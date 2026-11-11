@@ -93,6 +93,7 @@ nav:
   - Methodology: methodology.md
   - Engines: engines.md
   - Reproduce: reproduce.md
+  - SQL for relational users: sql-for-relational-users.md
   - Result rows: results-schema.md
   - Related work: related-work.md
   - Contribute: contribute.md

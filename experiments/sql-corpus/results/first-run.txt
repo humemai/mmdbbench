@@ -1,0 +1,31 @@
+# images: postgres:18.6 postgres@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
+# images: arcadedata/arcadedb:26.11.1 arcadedata/arcadedb@sha256:22a049898f34f01c256b56a1ba95fb01d32e5e14755d3c4367415c8e55ae5035
+# limits: cores 12-15 and 2g per container, both containers on the same cores, ArcadeDB heap -Xmx1g
+# host: Intel(R) Core(TM) Ultra X9 388H, kernel 7.0.0-43-generic, docker 29.1.3
+# arcadedb engine: "version":"26.11.1 (build a3a5d124572608412aa187f9c4b290e071699473/1793826579842/main)"
+# arcadedb wire plugin: 2026-11-11 03:54:10.279 INFO  [PluginManager] <ArcadeDB_0> Discovered plugin on main class loader: PostgresProtocolPlugin
+# client psycopg 3.3.8 (libpq 180006), repeat 5, 2026-11-11 03:54 UTC
+# postgres server_version 18.6 (Debian 18.6-1.pgdg13+2)
+# arcadedb server_version 12.0
+PASS connect psycopg [postgres 6.37 ms; arcadedb 24.58 ms]
+FAIL 01-type-mapping-values psycopg column type OIDs [23, 20, 1700, 701, 16, 1043, 1082], reference [23, 20, 1700, 701, 16, 25, 1082] [postgres 0.28 ms p50 of 5; arcadedb 6.14 ms p50 of 5]
+FAIL 02-type-mapping-catalog psycopg first difference at row 6: ('s', 'character varying'), reference ('s', 'text') [postgres 1.92 ms p50 of 5; arcadedb 8.47 ms p50 of 5]
+PASS 03-list-tables psycopg 4 rows equal in order [postgres 0.87 ms p50 of 5; arcadedb 1.86 ms p50 of 5]
+FAIL 04-primary-key-catalog psycopg 0 rows, reference 4 [postgres 2.39 ms p50 of 5; arcadedb 1.32 ms p50 of 5]
+FAIL 05-foreign-key-catalog psycopg SQLSTATE 0A000: Error on executing query: The catalog relation "information_schema.constraint_column_usage" is not supported by this server
+PASS 06-primary-key-lookup psycopg 1 rows equal as a multiset [postgres 0.27 ms p50 of 5; arcadedb 1.33 ms p50 of 5]
+FAIL 07-limit-offset psycopg SQLSTATE 42601: Syntax error on executing query: SQL syntax error at line 1, column 48: mismatched input 'OFFSET' expecting {<EOF>, ';'} SELECT id, name FROM person ORDER BY id LIMIT 2 OFFSET 1 ^
+FAIL 08-inner-join psycopg SQLSTATE 42601: Syntax error on executing query: SQL syntax error at line 1, column 57: mismatched input 'JOIN' expecting {<EOF>, ';'} SELECT p.name AS person, c.name AS company FROM person p JOIN company c ON c.id = p.company_id ^
+FAIL 09-left-join-unmatched psycopg SQLSTATE 42601: Syntax error on executing query: SQL syntax error at line 1, column 57: mismatched input 'LEFT' expecting {<EOF>, ';'} SELECT p.name AS person, c.name AS company FROM person p LEFT JOIN company c ON c.id = p.company_id ^
+FAIL 10-select-star psycopg 7 columns, reference 4 [postgres 0.11 ms p50 of 5; arcadedb 1.37 ms p50 of 5]
+PASS 11-group-by-aggregate psycopg 3 rows equal as a multiset [postgres 0.14 ms p50 of 5; arcadedb 5.55 ms p50 of 5]
+FAIL 12-left-join-group-by psycopg SQLSTATE 42601: Syntax error on executing query: SQL syntax error at line 1, column 64: mismatched input 'LEFT' expecting {<EOF>, ';'} SELECT c.name AS company, count(p.id) AS persons FROM company c LEFT JOIN person p ON p.company_id = c.id GROUP BY c.name
+FAIL 13-edge-table-columns psycopg first difference at row 0: (1, None, None, 2019), reference (1, 1, 2, 2019) [postgres 0.11 ms p50 of 5; arcadedb 2.76 ms p50 of 5]
+FAIL 14-one-hop-edge-join psycopg SQLSTATE 42601: Syntax error on executing query: SQL syntax error at line 2, column 14: mismatched input 'JOIN' expecting {<EOF>, ';'} FROM person a JOIN knows k ON k.source_id = a.id JOIN person b ON b.id = k.target_id ^
+FAIL 15-parallel-edges psycopg SQLSTATE 42601: Syntax error on executing query: SQL syntax error at line 2, column 14: mismatched input 'JOIN' expecting {<EOF>, ';'} FROM person a JOIN knows k ON k.source_id = a.id JOIN person b ON b.id = k.target_id ^
+FAIL 16-insert-returning psycopg SQLSTATE 42601: Syntax error on executing query: SQL syntax error at line 1, column 74: mismatched input 'RETURNING' expecting {<EOF>, ';'} INSERT INTO person (id, name, age, company_id) VALUES (100, 'Zed', 40, 1) RETURNING id, name, company_id ^
+PASS 17-parameter psycopg 1 rows equal as a multiset [postgres 0.30 ms p50 of 5; arcadedb 2.72 ms p50 of 5]
+PASS 18-update-rowcount psycopg row count 1 equal [postgres 1.77 ms; arcadedb 21.55 ms]
+PASS 19-copy-out psycopg 6 rows equal in order [postgres 0.14 ms p50 of 5; arcadedb 3.54 ms p50 of 5]
+FAIL 20-unsupported-feature psycopg expected SQLSTATE 0A000, got 42601: Syntax error on executing query: SQL syntax error at line 1, column 7: no viable alternative at input 'CREATE EXTENSION' CREATE EXTENSION vector ^
+VERDICT psycopg FAIL connect=PASS cases=20 PASS=6 FAIL=14 ERROR=0

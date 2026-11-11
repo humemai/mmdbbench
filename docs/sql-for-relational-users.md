@@ -3,7 +3,7 @@
 This is a study beside the lanes, not a lane. It asks how natural a multi-model database is for someone who already knows PostgreSQL, and how that can be measured instead of argued. The first subject is ArcadeDB; HumemAI contributes to ArcadeDB, which is one reason the scoring is written down here, with the reference answers coming from PostgreSQL 18 and not from the engine under test.
 
 !!! note "Status"
-    The first evidence exists: two small experiments, with their harness and pre-registered rules, are described in [ArcadeDB discussion 11292](https://github.com/ArcadeData/arcadedb/discussions/11292). The corpus described below extends them and is tracked in [humemai/mmdbbench#18](https://github.com/humemai/mmdbbench/issues/18). Nothing has been measured with the full corpus yet, so the targets below are targets, not results, and no date is promised.
+    The first evidence exists: two small experiments, with their harness and pre-registered rules, are described in [ArcadeDB discussion 11292](https://github.com/ArcadeData/arcadedb/discussions/11292). The corpus described below extends them and is tracked in [humemai/mmdbbench#18](https://github.com/humemai/mmdbbench/issues/18). A first version of the corpus (20 cases, psycopg only) and its first smoke run are in [`experiments/sql-corpus`](https://github.com/humemai/mmdbbench/tree/main/experiments/sql-corpus). The full corpus and the client matrix have not been measured yet, so the targets below are targets, not results, and no date is promised.
 
 ## Why PostgreSQL
 

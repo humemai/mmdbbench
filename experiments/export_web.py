@@ -1637,6 +1637,7 @@ OCT_COLD_SOURCE = {
 COLD_QUERY_NAMES = {
     "q1": "TPC-H Q1", "top_degree": "most friends", "q_last": "the newest reading",
     "point": "the point lookup", "new_order": "new-order", "retrieval": "the retrieval path",
+    "crud_insert": "insert",       # CrateDB runs no new-order (not expressible): its first query is the insert, and the page names it as the table's column does
 }
 
 
@@ -1887,6 +1888,11 @@ def _declare_missing_builds(tables):
 _WORKLOAD_WORDS = {"oltp": "transaction", "olap": "analytics", "hybrid": "transaction", "atomicity": "atomicity"}
 
 
+def _arm_has_rows(lane, workload, backend):
+    """True when the frozen rows hold a row of this arm on this workload of this lane: the arm ran it, whatever the roster (runner.ARM_RUNS) says."""
+    return any(r.get("lane") == lane and r.get("workload") == workload and str(r.get("backend")) == backend for r in _FROZEN_ROWS)
+
+
 def _declare_arm_runs_absences(tables):
     """The blank cells of an arm that does not run this table's workload (runner.ARM_RUNS) are declared 'not measured', one per column.
 
@@ -1902,14 +1908,42 @@ def _declare_arm_runs_absences(tables):
         lane, wl = lane_wl
         for e in t.get("entries", []):
             key = str(e.get("backend_key"))
-            if e.get("outcome") or runner(lane, wl, key):
-                continue
+            if e.get("outcome") or runner(lane, wl, key) or _arm_has_rows(lane, wl, key):
+                continue          # an arm with rows on this workload ran it: CrateDB's single-statement rows (humemai/mmdbbench#59)
             ran = " and ".join(_WORKLOAD_WORDS.get(w, w) for w in arms[key][lane]["workloads"])
             why = (f"{e['backend']} was not run on the {_WORKLOAD_WORDS.get(wl, wl)} workload: it runs the {ran} workload of this lane only.")
             for col in t.get("columns") or []:
                 if isinstance((e.get("metrics") or {}).get(col), dict) and (e["metrics"][col] or {}).get("median") is not None:
                     continue
                 _declare_absence(t["id"], e["backend"], col, "not measured", why)
+
+
+# THE BLANK CELLS OF A TRANSACTION THE ENGINE CANNOT EXPRESS. CrateDB has no multi-statement transaction, so its new-order and payment are declared by the adapter
+# (`res_neworder_digest`, `res_payment_digest` = "unexpressible: <reason>") and its row on the transaction table prints the four single-statement operations and no
+# new-order, payment or OLTP ops/s cell. Each such blank is declared per column with the adapter's own reason (page_check A1 reads it), not with the false sentence that
+# the arm "was not run on the transaction workload". OLTP ops/s is the new-order loop's rate, so it follows the new-order declaration.
+_UNEXPRESSIBLE_COLUMNS = {"neworder": ("new-order", ("new-order p50 ms", "new-order p99 ms", "OLTP ops/s")),
+                          "payment": ("payment", ("payment p50 ms",))}
+
+
+def _declare_unexpressible_columns(tables):
+    cells = _unexpressible_cells()
+    for t in tables:
+        lane_wl = _TABLE_LANE.get(t.get("id"))
+        if not lane_wl or not lane_wl[1]:
+            continue
+        lane, wl = lane_wl
+        for e in t.get("entries", []):
+            declared = cells.get((lane, wl, str(e.get("backend_key"))), {})
+            for query, (word, columns) in _UNEXPRESSIBLE_COLUMNS.items():
+                if query not in declared:
+                    continue
+                why = (f"{e['backend']} has no {word} transaction: its own language cannot express it, declared by the adapter "
+                       f"rather than left blank ({declared[query]}).")
+                for col in t.get("columns") or []:
+                    if col in columns and not (isinstance((e.get("metrics") or {}).get(col), dict)
+                                               and (e["metrics"][col] or {}).get("median") is not None):
+                        _declare_absence(t["id"], e["backend"], col, "unexpressible", why)
 
 
 def _declare_excluded_at_tier_absences(tables):
@@ -2091,7 +2125,7 @@ def _equivalence_notes(rows):
                     # page_check refuses, and with every lifecycle engine declared
                     # the sentence ran to 11,000 characters. The statement and the answer
                     # stay on the row, as the per-engine sentence says.
-                    _why = str(d)[len(bench_common.UNEXPRESSIBLE_PREFIX):].split("; tried ", 1)[0]
+                    _why = _declared_reason(d)
                     unexpr[tid].setdefault((query, _why), set()).add(display_name(str(be)))
                 elif bench_common.is_censored_answer(d):
                     # NOT "cannot express" (DECISIONS #120): the engine asked,
@@ -4730,8 +4764,12 @@ def _jvm_memory_note_fixed_heap(table):
         # "this column is close to the heap, not to the work" is true of that
         # arm either way, and dropping the sentence there left the artifact
         # explained on six tables and unexplained on three.
-        found.setdefault(e.get("backend"),
-                         (heaps.pop() if len(heaps) == 1 else None, float(cell["median"])))
+        # THE HEAPS OF AN ARM ARE READ OVER EVERY SIZE OF THE TABLE, not off its first entry: CrateDB runs a 4g heap at tpch1 and an 8g heap at tpch10, and
+        # quoting the first size's figure against 4g printed "143 per cent of its 4g heap" beside a column that holds the 8g size. An arm with more than one
+        # heap on the table is named and never quoted (the rule the comment above states); the example is its first entry's cell as before.
+        seen = found.setdefault(e.get("backend"), [set(), float(cell["median"])])
+        seen[0] |= heaps
+    found = {b: (next(iter(hs)) if len(hs) == 1 else None, gib) for b, (hs, gib) in found.items()}
     if not found:
         return None
     names = _join_and(sorted(found))
@@ -6602,6 +6640,23 @@ def _mutation_rebuilds(rows):
 
 _UNEXPRESSIBLE_CACHE = None
 
+# WHERE THE ENGINE'S OWN ANSWER STARTS inside a declared reason. A declaration reads "<reason>; tried `<statement>` and the engine answered: <error>" (DECISIONS #88),
+# and the CrateDB adapter's "<reason>; the probe statement raised <Type>: <text>" carries the Java stack trace of the failed ROLLBACK. The error is the engine's own text:
+# it has positions like [1:8], class names like io.crate.protocols.postgres.PostgresWireProtocol (72 raw `postgres` keys for page_check on the preview of the CrateDB rows)
+# and runs to a page of lines. The statement and the answer stay on the row; the page prints the reason.
+_ENGINE_ANSWER_MARKERS = ("; tried ", "; the probe statement raised ")
+
+
+def _declared_reason(value):
+    """The reason an adapter declared a query unexpressible, without the engine's own answer to the attempt (see _ENGINE_ANSWER_MARKERS)."""
+    import bench_common
+    text = str(value)
+    if bench_common.is_unexpressible(text):
+        text = text[len(bench_common.UNEXPRESSIBLE_PREFIX):]
+    for marker in _ENGINE_ANSWER_MARKERS:
+        text = text.split(marker, 1)[0]
+    return text.strip()
+
 
 def _unexpressible_cells():
     """(lane, workload, backend) -> {query key: reason}, from the rows.
@@ -6629,7 +6684,7 @@ def _unexpressible_cells():
                     m = re.match(r"^res_(.+)_digest$", str(field))
                     if m and bench_common.is_unexpressible(value):
                         key = (r.get("lane"), r.get("workload"), str(r.get("backend")))
-                        out[key][m.group(1)] = str(value).split(":", 1)[-1].strip()
+                        out[key][m.group(1)] = _declared_reason(value)
     _UNEXPRESSIBLE_CACHE = out
     return out
 
@@ -7916,6 +7971,7 @@ def main() -> int:
                 _t["conditions"].append(_note)
     _declare_missing_builds(tables)
     _declare_arm_runs_absences(tables)
+    _declare_unexpressible_columns(tables)
     _declare_excluded_at_tier_absences(tables)
     _disclose_server_builds(tables)
     # THE OVERRIDES A READER MEETS (CAMPAIGN section 7 row 21). PROTOCOL.md

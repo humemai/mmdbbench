@@ -80,10 +80,14 @@ def test_the_copy_is_not_empty():
 def test_the_module_imports_and_its_root_constants_point_here(name, isolated_imports):
     try:
         mod = importlib.import_module(name)
-    except ModuleNotFoundError as e:
-        if e.name in HARNESS_NAMES:
+    except ImportError as e:
+        if isinstance(e, ModuleNotFoundError) and e.name in HARNESS_NAMES:
             raise
-        pytest.skip(f"{name} needs {e.name}, which the hermetic suite does not install")
+        if isinstance(e, ModuleNotFoundError):
+            pytest.skip(f"{name} needs {e.name}, which the hermetic suite does not install")
+        if "no ArcadeDB Python package" in str(e):      # the runner modules refuse to import without arcadedb, arcadedb-jvm or arcadedb_embedded
+            pytest.skip(f"{name} needs an ArcadeDB Python package, which the hermetic suite does not install")
+        raise
     for attr, want in (("HERE", HERE), ("REPO", ROOT)):
         got = getattr(mod, attr, None)
         if isinstance(got, Path):

@@ -1106,6 +1106,10 @@ DENSE_10M_ARMS = [
     ("arango_int8", "arangodb_dense_int8", "ArangoDB (int8)", False),
     ("falkordb", "falkordb_dense", "FalkorDB (fp32)", False),
     ("ladybug", "ladybug_dense", "LadybugDB (fp32)", False),
+    # The n=3 landing: both are on the lane roster and in runner.MP_LABELS; Redis has overlay files at both sizes, CrateDB timed out at the small tier
+    # (test_dense_arms_roster.py reads the three lists, so an arm that is on one and not on the other is a test failure).
+    ("redis", "redis_dense", "Redis (fp32)", False),
+    ("cratedb", "cratedb_dense", "CrateDB (fp32)", False),
 ]
 
 
@@ -2801,7 +2805,7 @@ def _e4_table():
             "deployment": "all three",
             "image": None,
             "version_name": _engine_identity(meta.get("engine_version"), meta.get("engine_commit")),
-            "host": meta.get("host"),
+            "host": (meta.get("host") or None),
             "metrics": metrics,
         })
 
@@ -3210,12 +3214,12 @@ def _lifecycle_table(all_rows):
             "workload": "session",
             "n_docs": str(rs[0].get("n_rows") or ""),
             "deployment": _mode,
-            "image": _one_version(rs, f"lifecycle/{rs[0].get('backend')}/{scale}").get("image"),
+            "image": (_one_version(rs, f"lifecycle/{rs[0].get('backend')}/{scale}").get("image") or None),
             "version_name": (_engine_identity(rs[0].get("engine_version"),
                                               rs[0].get("engine_commit")) if _ours
                              else _engine_version(f"{engine} ({_mode})",
                                                   _row_engine_string(rs[0]))),
-            "host": rs[0].get("host"),
+            "host": (rs[0].get("host") or None),
             "metrics": {},
         }
         # The four cold-start columns, which the page must print beside any
@@ -3512,7 +3516,7 @@ def _durability_table(all_rows):
                 "workload": "write",
                 "n_docs": None,
                 "deployment": deployment_of(backend),
-                "image": _one_version(rs, f"durability/{backend}/{op_key_s}").get("image"),
+                "image": (_one_version(rs, f"durability/{backend}/{op_key_s}").get("image") or None),
                 # ArcadeDB is identified by commit (#49); a comparator by its
                 # own stamp, else its row read "arcadedb surrealdb-embedded:...".
                 "version_name": (_engine_identity(rs[0].get("engine_version"),
@@ -3520,7 +3524,7 @@ def _durability_table(all_rows):
                                  if "arcadedb" in backend
                                  else _engine_version(display_name(backend), _row_engine_string(rs[0]),
                                                       image=rs[0].get("image"))),
-                "host": rs[0].get("host"),
+                "host": (rs[0].get("host") or None),
                 "metrics": {},
             }
             # An engine with no knob answers the same string in both cells,
@@ -3913,7 +3917,7 @@ def _l4_table(all_rows):
             "version_name": _engine_version(
                 label, rs[0].get("backend_version") or rs[0].get("engine_version"),
                 commit=rs[0].get("engine_commit")),
-            "host": rs[0].get("host"),
+            "host": (rs[0].get("host") or None),
             "metrics": {},
         }
         for field, lab in _l4_cols:

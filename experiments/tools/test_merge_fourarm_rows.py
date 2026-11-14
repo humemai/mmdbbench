@@ -96,3 +96,40 @@ def test_a_rows_name_and_a_worktree_list_name_the_post2_files_and_keep_the_local
     plan = m.pull_targets("a3a5d1245", "runs_page_{pin}_2611_post2.jsonl", "~/post2-wt/jvm:~/post2-wt/native")
     assert [p for _b, p in plan] == [f"~/post2-wt/{x}/{m.RESULTS}/runs_page_a3a5d1245_2611_post2.jsonl" for x in ("jvm", "native")]
     assert len({m.local_name(i, b) for i, (b, _p) in enumerate(plan)}) == 2, "two worktrees must not share one local file"
+
+
+# ---- the two arms of the Graph Analytical View share a run_id (humemai/mmdbbench#77, refs #52)
+GAV_BASE = {"lane": "l2", "backend": "arcadedb_graph_embedded", "workload": "olap", "scale": "sf1full", "rep": 1, "engine_backend": "jvm",
+            "run_id": "l2_arcadedb_graph_embedded_olap_sf1full_r1"}
+
+
+def gav_on(**kw):
+    return dict(GAV_BASE, gav=True, ts_utc="2026-11-07T22:46:15+00:00", **kw)
+
+
+def gav_off(**kw):
+    return dict(GAV_BASE, gav=False, backend_arm="nogav", ts_utc="2026-11-07T22:50:54+00:00", **kw)
+
+
+def test_the_gav_and_the_no_gav_row_of_one_rep_share_a_run_id_and_both_stay(tmp_path):
+    """l2_graph.py runs both arms in one rep stage and they write the same run_id; the arm was not in the key, so the later (no-GAV) row replaced the GAV-on row of every rep
+    and the landing lost all 18 GAV-on rows of the full SF1 analytics."""
+    p = w(str(tmp_path), "a", [gav_on(q=1), gav_off(q=2)])
+    rows, _ = m.merge([p])
+    assert [(r["gav"], r["q"]) for r in rows] == [(True, 1), (False, 2)], rows
+
+
+def test_a_later_row_replaces_only_the_row_of_its_own_arm_and_an_error_never_replaces_a_clean_row_of_the_other_arm(tmp_path):
+    d = str(tmp_path)
+    live = w(d, "a", [gav_on(q=1), gav_off(q=2), gav_off(error="killed", q=0)])
+    catchup = w(d, "b", [gav_on(q=3), gav_on(error="late", q=0)])
+    rows, _ = m.merge([live, catchup])
+    by = {r["gav"]: r for r in rows}
+    assert by[True]["q"] == 3 and by[False]["q"] == 2, rows               # the catch-up row of the GAV-on arm; the no-GAV clean row survives its own error row
+    assert len(rows) == 2
+
+
+def test_the_arm_and_the_build_and_the_run_id_are_the_key(tmp_path):
+    rows, _ = m.merge([w(str(tmp_path), "a", [gav_on(), gav_off(), dict(gav_on(), engine_backend="native"), dict(gav_off(), engine_backend="native"),
+                                              dict(gav_on(), run_id="l2_arcadedb_graph_embedded_olap_sf1full_r2")])])
+    assert len(rows) == 5

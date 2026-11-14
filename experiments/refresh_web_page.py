@@ -52,7 +52,7 @@ PAGE_DATA = "src/data/dbbench-benchmarks.json"
 # rows say. None of them asks whether the two engines answered the same
 # question, which is the check that decides whether a fast number is also a
 # right one, so it is the first gate a publish has to pass.
-# SEVEN GATES. resource_check (issue #349) is the newest: it asks whether a disk
+# EIGHT GATES (landing_gates, #78, is the newest: the rows against the stages and the collision groups). The first seven: resource_check (issue #349) is the newest: it asks whether a disk
 # or memory value can be right at all. version_pin_check is the only one
 # that reads no rows: the other six ask whether the MEASUREMENTS are sound,
 # and this one asks whether the four files a human edits can still disagree
@@ -61,7 +61,7 @@ PAGE_DATA = "src/data/dbbench-benchmarks.json"
 # nothing compared them until dbbench:pg-age spent a campaign on PostgreSQL
 # 17.11 under an instrument declaring 18.6 (BUGS F76).
 GATES = ["equivalence_check", "resource_check", "provenance_check", "fairness_check", "page_check",
-         "version_consistency_check", "version_pin_check"]
+         "version_consistency_check", "version_pin_check", "landing_gates"]    # landing_gates (humemai/mmdbbench#78): the frozen rows against the roster of the stages, and the collision groups
 
 
 def _refuse_wrong_payload(exported):

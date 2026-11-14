@@ -1,0 +1,3413 @@
+{
+ "cells": [
+  {
+   "arm": "",
+   "backend": "arangodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "composed_embedded_sqlite_lance_ladybug",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "composed_qdrant_neo4j",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "pg_age_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2_server",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_embedded_sqlite_lance_ladybug",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_embedded_sqlite_lance_ladybug",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_qdrant_neo4j",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_qdrant_neo4j",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "pg_age_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "pg_age_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2_server",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "composed_embedded_sqlite_lance_ladybug",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "composed_qdrant_neo4j",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "pg_age_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_e2_server",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_embedded_sqlite_lance_ladybug",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_embedded_sqlite_lance_ladybug",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_qdrant_neo4j",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "composed_qdrant_neo4j",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "pg_age_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "pg_age_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2_server",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_e2_server",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "cratedb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "postgres",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_tuned",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "redis_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_tpc",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_tuned",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_tuned",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "redis_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "redis_tpc",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc_server",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "cratedb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "postgres",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_tuned",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_tpc",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_imgdefaults_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_tuned",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_tuned",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc_server",
+   "cls": "relaxed",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_tpc_server",
+   "cls": "strict",
+   "lane": "l1tpc",
+   "scale": "tpch10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_embedded",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_embedded",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_server",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_server",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckpgq_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckpgq_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "pgage_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "pgage_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph_server",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph_server",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_embedded",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_embedded",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_server",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_server",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckpgq_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "duckpgq_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "pgage_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "pgage_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph_server",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph_server",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_embedded",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "nogav",
+   "backend": "arcadedb_graph_embedded",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_graph_server",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "nogav",
+   "backend": "arcadedb_graph_server",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "duckpgq_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "pgage_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_graph_server",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_embedded",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_embedded_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_server",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_server_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "cratedb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_vss_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "pgvector_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "redis_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite_vec_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite_vec_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_dense_server",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_embedded",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_embedded_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_server",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_dense_server_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "cratedb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb_vss_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "ladybug_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "memgraph_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "pgvector_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "redis_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite_vec_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite_vec_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_dense_server",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded_fp32",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded_nocompact",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_server",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_server_fp32",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "pgvector_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_sparse_uint8",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded_fp32",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded_nocompact",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_server",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_server_fp32",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "pgvector_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_sparse_uint8",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded_fp32",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_embedded_nocompact",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_server",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_sparse_server_fp32",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "pgvector_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "qdrant_sparse_uint8",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_doc",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_doc_server",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_native",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_native_server",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "cratedb_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "redis_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_ts_server",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "timescaledb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arangodb_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_doc",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_doc_server",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_native",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_ts_native_server",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "cratedb_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "duckdb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "mongodb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "postgres_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "redis_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "sqlite",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_ts",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_ts_server",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "timescaledb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc100k",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10k",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc10m",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "doc"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "doc_idx10"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "empty"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "graph"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "graph_gav"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "sparse"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "ts"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_embedded",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "arcadedb_server",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "vector"
+  },
+  {
+   "arm": "",
+   "backend": "surrealdb_lifecycle",
+   "cls": "relaxed",
+   "lane": "lifecycle",
+   "scale": "lc1m",
+   "workload": "vector"
+  }
+ ],
+ "cells_sha256": "8380ad4a5b8b01f9b6e0ed5618f8450bb62938e13ffb9a8aa46a236edc8ca2df",
+ "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells)",
+ "outside": {
+  "prefixes": [
+   "neo4j_e2",
+   "falkordb",
+   "milvus",
+   "elasticsearch",
+   "chroma",
+   "lancedb",
+   "questdb"
+  ],
+  "rule": "registered arms that are not in the subset of the paper pass (make_2611_stages.OUTSIDE)",
+  "source": "experiments/make_2611_stages.py:431"
+ },
+ "outside_cells": [
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "chroma_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense_fp32",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "chroma_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense_fp32",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "questdb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "questdb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  }
+ ]
+}

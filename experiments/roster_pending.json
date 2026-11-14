@@ -1,0 +1,14 @@
+[
+ {
+  "cell": "l2/sf10/oltp/pgage_graph/relaxed",
+  "reason": "not run: censored at sf1, so censored here too (cap rule). The PG+AGE sf1 failure was the harness's fault and was rerun clean (comprerun), so this cell was skipped by a consequence of it and is owed a run",
+  "ref": "DECISIONS #188 (the cap rule); STATUS qC01 and qC09 of the 2611 chain on the mini",
+  "since": "pending rerun after the PG+AGE sf1 fix, 2026-11-14"
+ },
+ {
+  "cell": "l2/sf10/oltp/pgage_graph/strict",
+  "reason": "not run: censored at sf1, so censored here too (cap rule). The PG+AGE sf1 failure was the harness's fault and was rerun clean (comprerun), so this cell was skipped by a consequence of it and is owed a run",
+  "ref": "DECISIONS #188 (the cap rule); STATUS qC01 and qC09 of the 2611 chain on the mini",
+  "since": "pending rerun after the PG+AGE sf1 fix, 2026-11-14"
+ }
+]

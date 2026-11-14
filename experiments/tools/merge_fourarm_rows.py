@@ -7,7 +7,8 @@ results directory was never made) and the catch-up rows are in two more:
 Rule (per (engine_backend, run_id)): a clean row (no `error`) beats every error row of that (engine_backend, run_id) (the live failed twin and strict rows carry no data,
 the catch-up row is the new row at its own pin); several clean rows of one key keep the LAST one in source order (catch-up after live, then by ts_utc); a key with only
 error rows keeps its last error row. Row order otherwise follows the first appearance of the key. run_id alone is NOT a key: the JVM and the native chains write the same
-run_id for the same cell and are told apart only by engine_backend. Prints one summary line per source and the totals to stderr.
+run_id for the same cell and are told apart only by engine_backend, and the two arms of the Graph Analytical View (l2 olap: the view built, and BENCH_GAV=0 stamped `gav` false and
+`backend_arm` `nogav`) write the SAME run_id for one rep and are told apart only by `gav` (the arm of a row is `gav is False`, as in make_paper_tables). Prints one summary line per source and the totals to stderr.
 
     merge_fourarm_rows.py --out FILE SOURCE...          SOURCE = local jsonl path
     merge_fourarm_rows.py --pull PIN --out FILE         scp the four files of the bench host first (read-only there), then merge
@@ -45,7 +46,8 @@ def local_name(i, base):
     return f"{i}-{os.path.basename(base)}.jsonl"
 
 
-def merge(paths):
+def merge(paths, dropped=None):
+    """(rows, seen). `dropped` (a list) receives (dropped_row, kept_row, reason) for every row the merge discards: G2 of landing_gates.py refuses a drop whose two rows differ in an identity field."""
     first, best, order, seen = {}, {}, [], {}
     for path in paths:
         n = 0
@@ -59,15 +61,21 @@ def merge(paths):
                 continue
             n += 1
             # run_id alone is not unique: the JVM and the native chains share it (l2_arcadedb_graph_embedded_oltp_sf1_r1 in both), so keying on
-            # it kept 186 of 365 rows in the 2026-11-14 rehearsal; with the build in the key all 365 stay.
-            rid = (r.get("engine_backend"), r.get("run_id"))
+            # it kept 186 of 365 rows in the 2026-11-14 rehearsal; with the build in the key all 365 stay. The two GAV arms of one rep share it as
+            # well (l2_arcadedb_graph_embedded_olap_sf1full_r1: view built, then BENCH_GAV=0): the arm is in the key too (humemai/mmdbbench#77),
+            # or the later no-GAV row replaces the GAV-on row of every rep (18 rows lost from the round 2 landing).
+            rid = (r.get("engine_backend"), r.get("run_id"), r.get("gav") is False)
             if rid not in first:
                 first[rid] = len(order)
                 order.append(rid)
             clean = not r.get("error")
             cur = best.get(rid)
             if cur is None or clean or not cur[0]:   # a clean row always replaces; an error row replaces only another error row
+                if cur is not None and dropped is not None:
+                    dropped.append((cur[1], r, "a row superseded by a later clean row of the same key" if clean else "an error row superseded by a later error row"))
                 best[rid] = (clean, r)
+            elif dropped is not None:
+                dropped.append((r, cur[1], "an error row dropped: a clean row of the same key exists"))
         seen[path] = n
     rows = [best[rid][1] for rid in order]
     return rows, seen
@@ -96,7 +104,15 @@ def main():
                 srcs.append(dst)
         if not srcs:
             sys.exit("no source")
-        rows, seen = merge(srcs)
+        pairs = []
+        rows, seen = merge(srcs, dropped=pairs)
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        import landing_gates as G              # G2 (humemai/mmdbbench#78): every drop is reported and written beside the output; a drop that is not a retry is refused
+        bad = G.drop_problems(pairs)
+        if bad:
+            sys.exit("REFUSING: the merge would drop " + str(len(bad)) + " row(s) that are not a retry of one row:\n  " + "\n  ".join(bad[:10]))
+        sha = G.write_dropped(a.out + ".dropped_rows.jsonl", [G.drop_record(d, k, why) for d, k, why in pairs])
+        print(f"dropped rows: {len(pairs)} listed in {a.out}.dropped_rows.jsonl, sha256 {sha}", file=sys.stderr)
         with open(a.out, "w") as f:
             for r in rows:
                 f.write(json.dumps(r) + "\n")

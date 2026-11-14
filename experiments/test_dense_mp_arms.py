@@ -9,6 +9,26 @@ import tempfile
 import make_paper_tables as M
 
 PIN = "abc123456"
+_VARS = ("BENCH_MP_ARMS", "BENCH_MP_BUILDS", "BENCH_ENGINE_COMMIT")
+
+
+def _isolated(fn):
+    """The module-level state these tests move (the resolver's results directory, the pin and the arm and build variables) is put back after
+    each test: pytest runs the whole suite in one process, and test_vendor_memory reaches dense_mp_dir() through fairness_check."""
+    def run():
+        saved = (M.RESULTS, {k: os.environ.get(k) for k in _VARS})
+        try:
+            fn()
+        finally:
+            M.RESULTS = saved[0]
+            for k, v in saved[1].items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    run.__name__ = fn.__name__
+    run.__doc__ = fn.__doc__
+    return run
 
 
 def _tree(arms, builds=3, missing=()):
@@ -39,6 +59,7 @@ def _refuses(fn, *needles):
     raise AssertionError("expected a refusal")
 
 
+@_isolated
 def test_a_landing_that_names_its_arms_passes_with_exactly_those_arms():
     d, ov = _tree(("fp32", "arcsrv", "duckvss", "qdrant", "ladybug", "redis"))
     M.RESULTS = d
@@ -49,6 +70,7 @@ def test_a_landing_that_names_its_arms_passes_with_exactly_those_arms():
     assert M.mp_arms_present(small=False) == ("fp32", "arcsrv", "duckvss", "qdrant", "ladybug", "redis")
 
 
+@_isolated
 def test_a_named_arm_with_fewer_builds_than_the_landing_holds_still_refuses():
     d, _ = _tree(("fp32", "arcsrv"), missing={("arcsrv", 3)})
     M.RESULTS = d
@@ -56,6 +78,7 @@ def test_a_named_arm_with_fewer_builds_than_the_landing_holds_still_refuses():
     _refuses(M.dense_mp_dir, "mp_arcsrv_b3.json", "1 of 6 files missing")
 
 
+@_isolated
 def test_the_one_megabyte_overlay_reads_the_same_list():
     d, _ = _tree(("fp32", "arcsrv"))
     os.rename(os.path.join(d, f"dense_mp5_{PIN}"), os.path.join(d, f"dense_mp5_small_{PIN}"))
@@ -66,6 +89,7 @@ def test_the_one_megabyte_overlay_reads_the_same_list():
     assert M.dense_mp_small_dir().endswith(f"dense_mp5_small_{PIN}")
 
 
+@_isolated
 def test_the_native_twin_check_follows_the_named_arms():
     d, ov = _tree(("fp32", "arcsrv"))
     for b in (1, 2, 3):
@@ -79,6 +103,7 @@ def test_the_native_twin_check_follows_the_named_arms():
     _refuses(lambda: M._refuse_partial_native(ov, "x"), "partial", "fp32")    # a half-built native arm of the landing still refuses
 
 
+@_isolated
 def test_a_malformed_list_refuses_and_names_the_variable():
     _env(BENCH_MP_ARMS="fp32,arcsrv,fp32")
     _refuses(lambda: M.mp_required(M.MP_ARMS), "BENCH_MP_ARMS", "fp32 named twice")
@@ -90,6 +115,7 @@ def test_a_malformed_list_refuses_and_names_the_variable():
     assert M.mp_required(M.MP_ARMS) is M.MP_ARMS
 
 
+@_isolated
 def test_land_stage_carries_the_flag_to_the_variable():
     import land_stage as L
     _env()

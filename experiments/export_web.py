@@ -826,6 +826,10 @@ DENSE_PRECISION = {
     "milvus_dense": "fp32",
     "duckdb_vss_dense": "fp32",
     "sqlite_vec_dense": "fp32",
+    # `RedisDense.build`: FT.CREATE ... VECTOR HNSW ... TYPE FLOAT32
+    "redis_dense": "fp32",
+    # `CrateDense`: a float_vector column with a knn_match index
+    "cratedb_dense": "fp32",
     "lancedb_dense": "int8",
     # The int8 comparator arms. They are written in l3d_dense.py, registered in
     # runner.py, and running in the current campaign, but they had no entry

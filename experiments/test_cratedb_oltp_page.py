@@ -53,7 +53,7 @@ def test_the_unexpressible_cells_read_the_reason_and_the_page_check_finds_no_raw
         cells = EW._unexpressible_cells()
         assert cells[("l1tpc", "oltp", "cratedb_tpc")] == {q: REASON for q in ("neworder", "payment", "payment" + "s", "stock")}
         notes = EW._unexpressible_notes("docs_oltp", [{"backend": "CrateDB", "backend_key": "cratedb_tpc", "scale": "tpch1"}])
-        assert len(notes) == 4 and all(REASON in n and "postgres" not in n.lower() for n in notes), notes
+        assert len(notes) == 1 and REASON in notes[0] and "postgres" not in notes[0].lower(), notes
         payload = {"tables": [{"id": "docs_oltp", "conditions": notes, "declared_absences": EW._DECLARED_ABSENCES["docs_oltp"], "entries": []}]}
         assert PC._check_raw_backend_keys(payload) == 0
     finally:
@@ -102,25 +102,30 @@ def test_the_blank_transaction_cells_of_cratedb_are_declared_not_expressible_and
 # ---------------------------------------------------------------- (c) the JVM memory sentence
 def _mem_table(arms):
     """arms: {label: [(scale, GiB, heap)]}"""
-    return {"id": "docs_oltp", "entries": [{"backend": label, "backend_key": label, "scale": s, "heap": h, "metrics": {"peak memory GiB": {"median": g}}}
+    return {"id": "docs_oltp", "entries": [{"backend": label, "backend_key": label, "scale": s, "scale_label": {"tpch1": "TPC-H SF1 (6.0M line items)", "tpch10": "TPC-H SF10 (60.0M line items)"}.get(s, s), "heap": h, "metrics": {"peak memory GiB": {"median": g}}}
                                            for label, rows in arms.items() for s, g, h in rows]}
 
 
-def test_an_arm_that_ran_two_heaps_across_the_sizes_is_named_but_never_quoted():
-    """CrateDB runs a 4g heap at tpch1 and an 8g heap at tpch10. The sentence took the first size of each arm, so it quoted 'CrateDB's 5.72 GiB ... 143 per cent of its 4g
-    heap' while the same column holds the 8g size. An arm with more than one heap is in the list, and the example comes from an arm with one heap."""
+def test_the_memory_example_is_one_cell_with_its_own_heap_and_names_its_size():
+    """Every JVM arm of the real tables ran a different heap at each size (the heap follows the memory cap: CrateDB 4g and 8g, ArcadeDB 8g and 16g), so an example
+    that required one heap on the whole table was dropped from docs_oltp, docs_olap, l2 and e2. The example is one cell of the column, read against the heap that cell ran,
+    and named by its size when the table has several. An arm that ran one heap on the table comes first, the highest per cent of its heap; with none, the highest cell."""
     old = (EW._entry_heaps, EW._heap_not_pinned)
     try:
         EW._entry_heaps = lambda e, lane, wl, exact_only=False: {e["heap"]}
         EW._heap_not_pinned = lambda e, lane, wl: False
         both = EW._jvm_memory_note_fixed_heap(_mem_table({"CrateDB": [("tpch1", 5.72, "4g"), ("tpch10", 10.9, "8g")],
-                                                           "ArcadeDB (server)": [("tpch1", 3.27, "8g"), ("tpch10", 5.0, "8g")]}))
+                                                           "ArcadeDB (server)": [("tpch1", 3.27, "8g"), ("tpch10", 5.2, "8g")]}))
         assert "ArcadeDB (server) and CrateDB run on a JVM" in both
-        assert "ArcadeDB (server)'s 3.27 GiB here is about 41 per cent of its 8g heap" in both and "CrateDB's" not in both, both
-        only = EW._jvm_memory_note_fixed_heap(_mem_table({"CrateDB": [("tpch1", 5.72, "4g"), ("tpch10", 10.9, "8g")]}))
-        assert only.startswith("CrateDB runs on a JVM") and "per cent" not in only and "5.72" not in only, only
+        assert "ArcadeDB (server)'s 5.20 GiB at TPC-H SF10 is about 65 per cent of its 8g heap" in both and "CrateDB's" not in both, both      # one heap first
+        none = EW._jvm_memory_note_fixed_heap(_mem_table({"CrateDB": [("tpch1", 5.72, "4g"), ("tpch10", 10.9, "8g")]}))
+        assert none.startswith("CrateDB runs on a JVM") and "CrateDB's 5.72 GiB at TPC-H SF1 is about 143 per cent of its 4g heap" in none, none   # no arm of one heap
         one = EW._jvm_memory_note_fixed_heap(_mem_table({"CrateDB": [("tpch1", 5.72, "4g"), ("tpch10", 10.9, "4g")]}))
-        assert "CrateDB's 5.72 GiB here is about 143 per cent of its 4g heap" in one, one          # one heap on every size: unchanged
+        assert "CrateDB's 10.90 GiB at TPC-H SF10 is about 272 per cent of its 4g heap" in one, one
+        single = EW._jvm_memory_note_fixed_heap(_mem_table({"Neo4j": [("sf1", 13.81, "12g")]}))
+        assert "Neo4j's 13.81 GiB here is about 115 per cent of its 12g heap" in single, single      # a table of one size is unchanged
+        # the figures of the sentence are the cells': the GiB, the heap and the per cent are computed from them, never typed
+        assert all(rec["values"] for rec in EW._GENERATED if rec["text"] == both)
     finally:
         EW._entry_heaps, EW._heap_not_pinned = old
 
@@ -154,6 +159,42 @@ def test_cratedb_prints_the_same_version_string_on_the_document_tables_and_the_d
     assert docs == durability == "cratedb 6.4.6", (docs, durability)
     mongo_docs = EW._engine_version("MongoDB", "9.0.4", image="mongo@sha256:" + "0" * 64, commit=None)
     assert mongo_docs == EW._engine_version("MongoDB", "mongodb 9.0.4", image=None) == "mongodb 9.0.4"    # the precedent this follows
+
+
+# ---------------------------------------------------------------- the declared reason, said once
+QUERIES = ("neworder", "payment", "payments", "stock")
+ONCE = ("CrateDB cannot express new-order and payment (and the payments and stock checks that read their end state) on this table: the adapter declared them "
+        "not expressible rather than leaving them blank (" + REASON + ").")
+
+
+def test_the_declared_reason_is_said_once_per_engine_and_the_structured_absences_are_unchanged():
+    """The four digests of CrateDB carry one reason; the page said it four times, once per raw query key ('does not answer neworder', 'payments', 'stock')."""
+    old = (EW._UNEXPRESSIBLE_CACHE, dict(EW._DECLARED_ABSENCES), list(EW._GENERATED))
+    try:
+        EW._UNEXPRESSIBLE_CACHE = {("l1tpc", "oltp", "cratedb_tpc"): {q: REASON for q in QUERIES}}
+        EW._DECLARED_ABSENCES.clear()
+        notes = EW._unexpressible_notes("docs_oltp", [{"backend": "CrateDB", "backend_key": "cratedb_tpc", "scale": "tpch1"}])
+        assert notes == [ONCE], notes
+        assert "neworder" not in notes[0] and notes[0].count(REASON) == 1
+        got = EW._DECLARED_ABSENCES["docs_oltp"]                                  # one per query, exactly as before (the reason text is the adapter's)
+        assert [(a["backend"], a["column"], a["kind"], a["query"]) for a in got] == [("CrateDB", None, "unexpressible", q) for q in QUERIES[:0] + ("neworder", "payment", "payments", "stock")]
+        for a in got:
+            assert a["why"] == (f"CrateDB does not answer {a['query']} on this table: the engine's own language cannot express it, declared by the adapter "
+                                f"rather than left blank ({REASON}).")
+        assert not any("does not answer" in r["text"] for r in EW._GENERATED[len(old[2]):])      # the per-query lines are no longer page conditions
+    finally:
+        EW._UNEXPRESSIBLE_CACHE = old[0]
+        EW._DECLARED_ABSENCES.clear()
+        EW._DECLARED_ABSENCES.update(old[1])
+
+
+def test_the_answer_check_sentence_says_the_reason_once_with_the_queries_named_as_the_table_names_them():
+    import equivalence_check as EQ
+    row = {"lane": "l1tpc", "scale": "tpch1", "workload": "oltp", "backend": "cratedb_tpc", "rc": 0, "instrument": EQ.REQUIRED_INSTRUMENT}
+    row.update({f"res_{q}_digest": DIGEST for q in QUERIES})
+    text = EW._equivalence_notes([row])["docs_oltp"]
+    assert text.count(REASON) == 1 and "neworder" not in text, text
+    assert "CrateDB cannot express new-order and payment (and the payments and stock checks that read their end state): " + REASON in text, text
 
 
 if __name__ == "__main__":

@@ -177,8 +177,8 @@ def post1_patch(text, label, wheel_name, wheel_sha, build_only, chain):
     if n != 1:
         raise SystemExit(f"generator drift: REPSTATE line matched {n}x, expected 1")
     text = _sub(text, 'say "$ID START:', f'BUILD_ONLY_FLAG="{"--build-only" if build_only else ""}"   # post1_rows.py; the runner refuses it for any results file not named _postN\nsay "$ID START:', what="START")
-    text = _sub(text, '--only-reps "$PASS" --reps "$REPS" --results-file "$RF" >> "$S" 2>&1',
-                '--only-reps "$PASS" --reps "$REPS" --results-file "$RF" $BUILD_ONLY_FLAG >> "$S" 2>&1', what="run_cell runner line")
+    text = _sub(text, '--only-reps "$PASS" --reps "$REPS" --results-file "$RF" $CLIENTS_ARG >> "$S" 2>&1',
+                '--only-reps "$PASS" --reps "$REPS" --results-file "$RF" $CLIENTS_ARG $BUILD_ONLY_FLAG >> "$S" 2>&1', what="run_cell runner line")
     text = _sub(text, "export BENCH_CPUSET=0-11 BENCH_GRAPH_SOURCE=ldbc\n",
                 "export BENCH_CPUSET=0-11 BENCH_GRAPH_SOURCE=ldbc\n"
                 f"export BENCH_WHEEL_LABEL={label} BENCH_WHEEL_NAME={wheel_name} BENCH_WHEEL_SHA256={wheel_sha}   # every row says which wheel it ran on (post1_rows.stamp_row)\n",
@@ -517,8 +517,8 @@ def main(argv=None):
         print(f"wrote {a.write_cells}")
         return 0
     a.chains = [c for c in a.chains.split(",") if c]
-    if any(c not in CHAINS for c in a.chains) or not 1 <= a.reps <= 5:
-        raise SystemExit("--chains is jvm and/or native; --reps is 1 to 5")
+    if any(c not in CHAINS for c in a.chains) or not 1 <= a.reps <= 3:
+        raise SystemExit("--chains is jvm and/or native; --reps is 1 to 3 (the n=4 and n=5 passes are dropped, 2026-11-14)")
     modes = read_cells(a.cells) if a.cells else {tuple(cell_row(c, "x")[:7]): m for c, m in default_cells()}
     hours = load_hours(a.hours) if a.hours else None
     if a.dry_run:

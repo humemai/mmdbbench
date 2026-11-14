@@ -135,7 +135,7 @@ def _gen(tmp_path, name, *extra):
 @pytest.fixture(scope="module")
 def modes(tmp_path_factory):
     t = tmp_path_factory.mktemp("caprule")
-    return {"biggest-last": _gen(t, "biglast"), "paper": _gen(t, "paper", "--order", "paper", "--reps", "5")}
+    return {"biggest-last": _gen(t, "biglast"), "paper": _gen(t, "paper", "--order", "paper", "--reps", "3")}
 
 
 @pytest.mark.parametrize("mode", ["biggest-last", "paper"])

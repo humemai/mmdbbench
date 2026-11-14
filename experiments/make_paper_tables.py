@@ -8,8 +8,8 @@ Cells are median [min-max] over N=5 reps. Raw rows are never edited;
 rerun this script after a re-measure.
 
 Dense overlay build count: results/dense_mp5_<pin> holds mp_<arm>_b<k>.json files, one per build. The count is a landing
-parameter (humemai/mmdbbench#27): BENCH_MP_BUILDS, default 5, read by mp_builds() and nowhere else. A landing at n=3 sets
-BENCH_MP_BUILDS=3 (land_stage --mp-builds 3); the overlay is still complete, absent, or refused, pinned only, and only the
+parameter (humemai/mmdbbench#27): BENCH_MP_BUILDS, default 3 (n=4 and n=5 are dropped, the owner 2026-11-14), read by mp_builds() and nowhere else. A landing
+at n=3 needs no variable; BENCH_MP_BUILDS=5 (land_stage --mp-builds 5) asks for five; the overlay is still complete, absent, or refused, pinned only, and only the
 number moves. The directory name keeps "mp5" whatever the count.
 
 Outputs: ../latex/tables/t{2,3,4,5}_*.tex.
@@ -824,7 +824,8 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
 
     The paper corpus rows (8,841,823 x 30,109; load_canonical's PAPER_CORPUS
     already drops everything else) at BENCH_ENGINE_COMMIT, all three tiers at
-    five reps and one engine_version, else None. Same all-or-nothing rule as
+    the landing's n reps (mp_builds(): BENCH_MP_BUILDS, default 3; the n=4 and
+    n=5 passes were dropped on 2026-11-14) and one engine_version, else None. Same all-or-nothing rule as
     dense_mp_dir(): a partial re-run must not supersede a complete overlay
     tier by tier.
     """
@@ -839,8 +840,9 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
             continue
         out.setdefault(r["scale"], []).append(r)
     tiers = ("tiny", "small", "medium")
+    n = mp_builds()   # reps per tier this landing holds: the one reader the dense overlay uses, not a literal 5
     # ABSENT IS NOT PARTIAL -- the same distinction dense_mp_dir() needed.
-    # PARTIAL (some tiers at five reps, others short) is the all-or-nothing
+    # PARTIAL (some tiers at the landing's n reps, others short) is the all-or-nothing
     # case this function exists for: a partial re-run must not supersede a
     # complete set tier by tier. ABSENT (no row at any tier) is the sparse
     # arm not having run at this pin yet, which is the normal state for most
@@ -854,7 +856,7 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
     # LaTeX table, which is one build, so it validates each build and returns the chosen one (below).
     _builds = {_AI.build_of(r) for t in out for r in out[t]}
     if len(_builds) > 1:
-        # Both builds measured: each is validated on its own below (five reps at every tier, one identity). The paper's LaTeX table is
+        # Both builds measured: each is validated on its own below (n reps at every tier, one identity). The paper's LaTeX table is
         # ONE build per call and NO DEFAULT (#222 (4)): the caller names the build (or "all" for every build, each validated), and
         # BENCH_ENGINE_BACKEND names it for a one-build freeze. The tables loop over the builds and print both.
         _want = build or _AI.wanted_build()
@@ -863,13 +865,13 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
             return None
         for _b in sorted(_builds - ({_want} if _want != "all" else set())):
             _other = {t: [r for r in rs if _AI.build_of(r) == _b] for t, rs in out.items()}
-            if any(len(_other.get(t, [])) < 5 for t in tiers) or len({_AI.arm_identity(r) for t in tiers for r in _other[t]}) != 1:
+            if any(len(_other.get(t, [])) < n for t in tiers) or len({_AI.arm_identity(r) for t in tiers for r in _other[t]}) != 1:
                 sys.stderr.write(f"pinned sparse rows of the {_b} build are incomplete or span two identities\n")
                 return None
         if _want != "all":
             out = {t: [r for r in rs if _AI.build_of(r) == _want] for t, rs in out.items()}
-    if any(len(out.get(t, [])) < 5 for t in tiers):
-        missing = [t for t in tiers if len(out.get(t, [])) < 5]
+    if any(len(out.get(t, [])) < n for t in tiers):
+        missing = [t for t in tiers if len(out.get(t, [])) < n]
         sys.stderr.write(f"pinned sparse rows incomplete at {missing}\n")
         return None
     versions = {_AI.arm_identity(r) for t in tiers for r in out[t]}   # (engine_version, build): one engine, one build
@@ -890,7 +892,7 @@ def _sparse_2681_rows(arm="arcadedb_sparse_embedded", build=None):
 
 def sparse_table(rows):
     l3s = [r for r in rows if r["lane"] == "l3s"]
-    # ArcadeDB: one released engine, every tier, N=5. Comparators stay in
+    # ArcadeDB: one released engine, every tier, the landing's N (3). Comparators stay in
     # runs.jsonl and are untouched: they are not ArcadeDB runs, their own
     # versions did not change, and the F9 control re-runs one of them to
     # license keeping the other two.
@@ -949,17 +951,17 @@ def sparse_table(rows):
 MP_ARMS = ("fp32", "int8", "arcsrv", "arcsrv_int8", "milvus", "milvus_int8",
            "qdrant", "qdrant_int8", "chroma", "duckvss", "lancedb",
            "sqlitevec", "sqlitevec_int8")
-# THE BUILD COUNT IS A LANDING PARAMETER (humemai/mmdbbench#27). The campaign lands whole passes (n=3 for every engine, then n=4,
-# then n=5), so a landing at n=3 holds three mp_<arm>_b<k>.json files per arm and a constant 5 could never pass it. BENCH_MP_BUILDS
-# says how many builds this landing holds; unset or blank means 5, so a landing at n=5 behaves as it always did. It is read HERE and
+# THE BUILD COUNT IS A LANDING PARAMETER (humemai/mmdbbench#27). The campaign lands n=3 for every engine (the n=4 and n=5 passes
+# were dropped on 2026-11-14), so a landing holds three mp_<arm>_b<k>.json files per arm and a constant 5 could never pass it.
+# BENCH_MP_BUILDS says how many builds this landing holds; unset or blank means 3, and 5 is asked for by name. It is read HERE and
 # nowhere else: every resolver and check below calls mp_builds(), and the refusals print the number they counted against. Only
 # the number moves. The overlay is still complete, absent, or refused, pinned only, no fallback, and the required arm lists are
 # unchanged: an arm missing at any n refuses.
-MP_BUILDS_DEFAULT = 5
+MP_BUILDS_DEFAULT = 3
 
 
 def mp_builds():
-    """Builds per arm of the dense overlay this landing holds: BENCH_MP_BUILDS, else MP_BUILDS_DEFAULT (5)."""
+    """Builds per arm of the dense overlay this landing holds: BENCH_MP_BUILDS, else MP_BUILDS_DEFAULT (3)."""
     raw = os.environ.get("BENCH_MP_BUILDS", "").strip()
     if not raw:
         return MP_BUILDS_DEFAULT

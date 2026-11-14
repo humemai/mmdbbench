@@ -1509,13 +1509,14 @@ REP_HELPERS = r"""
 # the data, this file only drives the order. Stopping after any pass leaves a valid n; a later pass picks up from it with no
 # regeneration, and a restarted stage skips what is already clean. Delete REPSTATE to start the chain over.
 REPSTATE=$HOME/rep-state-@INSTRUMENT@-$PIN@BUILD@.tsv
-# TWIN-ONLY CATCH-UP (DECISIONS #263). FOURARM_CLIENTS=pgwire, set by the caller and unset in every normal pass (then CLIENTS_ARG is empty and nothing changes), hands
+# TWIN-ONLY CATCH-UP (DECISIONS #263; FOURARM_CLIENTS=lean is the same switch for the lean twins, humemai/mmdbbench#62). FOURARM_CLIENTS=pgwire, set by the caller and unset in every normal pass (then CLIENTS_ARG is empty and nothing changes), hands
 # `--clients pgwire` to every runner call of this stage, so only the PostgreSQL-wire sensitivity twins run, and moves REPSTATE to its own file: the headline's
 # "rep already clean" gate would skip the twin, and the headline's rep-state is not this run's to write.
 case "${FOURARM_CLIENTS:-}" in
   "") CLIENTS_ARG="" ;;
   pgwire) CLIENTS_ARG="--clients pgwire"; REPSTATE=${REPSTATE%.tsv}-pgwire.tsv ;;
-  *) say "$ID ABORT: FOURARM_CLIENTS=${FOURARM_CLIENTS} (only pgwire)"; exit 1 ;;
+  lean) CLIENTS_ARG="--clients lean"; REPSTATE=${REPSTATE%.tsv}-lean.tsv ;;
+  *) say "$ID ABORT: FOURARM_CLIENTS=${FOURARM_CLIENTS} (only lean or pgwire)"; exit 1 ;;
 esac
 rep_done() {  # <label> <rep>: true when that repetition of the cell finished CLEAN (a fail is retried by a restart)
   grep -qxF -- "$1"$'\t'"$2"$'\t'ok "$REPSTATE" 2>/dev/null

@@ -4609,6 +4609,20 @@ def _entry_heaps(e, lane, wl, exact_only=False):
     return heaps
 
 
+def _memory_workload(e, lane, wl):
+    """The workload filter for the rows an entry's memory cell was read from, which is also where its heap is read.
+
+    The document lane runs two workloads over one corpus and main() merges them into one cell, but reads the memory cell from the
+    transactional rows only: `[rows of oltp] or rs`. An arm with no transactional rows at the entry's size (CrateDB in the n=3
+    landing: analytics rows only) keeps the rows it has, so its memory cell is printed. The heap beside that cell must read the same
+    rows, so for the document lane this returns `wl` when the arm has rows of that workload at the size and None (every workload of
+    the lane) when it has none. Another lane returns `wl` unchanged: its memory cell is read from the cell's own rows.
+    """
+    if lane == "l1tpc" and not _entry_rows(e, lane, wl, exact_only=True):
+        return None
+    return wl
+
+
 def _heap_not_pinned(e, lane, wl):
     """True when this table entry's JVM started with far less heap than it may take: embedded ArcadeDB
     (no -Xms in this instrument), or an entry whose every row records `server_jvm_initial_heap_bytes`
@@ -6314,6 +6328,21 @@ def _row_label_for(table_id, r):
     return label
 
 
+def _strict_rows_set_aside(rows):
+    """The strict-class rows that no table but the durability table prints (BUGS F52).
+
+    The instrument runs every timed write at both durability settings and the frozen set holds both. Every other table reports the
+    relaxed class, so a strict row is set aside whenever a relaxed row of the same cell (lane, workload, backend, scale) exists; an
+    engine with no setting has strict rows only and keeps them. Shared by main(), which drops these rows from the tables, and by the
+    sentences that read `_FROZEN_ROWS` (that list is set BEFORE the strict rows are set aside), so a sentence counts the reps its
+    table prints and nothing else.
+    """
+    has_relaxed = {(r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale")))
+                   for r in rows if str(r.get("durability_class")) == "relaxed"}
+    return [r for r in rows if str(r.get("durability_class")) == "strict"
+            and (r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale"))) in has_relaxed]
+
+
 def _query_budget_notes(table_id):
     spec = _QUERY_BUDGET_TABLES.get(table_id)
     if not spec:
@@ -6332,7 +6361,13 @@ def _query_budget_notes(table_id):
     # (label, scale, query) -> [(iters, elapsed_s, budget_s)] across reps
     hits = collections.defaultdict(list)
     scales = _table_scales(table_id)
+    # THE REPS THE TABLE PRINTS. The medians under this sentence are the relaxed-class reps (a cell keeps its strict reps only when it has
+    # no relaxed ones), so the spans and the count come from those reps too. Reading every rep of the lane let a strict rep that hit the
+    # budget widen a span ("7 to 13 starts" where the printed reps gave "10 to 13") or declare a cell no printed rep hit at all.
+    _not_printed = {id(r) for r in _strict_rows_set_aside(_FROZEN_ROWS)}
     for r in _FROZEN_ROWS:
+        if id(r) in _not_printed:
+            continue
         if r.get("lane") != lane or (wl and r.get("workload") != wl):
             continue
         if scales and str(r.get("scale")) not in scales:
@@ -7133,7 +7168,9 @@ def _finish_table(table: dict) -> dict:
     # printed beside it for JVM engines). A JVM engine's peak sits close to the
     # heap it was given, so the setting belongs next to the number. From the
     # rows behind the cell at its own size only; an engine that records no
-    # heap, or a cell whose rows ran two, prints none.
+    # heap, or a cell whose rows ran two, prints none. The rows are the ones
+    # the memory cell was read from (_memory_workload), so an arm that has
+    # no transactional rows still gets the heap of the rows its cell has.
     _lw = _TABLE_LANE.get(table.get("id"))
     if _lw:
         _hl, _hw = _lw
@@ -7143,7 +7180,7 @@ def _finish_table(table: dict) -> dict:
             _pk = (_e.get("metrics") or {}).get("peak memory GiB")
             if _e.get("outcome") or not isinstance(_pk, dict) or _pk.get("median") is None:
                 continue
-            _hs = _entry_heaps(_e, _hl, _hw, exact_only=True)
+            _hs = _entry_heaps(_e, _hl, _memory_workload(_e, _hl, _hw), exact_only=True)
             if len(_hs) == 1:
                 _e["metrics"]["JVM heap"] = {"text": _hs.pop()}
     # Every metric a row carries is a column the page shows. l3smp carried
@@ -7442,10 +7479,7 @@ def main() -> int:
     # the same cell exists (BUGS F52). An engine with no setting has strict rows
     # only and keeps them.
     _all_rows = list(rows)
-    _has_relaxed = {(r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale")))
-                    for r in rows if str(r.get("durability_class")) == "relaxed"}
-    _dropped = [r for r in rows if str(r.get("durability_class")) == "strict"
-                and (r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale"))) in _has_relaxed]
+    _dropped = _strict_rows_set_aside(rows)
     if _dropped:
         print(f"  one setting per table: {len(_dropped)} strict rows set aside for the durability table only")
         rows = [r for r in rows if r not in _dropped]

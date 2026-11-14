@@ -1,0 +1,53 @@
+# MongoDB Community 9.0.4 + MongoDB Search (mongot) Community 1.70.5 in one
+# container: the self-hosted, generally available way to run $vectorSearch.
+#
+# THE OCTOBER HOLD AT mongod 8.2.12 / mongot 1.70.4 WAS LIFTED ON 2026-10-23.
+# 8.3.13 still refuses to boot on the bench kernel (SERVER-121912, the
+# kernel-6.19 guard; SERVER-136848 is the open ticket for Ubuntu kernels whose
+# `uname -r` stays 7.0.0 although they are upstream 7.0.14), with mongot 1.70.4
+# or 1.70.5 alike. 9.0.4 boots and answered the repo's TPC adapter checks like
+# 8.2.12 and a $vectorSearch run through mongot 1.70.5 with recall 1.000 (fp32)
+# and 0.878 (scalar) against exact search. MongoDB's own compatibility table for
+# Search lists mongot 1.70.1+ against MongoDB Server 8.3 only and calls 8.2
+# "no longer a supported source deployment", so the old pairing was outside
+# vendor support; 9.0 is also not in the table, which is the one gap left.
+# The reasoning and the check table are in COMPARATORS.md, "Held below the
+# newest, and why". It is still the SAME mongod digest every other MongoDB arm
+# runs, so the vector rows and the document rows come from one engine build.
+#
+# mongot 1.70.5 (2026-09-29) is the newest Search Community release: security
+# dependency upgrades only, and its default image moved to a distroless UBI9
+# base; /mongot-community is laid out as before, so the COPY below is unchanged.
+# Both digests are the amd64 MANIFEST digest (not the multi-arch index digest),
+# the convention COMPARATORS.md states for every pin.
+#
+# WHY THIS AND NOT mongodb/mongodb-atlas-local. atlas-local is the same two
+# processes in one image and it would have been less work, but MongoDB's own
+# documentation lists it as "For evaluation only" and says "This deployment is
+# not suitable for production use", and the vector-capable variant is its
+# `:preview` tag. DECISIONS #68 pins comparators to the latest SELF-HOSTED
+# RELEASE; a vendor's explicitly-not-production dev convenience image is not
+# one, and publishing a MongoDB vector number measured on it would be measuring
+# something nobody deploys. MongoDB Search and Vector Search went generally
+# available for Community Edition on 2026-06-30 and ship as the mongot binary
+# beside mongod, which is what this image is.
+#
+# Both halves are pinned by digest, so the local build has the same provenance
+# a pulled server image would: the ONLY thing added on top is the entrypoint
+# that starts the pair, and the mongot config, both in docker-conf/.
+#
+# The mongod half is the SAME digest the document, TPC and time-series tables
+# already run (runner.BACKENDS["mongodb"]), so MongoDB's vector rows and its
+# document rows come from one engine build rather than two.
+#
+# Built as dbbench:mongo-search by build_images.sh.
+FROM mongodb/mongodb-community-search@sha256:6232a8acec5ea4cce2cf52fa7c17b57da5758eac11538ffc35dab43abde8d366 AS mongot
+FROM mongo@sha256:b609cdfba3a865331378cc4158bc52522a3bf176d59a7ff2c43fab52f5d9d5cb
+# mongot bundles its own jlink'd JDK under bin/jdk, so the whole directory is
+# self-contained and nothing has to be installed into the mongod image.
+COPY --from=mongot /mongot-community /mongot-community
+COPY docker-conf/mongot-community.yml /mongot-community/config.default.yml
+COPY docker-conf/mongo-search-entrypoint.sh /usr/local/bin/mongo-search-entrypoint.sh
+RUN chmod 755 /usr/local/bin/mongo-search-entrypoint.sh && mkdir -p /mongot-state
+EXPOSE 27017
+ENTRYPOINT ["/usr/local/bin/mongo-search-entrypoint.sh"]

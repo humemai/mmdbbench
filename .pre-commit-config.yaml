@@ -1,3 +1,6 @@
+# The copied harness keeps recorded data byte for byte: the fixing hooks must not rewrite fixtures, results or evidence (end-of-file-fixer
+# rewrote six result files of the copy), and a checksum file or an archive is compared by its bytes.
+exclude: '^experiments/(results|fixtures|evidence)/|^experiments/.*\.(sha256|gz)$|^benchmarks/python-bindings/'
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

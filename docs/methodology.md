@@ -36,8 +36,8 @@ to run a cell under any other instrument value. These choices are part of the in
 - **The dense lane compares engines at matched recall.** After the build, the lane runs one timed pass per search-beam value on the same index (`ef` of 50, 100, 200 and 400 for the HNSW engines; ArangoDB's `nProbe` at 0.5, 1, 2 and 4 times its calibrated value). The headline is the lowest median latency among the passes whose recall@10 reaches 0.95, with the beam that won it. An engine that never reaches 0.95 is printed as `not reached` with its best recall, never as a slower or lower-recall number. Engines with no beam setting run one pass.
 - **Product-quantization (PQ) arms are off for now.** They run beside the full-precision and int8 arms only when enabled, with the same setting for every engine that offers it: 32 subspaces of 256 centroids, and a re-rank of the stored vectors where the engine can do one. They stay off until the measured ArcadeDB release carries the upstream PQ fixes (ArcadeData/arcadedb#10516 to #10519), because before them ArcadeDB's SQL search ignores a PQ index and would measure exact search under a PQ label.
 
-The harness documents these choices in [PROTOCOL.md](https://github.com/humemai/arcadedb-embedded-python/blob/main/benchmarks/experiments/PROTOCOL.md) and
-[FAIRNESS.md](https://github.com/humemai/arcadedb-embedded-python/blob/main/benchmarks/experiments/FAIRNESS.md).
+The harness documents these choices in [PROTOCOL.md](https://github.com/humemai/mmdbbench/blob/main/experiments/PROTOCOL.md) and
+[FAIRNESS.md](https://github.com/humemai/mmdbbench/blob/main/experiments/FAIRNESS.md).
 The 2026-10 instrument was a development version and is retired: nothing is measured with it again, and no result from it is published.
 
 ## JVM and memory settings per engine

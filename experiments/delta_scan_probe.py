@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""Where does the delta buffer overtake the graph?
+
+mergeWithDeltaScan() is a LINEAR scan: every query computes a distance for every
+buffered vector that the persisted graph does not cover. The rebuild threshold
+is max(100, min(0.2 * graph.size(), 50_000)), so past ~250k vectors the cap
+binds and the buffer is allowed to reach ~50,000 before a rebuild is considered
+-- and per GlobalConfiguration's own text the cap does not bound the buffer at
+all, only how often a rebuild drains it.
+
+The RAM side of that is issue #6497, already filed and fixed. The LATENCY side
+is unmeasured: nobody has said what a 50,000-entry delta scan costs a query.
+
+METHOD. Build the index, then disable the rebuild entirely
+(rebuildGraphRatio=0, mutationsBeforeRebuild enormous) so nothing drains the
+buffer, and grow it in steps, timing the same query set at each step. The graph
+is identical throughout, so the delta between steps IS the scan cost.
+
+Disabling the rebuild is what makes this an ablation rather than a race: with
+the default threshold a rebuild fires mid-sweep and the buffer empties under the
+measurement, which is the confound this probe exists to avoid.
+"""
+import json
+import os
+import statistics as st
+import time
+
+import bench_common
+
+DIM = int(os.environ.get("PROBE_DIM", "64"))
+BASE = int(os.environ.get("PROBE_BASE", "200000"))
+STEPS = [int(x) for x in os.environ.get(
+    "PROBE_DELTA_STEPS", "0,100,1000,5000,10000,25000,50000").split(",")]
+QUERIES = int(os.environ.get("PROBE_QUERIES", "200"))
+OUT = os.environ.get("PROBE_OUT", "results/probe/delta_scan.jsonl")
+DB = os.environ.get("PROBE_DB", "/lcdb/deltaprobe")
+
+
+# TWO MODES, because the probe now has two jobs.
+#
+#   PROBE_MODE=sweep   (default) price the RAW linear scan by disabling every
+#                      rebuild trigger including #6858's, so the buffer grows to
+#                      each step and the number stays comparable to the one filed
+#                      on #6797.
+#   PROBE_MODE=bounded leave #6858 at its DEFAULT and show the buffer does NOT
+#                      grow: the query-side trigger fires and drains it. This is
+#                      the mode that verifies the fix rather than the defect.
+#
+# Kept in one file because the two must share the corpus, the query set and the
+# timing harness; measuring the fix with a different rig than the defect is how
+# a comparison stops meaning anything.
+MODE = os.environ.get("PROBE_MODE", "sweep").strip().lower()
+if MODE not in ("sweep", "bounded"):
+    raise SystemExit(f"PROBE_MODE must be sweep or bounded, got {MODE!r}")
+
+
+def main():
+    import arcadedb_embedded as arcadedb
+    from arcadedb_embedded import DatabaseFactory  # noqa: F401
+    import random
+
+    rng = random.Random(17)
+    vec = lambda: [round(rng.gauss(0, 1), 4) for _ in range(DIM)]
+
+    if os.path.isdir(DB):
+        import shutil
+        shutil.rmtree(DB)
+
+    # Rebuild disabled for the whole run: ratio 0 removes the geometric term and
+    # the absolute floor is set past anything this probe will write, so the
+    # buffer only ever grows.
+    settings = {
+        "arcadedb.vectorIndex.rebuildGraphRatio": "0",
+        "arcadedb.vectorIndex.mutationsBeforeRebuild": str(10 ** 9),
+        "arcadedb.vectorIndex.inactivityRebuildTimeoutMs": str(10 ** 9),
+        # THE NEW QUERY-SIDE TRIGGER, added by #6858 (the fix for the finding
+        # this probe produced). It is ON BY DEFAULT and fires from the query
+        # path, which is exactly the path this probe times -- so without
+        # disabling it the buffer drains mid-sweep, graphNodeCount moves off the
+        # base, and the probe's own guard refuses the run.
+        #
+        # Disabling it is what keeps the ORIGINAL measurement reproducible: this
+        # sweep exists to price the raw linear scan, and it can only do that
+        # while nothing bounds the buffer. maxDeltaScanRatio=0 is upstream's own
+        # documented way back to the pre-fix behaviour, so the number stays
+        # comparable to the one filed on #6797.
+        # sweep only. In bounded mode this key is dropped below so the engine
+        # keeps its shipped default, which is the thing under test.
+        "arcadedb.vectorIndex.maxDeltaScanRatio": "0",
+    }
+    # -D on the JVM, which is how every other knob in this harness reaches the
+    # engine. An env-var convention was a guess and a silently ignored setting
+    # here would let a rebuild fire mid-sweep and empty the buffer under the
+    # measurement, which is precisely the confound this probe exists to avoid.
+    if MODE == "bounded":
+        # EVERY disabling setting goes, not just maxDeltaScanRatio.
+        #
+        # The first version dropped only that key and left the others, and the
+        # run looked like the fix did nothing: no rebuild at any step. The
+        # decision stats said why. deltaScanBudget read 1,000,000,000 -- the
+        # probe's OWN mutationsBeforeRebuild=10**9, which the new trigger's
+        # buffer condition is derived from. The buffer never approached a
+        # billion, so condition one could never fire, while the scan-cost
+        # condition was already satisfied (22,775,000 against a target of
+        # 20,000,000 at the last step).
+        #
+        # In other words the test disabled the thing it was testing, and the
+        # only reason that is known rather than guessed is that the probe now
+        # records the decision. Bounded mode runs the engine AS SHIPPED.
+        settings.clear()
+    extra = " ".join(f"-D{k}={v}" for k, v in settings.items())
+    # ARCADEDB_JVM_ARGS is the name jvm.py:445 actually reads. ARCADEDB_JVM_EXTRA,
+    # which this first used, is read by nothing: the settings would have been
+    # silently dropped, a rebuild would have fired mid-sweep, and the buffer would
+    # have emptied under the measurement.
+    os.environ["ARCADEDB_JVM_ARGS"] = (os.environ.get("ARCADEDB_JVM_ARGS", "") + " " + extra).strip()
+
+    db = arcadedb.create_database(DB)
+    db.command("sql", "CREATE VERTEX TYPE V")
+    db.command("sql", "CREATE PROPERTY V.id INTEGER")
+    db.command("sql", "CREATE PROPERTY V.emb ARRAY_OF_FLOATS")
+    db.begin()
+    for i in range(BASE):
+        db.command("sql", f"INSERT INTO V SET id = {i}, emb = {vec()}")
+        if i % 20000 == 19999:
+            db.commit(); db.begin()
+    db.commit()
+    db.command("sql", f'CREATE INDEX ON V (emb) LSM_VECTOR METADATA '
+                      f'{{ "dimensions": {DIM}, "similarity": "COSINE" }}')
+
+    # schema.get_index_by_name returns the raw Java TypeIndex, not the Python
+    # VectorIndex wrapper, so it exposes getStats() and not get_stats(). The
+    # per-bucket LSMVectorIndex underneath it is what carries the counters.
+    # Verified against the wheel before this ran; the first version guessed
+    # get_stats() and died after building the whole 200k corpus.
+    _ti = db.schema.get_index_by_name("V[emb]")
+    _lsm = _ti.getIndexesOnBuckets()[0]
+
+    def stats():
+        st = _lsm.getStats()
+        return {str(k): int(st.get(k)) for k in st.keySet()}
+    for _ in range(1200):
+        if stats().get("graphNodeCount", 0) >= BASE:
+            break
+        time.sleep(0.1)
+
+    probes = [vec() for _ in range(QUERIES)]
+    warm = [vec() for _ in range(50)]
+
+    def warmup():
+        """Held out of the timed set, and run before EVERY pass.
+
+        The delta=0 pass is the baseline every other step is divided by, and the
+        first version measured it against a freshly built index with nothing
+        warmed: it came out at 1.094 ms against 0.426 ms for delta=100, i.e. the
+        baseline was dearer than a step with a hundred extra vectors in it, which
+        makes every ratio below it meaningless. Warming before each pass costs a
+        second and removes the one confound this probe cannot afford, since the
+        whole output is a ratio against step zero.
+        """
+        for w in warm:
+            list(db.query("sql", f"SELECT FROM (SELECT expand(vectorNeighbors('V[emb]', {w}, 10)))"))
+
+    def timed_pass():
+        warmup()
+        lat = []
+        for p in probes:
+            t = time.perf_counter()
+            list(db.query("sql", f"SELECT FROM (SELECT expand(vectorNeighbors('V[emb]', {p}, 10)))"))
+            lat.append((time.perf_counter() - t) * 1000)
+        lat.sort()
+        return lat
+
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    stamp = bench_common.run_conditions(lane="delta_scan", backend="arcadedb_embedded",
+                                        role="engine", n_rows=BASE, dims=DIM)
+    added = 0
+    with open(OUT, "w") as f:
+        for target in STEPS:
+            while added < target:
+                db.begin()
+                for _ in range(min(1000, target - added)):
+                    added += 1
+                    db.command("sql", f"INSERT INTO V SET id = {BASE + added}, emb = {vec()}")
+                db.commit()
+            lat = timed_pass()
+            s = stats()
+            rec = dict(stamp)
+            rec.update({
+                "delta_target": target,
+                "delta_count": s.get("deltaVectorsCount"),
+                "graph_nodes": s.get("graphNodeCount"),
+                "graph_state": s.get("graphState"),
+                "mutations_since_rebuild": s.get("mutationsSinceRebuild"),
+                # #6858's DECISION, recorded rather than inferred. Upstream
+                # added these four precisely so the trigger can be observed from
+                # outside, and the first bounded run could not say why no
+                # rebuild fired because it captured none of them. A verification
+                # that cannot explain a negative result is not a verification.
+                #
+                # The trigger needs the buffer to exceed the graph walk's own
+                # work AND the accumulated scans to have already cost what the
+                # rebuild will, so deltaScanWorkSinceRebuild against
+                # deltaScanWorkTarget is the whole answer.
+                "graph_walk_visited_avg": s.get("graphWalkVisitedAvg"),
+                "delta_scan_budget": s.get("deltaScanBudget"),
+                "delta_scan_work_since_rebuild": s.get("deltaScanWorkSinceRebuild"),
+                "delta_scan_work_target": s.get("deltaScanWorkTarget"),
+                "persisted_graph_nodes": s.get("persistedGraphNodeCount"),
+                "p50_ms": round(st.median(lat), 3),
+                "p95_ms": round(lat[int(0.95 * (len(lat) - 1))], 3),
+                "n_queries": len(lat),
+            })
+            # THE SAME TWO FACTS MEAN OPPOSITE THINGS IN THE TWO MODES.
+            #
+            # sweep:   a moving graph or a drained buffer means the disabling
+            #          settings did not reach the engine, so every step from
+            #          here prices a different graph. Refuse.
+            # bounded: a moving graph or a drained buffer IS the result. The
+            #          query-side trigger fired and bounded the scan, which is
+            #          the whole thing being verified. Record it and continue.
+            #
+            # Guarding on the fact rather than the mode would have made bounded
+            # mode refuse on success, which is the failure this comment exists
+            # to stop the next reader from reintroducing.
+            drained = (rec["delta_count"] is not None
+                       and rec["delta_count"] < target * 0.9)
+            moved = rec["graph_nodes"] != BASE
+            # STARTED, not finished. `moved or drained` only sees a rebuild that
+            # completed inside the step; at 1M the async rebuild ran through
+            # the last two steps and was cancelled at close, at 10M it fired
+            # and was deferred for heap four times, and both rows said False
+            # while the engine log said otherwise (BUGS F7, 2026-09-04).
+            rec["async_rebuild_in_progress"] = s.get("asyncRebuildInProgress")
+            rec["rebuild_fired"] = bool(moved or drained
+                                        or (rec["async_rebuild_in_progress"] or 0) > 0)
+            if MODE == "sweep":
+                if moved:
+                    raise SystemExit(
+                        f"graph moved to {rec['graph_nodes']} from {BASE} at delta={target}: a "
+                        f"rebuild fired and drained the buffer, so the settings did not reach the "
+                        f"engine. Every step from here measures a different graph.")
+                if drained:
+                    raise SystemExit(
+                        f"delta buffer holds {rec['delta_count']} against a target of {target}: "
+                        f"something drained it, so the scan cost below is not the cost of "
+                        f"{target} entries.")
+            elif rec["rebuild_fired"]:
+                print(f"BOUNDED delta={target}: trigger fired "
+                      f"(buffer {rec['delta_count']} of {target}, graph {rec['graph_nodes']})",
+                      flush=True)
+            f.write(json.dumps(rec) + "\n"); f.flush()
+            _w, _t = rec["delta_scan_work_since_rebuild"], rec["delta_scan_work_target"]
+            _prog = f" scanwork={_w}/{_t}" if _t else ""
+            print(f"RESULT delta={target:>6} buffered={rec['delta_count']} "
+                  f"graph={rec['graph_nodes']} p50={rec['p50_ms']:.3f} ms "
+                  f"p95={rec['p95_ms']:.3f} ms{_prog}", flush=True)
+    # PROBE_WAIT_REBUILD=1 (bounded mode): after the last step, wait for the
+    # admitted async rebuild to finish and take one more timed pass, so the
+    # record shows the bound LANDING (buffer drained, p50 back near baseline)
+    # rather than only the trigger firing. #7184 verification, 2026-09-07.
+    if MODE == "bounded" and os.environ.get("PROBE_WAIT_REBUILD") == "1":
+        t0 = time.time()
+        while time.time() - t0 < 7200:
+            # NOT `st`: that is the statistics module; a local assignment made it local to main() and the p50 line raised UnboundLocalError after a one-hour 10M build (2026-09-07 qCQ, BUGS F20). pyflakes and a laptop smoke both catch it.
+            _s = stats()
+            if not _s.get("asyncRebuildInProgress"):
+                break
+            time.sleep(5)
+        _s = stats()
+        warmup()
+        lat = timed_pass()
+        rec = {"delta_target": "after_rebuild", "delta_count": _s.get("deltaVectorsCount"),
+               "graph_nodes": _s.get("graphNodeCount"), "graph_state": _s.get("graphState"),
+               "async_rebuild_in_progress": _s.get("asyncRebuildInProgress"),
+               "rebuilds_deferred_for_memory": _s.get("rebuildsDeferredForMemory"),
+               "waited_s": round(time.time() - t0, 1),
+               "p50_ms": round(st.median(lat), 3), "n_queries": len(lat)}
+        with open(OUT, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+        print(f"AFTER-REBUILD waited={rec['waited_s']}s buffered={rec['delta_count']} graph={rec['graph_nodes']} p50={rec['p50_ms']} ms", flush=True)
+
+    db.close()
+
+
+if __name__ == "__main__":
+    main()

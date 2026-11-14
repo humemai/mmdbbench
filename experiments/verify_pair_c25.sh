@@ -1,0 +1,152 @@
+#!/bin/bash
+# Verify the matched ArcadeDB pair: same jars, same JVM, on both arms.
+#
+# Replaces `build_engine_pair.sh --verify` for the upstream-jars pair. That
+# script verifies a pair WE compiled; this one verifies a pair we assembled from
+# upstream's published image, which is a different claim:
+#
+#   wheel jars buildNumber == image jars buildNumber == the SHA asked for
+#   wheel JVM major        == image JVM major
+#
+# The second line is the one that did not exist before, and its absence is why
+# the served arm ran Temurin 21 / musl / ZGC against the embedded arm's
+# Corretto 25 / glibc / G1 for every server row ever published.
+set -uo pipefail
+SHA="${1:?usage: verify_pair_c25.sh <full-40-char-sha>}"
+SHORT=${SHA:0:9}
+# PAIR_IMAGE names the server image when it is not the c25 build of this commit
+# (the 26.10.1 stages pass the release pair they were generated for).
+IMG="${PAIR_IMAGE:-arcadedb-c25:${SHORT}}"
+# THE CHECKOUT THIS SCRIPT LIVES IN, not a fixed path. It was $HOME/repos/humemai/arcadedb-embedded-python,
+# the main checkout, so run from a worktree it built from, wrote into, and verified against main's
+# bindings/python/dist and .venv: the pair it reported was another tree's. BENCH_PRINT_REPO=1 prints the
+# tree and exits (test_pair_scripts.py holds this).
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+[ -z "${BENCH_PRINT_REPO:-}" ] || { echo "REPO=$REPO"; exit 0; }
+# engine_matches <the engine version the image reports> <the wheel's version>.
+# A .devN wheel reports its own .devN (or the bare X.Y.Z of a snapshot jar), so .devN is dropped on both sides, as it always was.
+# A wheels-only X.Y.Z.postN ships the engine of X.Y.Z (DECISIONS #297; engine_pin.jar_pin says the same for the jars), and the native
+# package's `_build_info.ENGINE_VERSION` says X.Y.Z, so .postN is dropped on the WHEEL side only, after the .devN step (a .devN of a post
+# version does not exist). Anything else must be equal: 26.11.2 against 26.11.1.post2 fails, and so does an engine that says .postN.
+# BENCH_PAIR_VERSION_CHECK="<engine> <wheel>" prints MATCH or MISMATCH and exits, with no docker (test_pair_scripts.py).
+engine_matches() {
+  local e=${1-} w=${2-}
+  e=${e%.dev*}; w=${w%.dev*}
+  [[ $w =~ ^(.+)\.post[0-9]+$ ]] && w=${BASH_REMATCH[1]}
+  [ "$e" = "$w" ]
+}
+[ -z "${BENCH_PAIR_VERSION_CHECK:-}" ] || { set -- ${BENCH_PAIR_VERSION_CHECK}; if engine_matches "${1-}" "${2-}"; then echo MATCH; else echo MISMATCH; fi; exit 0; }
+# The engine bindings (bindings/python: scripts/build.sh and dist/) are not in this repository: BINDINGS_REPO names the checkout that holds them.
+BINDINGS_REPO="${BINDINGS_REPO:?set BINDINGS_REPO to the checkout that holds bindings/python (its scripts/build.sh and dist/)}"
+# The image the embedded arm runs: dbbench:arcadedb-<version> (build_images.sh tags it with the wheel's version; there is no floating tag).
+EMBEDDED_IMAGE="${EMBEDDED_IMAGE:-}"
+fail() { echo "PAIR UNVERIFIED: $*"; exit 1; }
+
+command -v docker >/dev/null || fail "no docker"
+docker image inspect "$IMG" >/dev/null 2>&1 || fail "no image $IMG"
+
+W=$(ls -t "$BINDINGS_REPO"/bindings/python/dist/*.whl 2>/dev/null | head -1)
+[ -n "$W" ] || fail "no wheel in bindings/python/dist"
+# The build is the tag's suffix: arcadedb-<v>-*.whl (native) -> dbbench:arcadedb-<v>-native, arcadedb_jvm-<v>-*.whl -> -jvm, the older arcadedb_embedded wheel -> none.
+WV=$(basename "$W" | cut -d- -f2)
+WB=""
+case "$(basename "$W" | cut -d- -f1)" in arcadedb) WB=native ;; arcadedb_jvm) WB=jvm ;; esac
+[ -n "$EMBEDDED_IMAGE" ] || EMBEDDED_IMAGE="dbbench:arcadedb-$(basename "$W" | cut -d- -f2)${WB:+-$WB}"
+
+# 1. the image's jars
+ISHA=$(docker run --rm --entrypoint sh "$IMG" -c 'cat /home/arcadedb/lib/arcadedb-engine-*.jar' \
+  | python3 -c "
+import sys, zipfile, io
+z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read()))
+p=z.read('com/arcadedb/arcadedb.properties').decode()
+print(next(l.split('=',1)[1].strip() for l in p.splitlines() if l.strip().startswith('buildNumber')))" 2>/dev/null)
+[ "$ISHA" = "$SHA" ] || fail "image jars are ${ISHA:0:9}, expected $SHORT"
+
+# THE NATIVE BUILD HAS NO JARS, NO JVM AND NO JPYPE: checks 2, 3 and 5 are about those and are skipped for it, said out loud (NOT CHECKED), and check 4 reads
+# the engine the image's native package compiled in (`_build_info.ENGINE_VERSION`) instead of a jar's buildNumber. The engine COMMIT of a native wheel is
+# not in a file, but the engine reports it: check 4b runs `SELECT version()` inside the embedded image ("<v> (build <sha>/...)") and compares the sha with $SHA.
+IJ=n/a; HAVE_J=n/a
+if [ "$WB" = native ]; then
+  echo "NOT CHECKED (native build): wheel jars (2), JVM major (3), JPype pin (5); the wheel carries no jars, no JVM and no JPype. Its engine commit IS checked (4b)"
+fi
+
+# 2. the wheel's jars
+[ "$WB" = native ] || {
+WSHA=$(python3 -c "
+import sys, zipfile, io
+z=zipfile.ZipFile('$W')
+n=next(x for x in z.namelist() if '/jars/arcadedb-engine-' in x and x.endswith('.jar'))
+e=zipfile.ZipFile(io.BytesIO(z.read(n)))
+p=e.read('com/arcadedb/arcadedb.properties').decode()
+print(next(l.split('=',1)[1].strip() for l in p.splitlines() if l.strip().startswith('buildNumber')))" 2>/dev/null)
+[ "$WSHA" = "$SHA" ] || fail "wheel jars are ${WSHA:0:9}, expected $SHORT"
+}
+
+# 3. THE JVMs. Same major on both sides or the deployment axis is not transport.
+[ "$WB" = native ] || {
+IJ=$(docker run --rm --entrypoint sh "$IMG" -c 'java -version 2>&1' | head -1 | grep -oE '"[0-9]+' | tr -d '"')
+# The venv's JRE when this checkout has one (the bench host does); otherwise the JRE inside the
+# embedded image, which is the JVM the embedded arm actually runs (a worktree has no .venv).
+VENV_JAVA=""
+for _p in arcadedb arcadedb_embedded; do   # arcadedb-jvm (26.11.1+) installs `arcadedb`; the older wheel `arcadedb_embedded`
+  [ -x "$BINDINGS_REPO/.venv/lib/python3.12/site-packages/$_p/jre/bin/java" ] && VENV_JAVA="$BINDINGS_REPO/.venv/lib/python3.12/site-packages/$_p/jre/bin/java"
+done
+if [ -n "$VENV_JAVA" ]; then
+  EJ=$("$VENV_JAVA" -version 2>&1 | head -1 | grep -oE '"[0-9]+' | tr -d '"')
+else
+  EJ=$(docker run --rm --entrypoint python3 "$EMBEDDED_IMAGE" -c "
+import importlib.metadata as m, pathlib, subprocess
+d = next(pathlib.Path(m.distribution(n).locate_file(p)) for n, p in (('arcadedb-jvm', 'arcadedb'), ('arcadedb', 'arcadedb'), ('arcadedb-embedded', 'arcadedb_embedded')) if any(m.distributions(name=n)))
+print(subprocess.run([str(d / 'jre' / 'bin' / 'java'), '-version'], capture_output=True, text=True).stderr.splitlines()[0])" \
+        2>/dev/null | grep -oE '"[0-9]+' | tr -d '"')
+fi
+[ -n "$IJ" ] && [ -n "$EJ" ] || fail "could not read a JVM version (image='$IJ' embedded='$EJ')"
+[ "$IJ" = "$EJ" ] || fail "JVM major differs: image=$IJ embedded=$EJ"
+}
+
+# 4. THE WHEEL THE EMBEDDED ARM ACTUALLY RUNS, which is baked into
+# dbbench:arcadedb at build time and is NOT the wheel file checked above.
+# Checks 2 and 3 pass while the embedded arm runs a different engine: on
+# 2026-09-19 dbbench:arcadedb carried arcadedb-embedded 26.8.1 from PyPI
+# (build_images.sh's fallback when ARCADEDB_WHEEL is unset) while every
+# served arm ran 26.9.1-SNAPSHOT, and the whole l4 table compared two
+# ArcadeDB versions with this script reporting PAIR VERIFIED. A wheel FILE on
+# disk is not the engine a cell ran; the image is.
+if [ "$WB" = native ] && docker image inspect "$EMBEDDED_IMAGE" >/dev/null 2>&1; then
+  NV=$(docker run --rm --entrypoint python3 "$EMBEDDED_IMAGE" -c "from arcadedb._build_info import ENGINE_VERSION as v; print(v)" 2>/dev/null | tr -dc '0-9a-zA-Z.-')
+  engine_matches "$NV" "$WV" || fail "$EMBEDDED_IMAGE's native engine is '$NV', the wheel is $WV (rebuild it with ARCADEDB_WHEEL set)"
+  # 4b. THE COMMIT THE NATIVE ENGINE REPORTS, asked in SQL inside the image that will run the cells.
+  NSHA=$(docker run --rm --entrypoint python3 "$EMBEDDED_IMAGE" -c "
+import os, tempfile, arcadedb
+db = arcadedb.create_database(os.path.join(tempfile.mkdtemp(), 'p'))
+print(db.query('sql', 'SELECT version() AS v').first().get('v'))
+db.close()" 2>/dev/null | tail -1 | sed -n 's/.*(build \([0-9a-f]\{7,40\}\)\/.*/\1/p')
+  [ -n "$NSHA" ] || fail "$EMBEDDED_IMAGE's native engine did not answer SELECT version() with a build commit"
+  [ "${NSHA:0:9}" = "$SHORT" ] || fail "$EMBEDDED_IMAGE's native engine reports commit ${NSHA:0:9}, expected $SHORT"
+elif docker image inspect "$EMBEDDED_IMAGE" >/dev/null 2>&1; then
+  BSHA=$(docker run --rm --entrypoint python3 "$EMBEDDED_IMAGE" -c "
+import importlib.metadata as m, pathlib, zipfile, io, sys
+d = next(pathlib.Path(m.distribution(n).locate_file(p)) for n, p in (('arcadedb-jvm', 'arcadedb'), ('arcadedb', 'arcadedb'), ('arcadedb-embedded', 'arcadedb_embedded')) if any(m.distributions(name=n)))
+j = next(x for x in (d / 'jars').glob('arcadedb-engine-*.jar'))
+z = zipfile.ZipFile(j)
+p = z.read('com/arcadedb/arcadedb.properties').decode()
+print(next(l.split('=',1)[1].strip() for l in p.splitlines() if l.strip().startswith('buildNumber')))" 2>/dev/null)
+  [ "$BSHA" = "$SHA" ] || fail "$EMBEDDED_IMAGE bakes jars ${BSHA:0:9}, expected $SHORT (rebuild it with ARCADEDB_WHEEL set)"
+else
+  fail "no $EMBEDDED_IMAGE image; the embedded arm has nothing to run"
+fi
+
+# 5. THE JPYPE THE EMBEDDED ARM ACTUALLY RUNS (CAMPAIGN 7 row 73). The wheel declares jpype1>=1.5.0
+# with no upper bound, so an image built after a new JPype release holds the new one while every check
+# above still passes, and the embedded arm's per-call cost is not the one the campaign measures. The pin
+# is Dockerfile.bench's ARG default, read from this script's own directory like REPO above, never from
+# the environment.
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+[ "$WB" = native ] || {
+WANT_J=$(sed -n 's/^ARG JPYPE_VERSION=//p' "$HERE/Dockerfile.bench")
+[ -n "$WANT_J" ] || fail "no 'ARG JPYPE_VERSION=<x.y.z>' default in $HERE/Dockerfile.bench"
+HAVE_J=$(docker run --rm --entrypoint python3 "$EMBEDDED_IMAGE" -c 'import jpype; print(jpype.__version__)' 2>/dev/null | tr -dc '0-9a-zA-Z.-')
+[ "$HAVE_J" = "$WANT_J" ] || fail "$EMBEDDED_IMAGE runs JPype '$HAVE_J', the pin is $WANT_J (rebuild it: ./build_images.sh arcadedb)"
+}
+
+echo "PAIR VERIFIED $SHORT  jars=image+wheel+embedded-image  jvm=$IJ  jpype=$HAVE_J  image=$IMG  embedded=$EMBEDDED_IMAGE  repo=$REPO bindings=$BINDINGS_REPO  wheel=$W"

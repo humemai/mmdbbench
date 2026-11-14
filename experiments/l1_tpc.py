@@ -1,0 +1,2246 @@
+#!/usr/bin/env python3
+"""L1-TPC: standard-benchmark tabular lane (TPC-H schema, SF1).
+
+OLAP: official TPC-H Q1 (pricing summary) and Q6 (revenue forecast) — the
+canonical single-table queries, expressible identically in every engine's
+dialect. Full multi-join TPC-H is NOT run against ArcadeDB: its SQL has no
+ad-hoc relational joins (relationships are precomputed links), which the
+paper states plainly as a dialect boundary rather than papering over.
+
+OLTP: a New-Order-STYLE transactional mix over the same schema (disclosed
+as TPC-C-inspired, not official TPC-C): per transaction, read a part row,
+insert an order document, bump the part's stock counter, one ACID txn.
+Since DECISIONS #82 a PAYMENT-style transaction
+follows: read an order placed by new-order, mark it paid, insert a payment
+row, one ACID txn; the two are 88% of TPC-C's mix. OLTP ops/s covers both.
+
+OLAP since 2026-10: Q1 and Q6 plus three line-item queries every engine can
+answer without a join (top ten parts by revenue, count by ship mode, revenue
+by month), 100 runs each per repetition.
+
+Durability (DECISIONS #81): every engine commits without waiting for the
+disk where it has the knob; each adapter declares what it ran as
+`durability`, and the class that cannot be relaxed says so.
+
+Data: DuckDB dbgen parquet staged under BENCH_DATA/tpch (sf1_lineitem.parquet,
+sf1_part.parquet). Deterministic; identical rows for every backend. The
+line-item table is STREAMED from the parquet one batch at a time into each
+engine's own batch-insert path (LineItems below), so the tpch10 tier's 60M
+rows never sit in the client's memory whole; SF1 goes through the same path.
+"""
+import argparse
+import contextlib
+import json
+import os
+import random
+import statistics
+import time
+import surreal_common
+import arango_common
+import budget_lookup
+import bench_common
+
+
+def pg_durability(cx):
+    """What the PostgreSQL server actually runs, read from it (#81, #90).
+
+    The expected answer depends on the cell's durability class: `off` at the
+    relaxed class, `on` at the strict one, both set by runner.py on the server
+    itself so every session runs under it. Read rather than asserted, and a
+    server that answers something else marks the row instead of passing.
+    """
+    try:
+        with cx.cursor() as c:
+            c.execute("SHOW synchronous_commit")
+            v = c.fetchone()[0]
+        try:
+            cx.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return bench_common.pg_durability_string(v)
+    except Exception as e:  # noqa: BLE001
+        return f"synchronous_commit=unknown ({e.__class__.__name__})"
+
+DATA = os.environ.get("BENCH_TPC_DATA", "/data/tpch")
+SF = os.environ.get("BENCH_TPC_SF", "1")
+OLTP_OPS = 1_000
+# THE OLTP WARM-UP (CAMPAIGN section 7 row 65, DECISIONS #157). New-order, payment, and the four single-record operations
+# are timed from the FIRST operation after the load, each leaving out only its first 20 from the percentiles, so on the
+# JVM engines the statements compile inside the timed window (ArcadeDB embedded's new-order is 2.34x and 2.56x its own
+# payment, timed right after it, against 0.94x to 1.30x for every engine that is not on a JVM; on the laptop the window
+# is 2.90x to 3.79x the warm median and an untimed warm-up of 2,000 operations on disjoint keys cuts it to 0.38x). Every
+# engine now runs OLTP_WARMUP untimed operations of each kind first, on keys BELOW the timed ones (the timed keys start at
+# OLTP_WARMUP, so the timed inserts still land at the end of the order index), the same count in both durability classes;
+# the first operation of the session is timed and kept as the cold column. 2,000 is the count measured on the laptop;
+# the bench host may choose another (BENCH_DOCS_OLTP_WARMUP, recorded on the row as `oltp_warmup`).
+OLTP_WARMUP = int(os.environ.get("BENCH_DOCS_OLTP_WARMUP") or 2_000)
+# 100 runs per analytical query per repetition (DECISIONS #82): was 5, and a
+# p99 needs the samples (2026-09-10, BUGS F29). BENCH_OLAP_ITER lowers it for a
+# laptop smoke, where one SurrealDB cell is 16 minutes of the same query; the
+# count lands on the row as `olap_iters`, so a cell that ran fewer says so
+# instead of looking like a campaign cell.
+OLAP_ITER = int(os.environ.get("BENCH_OLAP_ITER") or 100)
+# THE PER-QUERY BUDGET (DECISIONS #100, third lane): the graph lane's mechanism
+# (graph_common.OLAP_BUDGET_S, #82b) as the time-series lane took it
+# (l4_tsbs.QUERY_BUDGET_S). A property of the lane and the same for every
+# engine on the table, so it moves no comparison by itself. The clock starts
+# before the cold pass, the cold pass always runs, the loop stops at the first
+# iteration that would start after the budget is spent, and the row records
+# <q>_budget_s, <q>_iters, <q>_elapsed_s and <q>_censored; the table names a
+# censored query with its iteration count and the time it reached while the
+# cell's other queries keep their numbers. Why this lane: the laptop skeleton's
+# embedded SurrealDB analytics cell at 60k line items exceeded the whole-cell
+# 0.25 h budget and left no row, and at SF1 that engine scans about 35 us per
+# row, so a hundred iterations of Q1 alone is hours against the cell timeout.
+#
+# WHY 1,800 s. Two constraints, and the cell timeout binds first. (1) The
+# tpch1 cell timeout is 3 h (runner.TIMEOUT_BY_SCALE), and a censored cell
+# costs five budgets plus its build, so 5 x B + 1,280 s (embedded SurrealDB's
+# SF1 build, BUGS F41) must stay under 10,800 s: B <= about 1,900 s. (2) The
+# slowest legitimate served engines on mini in September (results/runs_paper.csv,
+# tpch1, five reps each): ArcadeDB server Q1 10.20-10.35 s and MongoDB Q1
+# 9.76-10.08 s, so about 1,035 s for a hundred iterations; 1,800 s is 1.74x
+# that, and the three October queries on those engines are cheaper than Q1
+# (0.5-0.6x on the laptop skeleton). The SurrealDB 3.2.4 server's Q1 at
+# 40.9-41.2 s (4,120 s for a hundred) is the one served number the budget
+# cannot cover: covering it needs B >= 6,000 s and a 9 h cell, so it will be
+# censored at about 43 of 100 iterations, which leaves a 41 s p50 a 41 s
+# p50 and is named on the table. The override exists for a laptop probe of
+# the mechanism and never for a campaign.
+OLAP_BUDGET_S = float(os.environ.get("BENCH_DOCS_OLAP_BUDGET_S") or 1800.0)
+SEED = 20260722
+BATCH = 10_000
+
+# THE FULL TPC-H Q1 (CAMPAIGN section 7 row 57, DECISIONS #151 item 3, BUGS F170). TPC-H Q1, the pricing summary
+# report, returns ten columns: the two group keys, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty,
+# avg_price, avg_disc, and count_order. Through October this lane's Q1 returned seven of them: `l_tax` was never
+# loaded, so it could not compute sum_charge, and it left out avg_price and avg_disc too, while the page called it
+# "TPC-H's own Q1". Every engine now loads l_tax and computes all ten (our short names: sum_base, sum_disc,
+# sum_charge, avg_qty, avg_price, avg_disc, n); every documents analytics row records `tpch_q1` = full. The answer is
+# checked against DuckDB's bundled official SF1 answer (tpch_answers()) on the laptop (test_tpch_q1_full.py's
+# reference, and the smoke in REPIN-REHEARSAL).
+TPCH_Q1_FIELD = "tpch_q1"      # the row field that says which Q1 ran
+TPCH_Q1 = "full"               # all ten of TPC-H Q1's output columns
+Q1_DUCK = """
+SELECT l_returnflag, l_linestatus, sum(l_quantity) AS sum_qty,
+       sum(l_extendedprice) AS sum_base,
+       sum(l_extendedprice * (1 - l_discount)) AS sum_disc,
+       sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge,
+       avg(l_quantity) AS avg_qty, avg(l_extendedprice) AS avg_price,
+       avg(l_discount) AS avg_disc, count(*) AS n
+FROM lineitem WHERE l_shipdate <= DATE '1998-09-02'
+GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus
+"""
+Q6_DUCK = """
+SELECT sum(l_extendedprice * l_discount) AS revenue, count(*) AS n FROM lineitem
+WHERE l_shipdate >= DATE '1994-01-01' AND l_shipdate < DATE '1995-01-01'
+  AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24
+"""
+# The 2026-10 line-item set (DECISIONS #82): the same three questions in
+# every engine's language, no join anywhere.
+# A TOTAL ORDER, because "the top ten" must be one ten. Revenue ties are
+# unlikely here, but the graph lane's analytics showed what an ambiguous
+# ORDER BY ... LIMIT does across engines, and the same rule applies to every
+# limited query in the instrument (2026-09-14).
+TOP_PARTS_SQL = ("SELECT l_partkey, sum(l_extendedprice * (1 - l_discount)) AS rev "
+                 "FROM lineitem GROUP BY l_partkey ORDER BY rev DESC, l_partkey ASC LIMIT 10")
+SHIP_MODE_SQL = "SELECT l_shipmode, count(*) AS n FROM lineitem GROUP BY l_shipmode ORDER BY l_shipmode"
+BY_MONTH_DUCK = ("SELECT date_trunc('month', l_shipdate) AS m, sum(l_extendedprice * (1 - l_discount)) AS rev, "
+                 "count(*) AS n FROM lineitem GROUP BY m ORDER BY m")
+BY_MONTH_TEXT = ("SELECT substr(l_shipdate, 1, 7) AS m, sum(l_extendedprice * (1 - l_discount)) AS rev, "
+                 "count(*) AS n FROM lineitem GROUP BY m ORDER BY m")
+# ArcadeDB SQL: same semantics on the LineItem document type; dates stored
+# as ISO strings (lexicographic order == chronological for ISO-8601).
+# sum_disc WAS MISSING HERE, AND ONLY HERE (found 2026-09-14 while declaring
+# the #88 digest columns). Every comparator's Q1 -- DuckDB, PostgreSQL, SQLite,
+# MongoDB, SurrealDB, ArangoDB -- computes five aggregates; this one computed
+# four, because sum(l_extendedprice * (1 - l_discount)) was never written into
+# the ArcadeDB text. Both ArcadeDB arms therefore ran a cheaper Q1 than every
+# engine they were printed beside, from the first TPC-H row in August to the
+# September freeze on the live page. The digest would have caught it on the
+# first comparison; the point of #88 is that nothing did for six weeks.
+Q1_ARCADE = ("SELECT l_returnflag, l_linestatus, sum(l_quantity) AS sum_qty, "
+             "sum(l_extendedprice) AS sum_base, "
+             "sum(l_extendedprice * (1 - l_discount)) AS sum_disc, "
+             "sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge, "
+             "avg(l_quantity) AS avg_qty, avg(l_extendedprice) AS avg_price, avg(l_discount) AS avg_disc, "
+             "count(*) AS n FROM LineItem WHERE l_shipdate <= '1998-09-02' "
+             "GROUP BY l_returnflag, l_linestatus "
+             "ORDER BY l_returnflag, l_linestatus")
+# BETWEEN, NOT >= AND <=, AND THE REASON IS AN ENGINE DEFECT (found 2026-09-14
+# by the #88 digest, on its first cross-engine comparison). ArcadeDB SQL parses
+# a decimal literal in a comparison at single precision, so a literal 0.05 is
+# 0.05000000074505806 and the stored DOUBLE 0.05 is 0.05000000000000000277:
+# `l_discount >= 0.05` therefore behaves as `> 0.05` and drops the whole 0.05
+# bucket. Measured on the laptop at SF0.01 against wheel 26.8.1, 60,175 line
+# items, 11 discount values of about 5,470 rows each:
+#
+#     l_discount = 0.05                              0 rows
+#     l_discount >= 0.05      == l_discount > 0.05   27,187 (five buckets)
+#     l_discount <= 0.07      == l_discount < 0.07   43,749 (eight buckets)
+#     >= 0.05 AND <= 0.07                            10,761 (TWO buckets)
+#     BETWEEN 0.05 AND 0.07                          16,323 (three buckets)
+#     >= :a AND <= :b as bound parameters            16,323 (three buckets)
+#
+# So both ArcadeDB arms have been answering Q6 over two thirds of the qualifying
+# rows since the lane was written: revenue 842,572.68 against every comparator's
+# 1,193,053.23, and a latency over a third fewer rows. BETWEEN and bound
+# parameters are both correct; BETWEEN is also what Q6_DUCK writes, so the two
+# texts now say the same thing in the same shape. The defect itself is an
+# upstream matter (a Java repro against the engine's SQL parser), not a harness
+# one, and the published September Q6 cell for ArcadeDB is wrong.
+Q6_ARCADE = ("SELECT sum(l_extendedprice * l_discount) AS revenue, count(*) AS n FROM LineItem "
+             "WHERE l_shipdate >= '1994-01-01' AND l_shipdate < '1995-01-01' "
+             "AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24")
+ARCADE_OLAP = {
+    "q1": Q1_ARCADE, "q6": Q6_ARCADE,
+    "top_parts": ("SELECT l_partkey, sum(l_extendedprice * (1 - l_discount)) AS rev FROM LineItem "
+                  "GROUP BY l_partkey ORDER BY rev DESC, l_partkey ASC LIMIT 10"),
+    "ship_mode": "SELECT l_shipmode, count(*) AS n FROM LineItem GROUP BY l_shipmode ORDER BY l_shipmode",
+    "by_month": ("SELECT l_shipdate.substring(0, 7) AS m, sum(l_extendedprice * (1 - l_discount)) AS rev, "
+                 "count(*) AS n FROM LineItem GROUP BY m ORDER BY m"),
+}
+# CrateDB's dialect: no DATE type (the ship date is a TIMESTAMP, compared with the ISO literal), date_trunc for the month. The
+# remaining text is the DuckDB text.
+CRATE_OLAP = {
+    "q1": Q1_DUCK.replace("DATE '1998-09-02'", "'1998-09-02'"),
+    "q6": Q6_DUCK.replace("DATE '1994-01-01'", "'1994-01-01'").replace("DATE '1995-01-01'", "'1995-01-01'"),
+    "top_parts": TOP_PARTS_SQL, "ship_mode": SHIP_MODE_SQL,
+    "by_month": ("SELECT date_trunc('month', l_shipdate) AS m, sum(l_extendedprice * (1 - l_discount)) AS rev, "
+                 "count(*) AS n FROM lineitem GROUP BY m ORDER BY m"),
+}
+DUCK_OLAP = {"q1": Q1_DUCK, "q6": Q6_DUCK, "top_parts": TOP_PARTS_SQL, "ship_mode": SHIP_MODE_SQL, "by_month": BY_MONTH_DUCK}
+
+LI_COLS = ["l_orderkey", "l_partkey", "l_quantity", "l_extendedprice",
+           "l_discount", "l_returnflag", "l_linestatus", "l_shipdate",
+           "l_shipmode",   # l_shipmode joined for the 2026-10 ship-mode query
+           "l_tax"]        # l_tax joined for the full TPC-H Q1 (row 57); LAST, so every positional table keeps its order
+# Rows per streamed batch. DuckDB's COPY writes 122,880-row row groups (both
+# the SF1 and the SF10 files, DuckDB 1.5.4), so this reads one row group per
+# batch; a batch is one pandas frame of the nine LI_COLS, about 17 MB, and it
+# is the only part of the fact table the client holds at a time.
+LI_BATCH_ROWS = 122_880
+OLAP_QUERIES = ("q1", "q6", "top_parts", "ship_mode", "by_month")
+# THE SERVED ARM'S ROW CAP, written down because it is invisible until it
+# bites. The ArcadeDB HTTP API truncates a result at 20,000 rows unless the
+# request says otherwise, and the #88 digests caught both served time-series
+# arms returning exactly 20,000 where every other engine returned 32,944. This
+# lane's writes go through /command and its analytics through /query (F163);
+# neither request sets a `limit` field, so its scans carry an explicit LIMIT in
+# the SQL instead; the largest answer here is CRUD_OPS rows, three orders of
+# magnitude under the cap. A query on this lane that starts returning more than
+# 20,000 rows needs the cap raised in the SQL.
+
+
+# ---------------------------------------------------------------------------
+# WHAT THE ANSWER LOOKS LIKE (DECISIONS #88). One declaration per query, not
+# per engine: the tuple is the query's column order, and the alternatives in a
+# tuple are the names the dialects give the same column -- a MongoDB $group
+# calls its key "_id" (and reaches into it for a composite key), an AQL COLLECT
+# calls it whatever its RETURN names, and psycopg, DuckDB and SQLite hand back
+# positional tuples that already ARE this order.
+#
+# `coerce` says what a column IS where the engines spell it differently but
+# mean the same thing: by_month's key is a truncated DATE in DuckDB and
+# PostgreSQL and a seven-character substring everywhere else, which is the same
+# month.
+#
+# A MEASURE IS DECLARED `num`; A COUNT AND AN IDENTIFIER ARE NOT. Found at the
+# campaign's own SF1 on 2026-09-14, where the pricing summary split SEVEN
+# ENGINES TO ONE and nobody had the wrong answer:
+#
+#     ArangoDB   sum_qty = 37734107     (an int: AQL's SUM over a column
+#                                        VelocyPack stored as integers returns
+#                                        an integer)
+#     every other engine
+#                sum_qty = 37734107.0   (a double: SQL sum(), MongoDB $sum,
+#                                        SurrealQL math::sum)
+#
+# The canonical form prints an int exactly and a double to six significant
+# digits, so those became "37734107" and "3.77341e+07". `n` in the same row was
+# an int on every engine and identical, `avg_qty` was bit-identical, and
+# `avg_qty * n` is `sum_qty` -- so the two sides held the SAME NUMBER and the
+# digest split on its spelling. It is invisible below 10**6, which is why the
+# SF0.01 skeleton passed: at that size sum_qty is 377,341 and both spellings
+# are "377341". At SF1 three of Q1's four groups cross the boundary; at SF10 all
+# four do. A gate that refuses a publish over this is refusing arithmetic.
+#
+# So the fix is a declaration, not a looser hash: every summed or averaged
+# MEASURE is declared `num` and compared as a number whatever type the driver
+# returns, while `n`, `l_partkey` and the CRUD keys stay EXACT -- a count
+# rounded to six significant digits would let 1,234,567 and 1,234,568 agree.
+# Declared once per query and never per engine, so it cannot be used to make
+# one engine's answer match another's. Verified across all eight engines that
+# produced a clean SF1 row (tpc_rounding_audit.py).
+OLAP_DIGEST = {
+    "q1": dict(columns=(("l_returnflag", "_id.f", "f"), ("l_linestatus", "_id.s", "s"),
+                        "sum_qty", "sum_base", "sum_disc", "sum_charge", "avg_qty", "avg_price", "avg_disc", "n"),
+               coerce={"sum_qty": "num", "sum_base": "num", "sum_disc": "num", "sum_charge": "num",
+                       "avg_qty": "num", "avg_price": "num", "avg_disc": "num"}),
+    # THE COUNT IS PART OF THE ANSWER (DECISIONS #94). `revenue` is one large
+    # float, so at SF1 and above a single lost row falls inside six significant
+    # digits and the digest does not move: measured, the revenue total detected
+    # a missing row 10.8 per cent of the time and the monthly revenue 36.5. The
+    # rows each of them aggregates are now counted in the query itself and
+    # compared EXACTLY, so one lost row fails the gate whatever the sum does.
+    # The count rides the same scan the sum already makes, and the published
+    # latency columns still time exactly one call of exactly this query, so
+    # what they MEAN is unchanged -- which is why #94 required the change
+    # before the campaign rather than during it.
+    "q6": dict(columns=("revenue", "n"), coerce={"revenue": "num"}),
+    # ORDER BY rev DESC LIMIT 10: the membership of the top ten is the answer,
+    # and two engines may break a revenue tie differently, so the canonical
+    # form sorts on rev with the part key as tie-break.
+    "top_parts": dict(columns=(("l_partkey", "_id", "k"), "rev"),
+                      order_matters=True, order_key="rev", id_key="l_partkey",
+                      coerce={"rev": "num"}),
+    # No measure here: the only value column is a count.
+    "ship_mode": dict(columns=(("l_shipmode", "_id", "m"), "n")),
+    "by_month": dict(columns=(("m", "_id"), "rev", "n"),
+                     coerce={"m": "month", "rev": "num"}),
+}
+
+# ---------------------------------------------------------------------------
+# THE FOUR SINGLE-RECORD OPERATIONS (DECISIONS #82a). "Nothing times the
+# simplest thing anyone does to a database, which is one record created, read,
+# updated, and deleted", and it is the most comparable operation across engines
+# because every one of them expresses it without dialect argument. 1,000 of
+# each per repetition, on a table of the same shape as a TPC-C order line,
+# printed as their own columns beside the two transactions.
+#
+# A WRITE HAS NO ANSWER TO DIGEST, so what is digested is the POST-STATE: the
+# whole crud table read back after each phase, untimed. After the inserts that
+# is 1,000 rows at qty 1, after the updates 1,000 rows at qty 2, after the
+# deletes none. An insert that wrote nothing, an update that matched nothing,
+# and a delete that deleted nothing each fail the gate instead of printing a
+# fast number (#82a). A read-back rather than count(*)+sum(qty) because
+# engines disagree about what an aggregate over no rows returns, and that
+# disagreement would be about SQL, not about the data.
+CRUD_OPS = int(os.environ.get("BENCH_CRUD_OPS", "1000"))
+CRUD_QTY_AFTER_UPDATE = 2
+CRUD_DIGEST = dict(columns=(("ckey", "_id"), "pkey", "qty"))
+OLTP_STATE_DIGEST = dict(columns=(("okey", "_id"), "pkey", "qty", "paid"))
+# THE OTHER HALF OF NEW-ORDER (CAMPAIGN section 7 row 58, BUGS F172). The transaction inserts an order AND
+# decrements the part's stock, and the state digest above reads only the orders: an engine that skipped the
+# decrement printed a faster new-order and passed every gate. Every part starts at STOCK_START, so the rows
+# with a different stock are exactly the parts a new-order touched, and each engine reads them back untimed
+# in its own language (`SELECT p_partkey, stock FROM part WHERE stock <> 100`).
+STOCK_START = 100
+STOCK_DIGEST = dict(columns=("p_partkey", "stock"))
+# The payments the loop inserted, compared across engines as a one-row digest: a payment transaction that
+# marked the order paid and silently skipped its insert left every other digest agreeing.
+PAYMENTS_DIGEST = dict(columns=("n",))
+CRUD_READ_DIGEST = dict(columns=(("ckey", "_id"), "pkey", "qty"))
+
+
+def li_columns(df):
+    """One prepared frame of LI_COLS as the {property: column} mapping the bindings' columnar insert takes
+    (CAMPAIGN section 7 row 63, own issue #150): numeric columns as numpy arrays (one buffer copy each across the
+    bridge), the four text columns as object arrays of str."""
+    return {c: df[c].to_numpy() for c in LI_COLS}
+
+
+def _prepare(li):
+    """The frame every engine is fed: the same column set and the same
+    coercions the whole-table load applied before the stream existed."""
+    li["l_shipdate"] = li["l_shipdate"].astype(str)
+    for col in ("l_quantity", "l_extendedprice", "l_discount", "l_tax"):
+        li[col] = li[col].astype("float64")  # parquet DECIMAL -> uniform DOUBLE
+    return li
+
+
+# INDEX BUILD IS ITS OWN NUMBER (FAIRNESS F14, DECISIONS #112). The timer
+# lives in bench_common so this lane and the time-series lane cannot grow two
+# versions of it; see index_timer/index_split there for what it does and what
+# it deliberately does not do.
+index_timer = bench_common.index_timer
+
+
+class LineItems:
+    """The line-item table, streamed from the parquet in batches.
+
+    WHY. load_frames() read sf{SF}_lineitem.parquet into ONE pandas frame and
+    handed it to every engine. At SF1 that is 6.0M rows and about 1.5 GB of
+    Python objects; at SF10 (DECISIONS #103b: document analytics moves to
+    TPC-H SF10) it is 60M rows and would not fit the client's cap, which is
+    why campaign_env.sh said the tpch10 tier needed a loader that did not
+    exist (task #143). This one reads the parquet with
+    pyarrow.parquet.ParquetFile.iter_batches, LI_BATCH_ROWS rows at a time,
+    prepares each batch exactly as the whole frame was prepared, and feeds
+    each engine's EXISTING batch-insert path from it. SF1 takes the same path
+    with the same batch size, so the two tiers differ only in row count.
+
+    The per-engine batch sizes (SQLite's 50,000-row executemany, MongoDB's
+    50,000-document insert_many, ArcadeDB's 10,000-row insert_many, the
+    server's 2,000-statement sqlscript, ...) are rolling buffers over rows(),
+    so they are unchanged by where a parquet batch boundary falls; DuckDB and
+    PostgreSQL take whole frames and a single COPY respectively, as before.
+    """
+
+    def __init__(self, path):
+        import pyarrow.parquet as pq
+        self.path = path
+        self._pf = pq.ParquetFile(path)
+        self.n_rows = self._pf.metadata.num_rows          # the file's own count
+        self.n_row_groups = self._pf.metadata.num_row_groups
+        self.n_streamed = 0                               # what build() consumed
+        self.n_batches = 0
+
+    def __len__(self):
+        return self.n_rows
+
+    def frames(self):
+        """Yield prepared pandas frames of LI_COLS, LI_BATCH_ROWS rows each."""
+        for b in self._pf.iter_batches(batch_size=LI_BATCH_ROWS, columns=LI_COLS):
+            df = _prepare(b.to_pandas())
+            self.n_streamed += len(df)
+            self.n_batches += 1
+            yield df
+
+    def rows(self):
+        """Yield plain tuples in LI_COLS order, the shape executemany takes."""
+        for df in self.frames():
+            yield from df[LI_COLS].itertuples(index=False, name=None)
+
+    def records(self):
+        """Yield namedtuples (t.l_orderkey, ...), the shape the ArcadeDB arms take."""
+        for df in self.frames():
+            yield from df.itertuples(index=False)
+
+
+def load_lineitems():
+    return LineItems(os.path.join(DATA, f"sf{SF}_lineitem.parquet"))
+
+
+def load_part():
+    """The part table stays a frame: 200k rows at SF1, 2M at SF10, two columns."""
+    import pyarrow.parquet as pq
+    part = pq.read_table(os.path.join(DATA, f"sf{SF}_part.parquet"),
+                         columns=["p_partkey", "p_retailprice"]).to_pandas()
+    part["p_retailprice"] = part["p_retailprice"].astype("float64")
+    return part
+
+
+class DuckTPC:
+    name = "duckdb"
+    # DECISIONS #81. Every string, and the evidence for the default it
+    # names, is in bench_common (one per engine, so two lanes cannot
+    # describe the same engine differently).
+    durability = bench_common.DURABILITY_DUCKDB
+
+    def connect(self):
+        import duckdb
+        self.cx = duckdb.connect("/tmp/tpc_duck.db")
+        # F6: DuckDB sizes its pool from the host (20 threads) under the 12-thread
+        # cpuset; only sched_getaffinity sees the cpuset. Same fix as l1_tabular.
+        self.cx.execute(f"PRAGMA threads={len(os.sched_getaffinity(0))}")
+        # ...and the engine's own answer, recorded on the row (CAMPAIGN section
+        # 7 row 21, override_registry.py): fairness_check F15 holds it to the size of
+        # the cell's cpuset, so a PRAGMA that did not take cannot pass.
+        self.row_extra = bench_common.duckdb_readback(self.cx)
+        self.version = duckdb.__version__
+
+    def build(self, li, part):
+        # The first streamed frame creates the table (CTAS, the shape the
+        # whole-frame load used); every later frame is INSERT INTO ... SELECT
+        # from the registered frame, DuckDB's columnar bulk path.
+        first = True
+        for df in li.frames():
+            self.cx.register("li_src", df)
+            if first:
+                self.cx.execute("CREATE TABLE lineitem AS SELECT * FROM li_src")
+                first = False
+            else:
+                self.cx.execute("INSERT INTO lineitem SELECT * FROM li_src")
+            self.cx.unregister("li_src")
+        self.cx.register("p_src", part)
+        self.cx.execute("CREATE TABLE part AS SELECT *, 100 AS stock FROM p_src")
+        self.cx.execute("CREATE TABLE orders_new (okey BIGINT, pkey BIGINT, qty INT, paid INT DEFAULT 0)")
+        with index_timer(self):
+            self.cx.execute("CREATE INDEX o_okey ON orders_new (okey)")
+        self.cx.execute("CREATE TABLE payments (okey BIGINT, pkey BIGINT, amount DOUBLE)")
+        self.cx.execute("CREATE TABLE crud (ckey BIGINT PRIMARY KEY, pkey BIGINT, qty INT, price DOUBLE)")
+        self.cx.execute("ALTER TABLE lineitem ALTER l_shipdate TYPE DATE")
+
+    def olap(self, which):
+        return self.cx.execute(DUCK_OLAP[which]).fetchall()
+
+    def new_order(self, i, pkey):
+        self.cx.execute("BEGIN")
+        self.cx.execute("SELECT p_retailprice, stock FROM part WHERE p_partkey=?",
+                        [pkey]).fetchone()
+        self.cx.execute("INSERT INTO orders_new VALUES (?, ?, ?, 0)", [i, pkey, 1])
+        self.cx.execute("UPDATE part SET stock = stock - 1 WHERE p_partkey=?",
+                        [pkey])
+        self.cx.execute("COMMIT")
+
+    def payment(self, okey):
+        self.cx.execute("BEGIN")
+        r = self.cx.execute("SELECT okey, pkey, qty FROM orders_new WHERE okey=?", [okey]).fetchone()
+        self.cx.execute("UPDATE orders_new SET paid = 1 WHERE okey=?", [okey])
+        self.cx.execute("INSERT INTO payments VALUES (?, ?, ?)", [okey, r[1] if r else 0, 1.0])
+        self.cx.execute("COMMIT")
+
+    # The four single-record operations (#82a). Each is one auto-committed
+    # statement, which on this engine is one transaction.
+    def crud_insert(self, i, pkey):
+        self.cx.execute("INSERT INTO crud VALUES (?, ?, 1, 9.99)", [i, pkey])
+
+    def crud_read(self, i):
+        return self.cx.execute("SELECT ckey, pkey, qty FROM crud WHERE ckey=?", [i]).fetchall()
+
+    def crud_update(self, i):
+        self.cx.execute("UPDATE crud SET qty = 2 WHERE ckey=?", [i])
+
+    def crud_delete(self, i):
+        self.cx.execute("DELETE FROM crud WHERE ckey=?", [i])
+
+    def crud_scan(self):
+        return self.cx.execute("SELECT ckey, pkey, qty FROM crud").fetchall()
+
+    def oltp_scan(self):
+        return self.cx.execute("SELECT okey, pkey, qty, paid FROM orders_new").fetchall()
+
+    def stock_scan(self):
+        return self.cx.execute("SELECT p_partkey, stock FROM part WHERE stock <> 100").fetchall()
+
+    def payments_n(self):
+        return self.cx.execute("SELECT count(*) FROM payments").fetchone()[0]
+
+    def close(self):
+        self.cx.close()
+
+
+Q1_SQLITE = Q1_DUCK.replace("DATE '1998-09-02'", "'1998-09-02'")
+Q6_SQLITE = Q6_DUCK.replace("DATE '1994-01-01'", "'1994-01-01'").replace("DATE '1995-01-01'", "'1995-01-01'")
+SQLITE_OLAP = {"q1": Q1_SQLITE, "q6": Q6_SQLITE, "top_parts": TOP_PARTS_SQL, "ship_mode": SHIP_MODE_SQL, "by_month": BY_MONTH_TEXT}
+
+
+class SQLiteTPC:
+    """SQLite in WAL mode with synchronous=NORMAL (DECISIONS #70, disclosed);
+    dates as ISO text like the ArcadeDB arm, so the comparisons are
+    lexicographic and equal to chronological (2026-09-11)."""
+    name = "sqlite"
+    # DECISIONS #81. Every string, and the evidence for the default it
+    # names, is in bench_common (one per engine, so two lanes cannot
+    # describe the same engine differently).
+    durability = bench_common.DURABILITY_SQLITE
+
+    def connect(self):
+        import sqlite3
+        self.cx = sqlite3.connect("/tmp/tpc_sqlite.db")
+        self.cx.execute("PRAGMA foreign_keys=ON")   # no schema here declares one; stated for completeness
+        self.cx.execute("PRAGMA journal_mode=WAL")
+        # NORMAL at the relaxed class, FULL at the strict one (DECISIONS #90).
+        self.cx.execute(f"PRAGMA synchronous={bench_common.sqlite_synchronous()}")
+        self.durability = bench_common.sqlite_durability_readback(self.cx)
+        self.version = f"sqlite {sqlite3.sqlite_version}"
+
+    def build(self, li, part):
+        self.cx.execute("CREATE TABLE lineitem (l_orderkey INTEGER, l_partkey INTEGER, "
+                        "l_quantity REAL, l_extendedprice REAL, l_discount REAL, "
+                        "l_returnflag TEXT, l_linestatus TEXT, l_shipdate TEXT, l_shipmode TEXT, l_tax REAL)")
+        self.cx.execute("CREATE TABLE part (p_partkey INTEGER PRIMARY KEY, p_retailprice REAL, stock INTEGER)")
+        self.cx.execute("CREATE TABLE orders_new (okey INTEGER PRIMARY KEY, pkey INTEGER, qty INTEGER, paid INTEGER DEFAULT 0)")
+        self.cx.execute("CREATE TABLE payments (okey INTEGER, pkey INTEGER, amount REAL)")
+        self.cx.execute("CREATE TABLE crud (ckey INTEGER PRIMARY KEY, pkey INTEGER, qty INTEGER, price REAL)")
+        buf = []
+        for r in li.rows():
+            buf.append(r)
+            if len(buf) >= 50_000:
+                self.cx.executemany("INSERT INTO lineitem VALUES (?,?,?,?,?,?,?,?,?,?)", buf)
+                self.cx.commit(); buf = []
+        if buf:
+            self.cx.executemany("INSERT INTO lineitem VALUES (?,?,?,?,?,?,?,?,?,?)", buf)
+            self.cx.commit()
+        self.cx.executemany("INSERT INTO part VALUES (?,?,100)",
+                            list(part[["p_partkey", "p_retailprice"]].itertuples(index=False, name=None)))
+        self.cx.commit()
+        # NO li_shipdate INDEX HERE, and that is a measurement rather than an
+        # omission (BUGS F98). SQLite had one since the lane was written, and
+        # it costs it: 53.4 ms without against 63.3 ms with, at 500k rows on
+        # 2026-09-22. Its query planner takes the index for Q6's shipdate
+        # range and then pays a rowid lookup per candidate, which is dearer
+        # than the scan it replaces at 14% selectivity. The OLTP tables keep
+        # their PRIMARY KEYs, which is where SQLite's point lookups go.
+        self.cx.commit()
+
+    def olap(self, which):
+        return self.cx.execute(SQLITE_OLAP[which]).fetchall()
+
+    def new_order(self, i, pkey):
+        self.cx.execute("SELECT p_retailprice, stock FROM part WHERE p_partkey=?", (pkey,)).fetchone()
+        self.cx.execute("INSERT INTO orders_new VALUES (?, ?, ?, 0)", (i, pkey, 1))
+        self.cx.execute("UPDATE part SET stock = stock - 1 WHERE p_partkey=?", (pkey,))
+        self.cx.commit()
+
+    def payment(self, okey):
+        r = self.cx.execute("SELECT okey, pkey, qty FROM orders_new WHERE okey=?", (okey,)).fetchone()
+        self.cx.execute("UPDATE orders_new SET paid = 1 WHERE okey=?", (okey,))
+        self.cx.execute("INSERT INTO payments VALUES (?, ?, ?)", (okey, r[1] if r else 0, 1.0))
+        self.cx.commit()
+
+    # The four single-record operations (#82a), each one committed transaction.
+    def crud_insert(self, i, pkey):
+        self.cx.execute("INSERT INTO crud VALUES (?, ?, 1, 9.99)", (i, pkey))
+        self.cx.commit()
+
+    def crud_read(self, i):
+        return self.cx.execute("SELECT ckey, pkey, qty FROM crud WHERE ckey=?", (i,)).fetchall()
+
+    def crud_update(self, i):
+        self.cx.execute("UPDATE crud SET qty = 2 WHERE ckey=?", (i,))
+        self.cx.commit()
+
+    def crud_delete(self, i):
+        self.cx.execute("DELETE FROM crud WHERE ckey=?", (i,))
+        self.cx.commit()
+
+    def crud_scan(self):
+        return self.cx.execute("SELECT ckey, pkey, qty FROM crud").fetchall()
+
+    def oltp_scan(self):
+        return self.cx.execute("SELECT okey, pkey, qty, paid FROM orders_new").fetchall()
+
+    def stock_scan(self):
+        return self.cx.execute("SELECT p_partkey, stock FROM part WHERE stock <> 100").fetchall()
+
+    def payments_n(self):
+        return self.cx.execute("SELECT count(*) FROM payments").fetchone()[0]
+
+    def close(self):
+        self.cx.close()
+
+
+class MongoTPC:
+    """MongoDB (9.0.4 from 2026-10-23): lineitem and part as collections, ISO-text dates like the
+    ArcadeDB and SQLite arms, Q1/Q6 as aggregation pipelines, new-order as
+    one multi-document transaction (which is why the server runs as a
+    single-node replica set) (2026-09-11)."""
+    name = "mongodb"
+    # DECISIONS #81. Every string, and the evidence for the default it
+    # names, is in bench_common (one per engine, so two lanes cannot
+    # describe the same engine differently).
+    durability = bench_common.DURABILITY_MONGODB
+
+    def connect(self):
+        import pymongo
+        host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+        self.cl = pymongo.MongoClient(f"mongodb://{host}:27017/?directConnection=true",
+                                      serverSelectionTimeoutMS=60000)
+        try:
+            self.cl.admin.command("replSetInitiate", {"_id": "rs0", "members": [{"_id": 0, "host": f"{host}:27017"}]})
+        except pymongo.errors.OperationFailure:
+            pass
+        for _ in range(120):
+            try:
+                if self.cl.admin.command("hello").get("isWritablePrimary"):
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.5)
+        # Reconnect once the node is primary (2026-09-12, laptop runner smoke):
+        # the first client's topology snapshot was taken while the node was
+        # still starting and carried no logicalSessionTimeoutMinutes, so the
+        # first transaction raised "Sessions are not supported by this
+        # MongoDB deployment" before the next heartbeat refreshed it. A fresh
+        # client discovers the primary as such; wait until it reports session
+        # support before handing the connection to the workload.
+        self.cl.close()
+        self.cl = pymongo.MongoClient(f"mongodb://{host}:27017/?directConnection=true",
+                                      serverSelectionTimeoutMS=60000)
+        for _ in range(120):
+            try:
+                self.cl.admin.command("ping")
+                if self.cl.topology_description.logical_session_timeout_minutes is not None:
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.5)
+        self.version = f"mongodb {self.cl.server_info()['version']}"
+        self.db = self.cl["bench"]
+        from pymongo import WriteConcern
+        # j=false at the relaxed class, j=true at the strict one, which is what
+        # makes the ack wait for the journal sync (DECISIONS #90).
+        self._wc = WriteConcern(w=1, j=bench_common.journal_ack())
+        self.durability = bench_common.at_class(bench_common.DURABILITY_MONGODB)
+
+    def build(self, li, part):
+        lc, pc, oc = self.db["lineitem"], self.db["part"], self.db["orders_new"]
+        lc.drop(); pc.drop(); oc.drop()
+        buf = []
+        for t in li.rows():
+            buf.append(dict(zip(LI_COLS, t)))
+            if len(buf) >= 50_000:
+                lc.insert_many(buf, ordered=False); buf = []
+        if buf:
+            lc.insert_many(buf, ordered=False)
+        pc.insert_many([{"p_partkey": int(k), "p_retailprice": float(v), "stock": 100}
+                        for k, v in part[["p_partkey", "p_retailprice"]].itertuples(index=False, name=None)],
+                       ordered=False)
+        with index_timer(self):
+            pc.create_index("p_partkey", unique=True)
+            lc.create_index("l_shipdate")
+            oc.create_index("okey", unique=True)
+        # w=1, j=false on every timed write (#81); cached so the timed loop
+        # does not build a collection handle per operation.
+        self._crud = self.db.get_collection("crud", write_concern=self._wc)
+        with index_timer(self):
+            self._crud.create_index("ckey", unique=True)
+
+    _REV = {"$sum": {"$multiply": ["$l_extendedprice", {"$subtract": [1, "$l_discount"]}]}}
+    TOP_PARTS = [{"$group": {"_id": "$l_partkey", "rev": _REV}},
+                 {"$sort": {"rev": -1, "_id": 1}}, {"$limit": 10}]
+    SHIP_MODE = [{"$group": {"_id": "$l_shipmode", "n": {"$sum": 1}}}, {"$sort": {"_id": 1}}]
+    BY_MONTH = [{"$group": {"_id": {"$substr": ["$l_shipdate", 0, 7]}, "rev": _REV, "n": {"$sum": 1}}},
+                {"$sort": {"_id": 1}}]
+    Q1 = [{"$match": {"l_shipdate": {"$lte": "1998-09-02"}}},
+          {"$group": {"_id": {"f": "$l_returnflag", "s": "$l_linestatus"},
+                      "sum_qty": {"$sum": "$l_quantity"}, "sum_base": {"$sum": "$l_extendedprice"},
+                      "sum_disc": {"$sum": {"$multiply": ["$l_extendedprice", {"$subtract": [1, "$l_discount"]}]}},
+                      "sum_charge": {"$sum": {"$multiply": ["$l_extendedprice", {"$subtract": [1, "$l_discount"]},
+                                                            {"$add": [1, "$l_tax"]}]}},
+                      "avg_qty": {"$avg": "$l_quantity"}, "avg_price": {"$avg": "$l_extendedprice"},
+                      "avg_disc": {"$avg": "$l_discount"}, "n": {"$sum": 1}}},
+          {"$sort": {"_id.f": 1, "_id.s": 1}}]
+    Q6 = [{"$match": {"l_shipdate": {"$gte": "1994-01-01", "$lt": "1995-01-01"},
+                      "l_discount": {"$gte": 0.05, "$lte": 0.07}, "l_quantity": {"$lt": 24}}},
+          {"$group": {"_id": None, "revenue": {"$sum": {"$multiply": ["$l_extendedprice", "$l_discount"]}},
+                      "n": {"$sum": 1}}}]
+
+    def olap(self, which):
+        q = {"q1": self.Q1, "q6": self.Q6, "top_parts": self.TOP_PARTS,
+             "ship_mode": self.SHIP_MODE, "by_month": self.BY_MONTH}[which]
+        return list(self.db["lineitem"].aggregate(q, allowDiskUse=True))
+
+    def new_order(self, i, pkey):
+        with self.cl.start_session() as sess:
+            with sess.start_transaction(write_concern=self._wc):
+                self.db["part"].find_one({"p_partkey": pkey}, {"p_retailprice": 1, "stock": 1}, session=sess)
+                self.db["orders_new"].insert_one({"okey": i, "pkey": pkey, "qty": 1, "paid": 0}, session=sess)
+                self.db["part"].update_one({"p_partkey": pkey}, {"$inc": {"stock": -1}}, session=sess)
+
+    def payment(self, okey):
+        with self.cl.start_session() as sess:
+            with sess.start_transaction(write_concern=self._wc):
+                o = self.db["orders_new"].find_one({"okey": okey}, {"pkey": 1, "qty": 1}, session=sess)
+                self.db["orders_new"].update_one({"okey": okey}, {"$set": {"paid": 1}}, session=sess)
+                self.db["payments"].insert_one({"okey": okey, "pkey": (o or {}).get("pkey", 0), "amount": 1.0}, session=sess)
+
+    # The four single-record operations (#82a). No session: a single-document
+    # write is atomic in MongoDB by construction, and wrapping it in a
+    # transaction would time a distributed-commit path no other engine pays.
+    def crud_insert(self, i, pkey):
+        self._crud.insert_one({"ckey": i, "pkey": pkey, "qty": 1, "price": 9.99})
+
+    def crud_read(self, i):
+        return list(self._crud.find({"ckey": i}, {"_id": 0, "ckey": 1, "pkey": 1, "qty": 1}))
+
+    def crud_update(self, i):
+        self._crud.update_one({"ckey": i}, {"$set": {"qty": 2}})
+
+    def crud_delete(self, i):
+        self._crud.delete_one({"ckey": i})
+
+    def crud_scan(self):
+        return list(self.db["crud"].find({}, {"_id": 0, "ckey": 1, "pkey": 1, "qty": 1}))
+
+    def oltp_scan(self):
+        return list(self.db["orders_new"].find({}, {"_id": 0, "okey": 1, "pkey": 1, "qty": 1, "paid": 1}))
+
+    def stock_scan(self):
+        return list(self.db["part"].find({"stock": {"$ne": 100}}, {"_id": 0, "p_partkey": 1, "stock": 1}))
+
+    def payments_n(self):
+        return self.db["payments"].count_documents({})
+
+    def close(self):
+        self.cl.close()
+
+
+class SurrealTPC:
+    """SurrealDB embedded through its Python SDK on SurrealKV (SDK 2.0.0, which carries core 2.3.10):
+    lineitem and part as tables, part keyed by record id, dates as ISO text,
+    Q1/Q6 in SurrealQL, new-order as one BEGIN/COMMIT transaction
+    (2026-09-11). The served twin runs the 3.2.4 server on RocksDB."""
+    name = "surrealdb_tpc"   # not "surrealdb": that is the cross-model lane's old row name
+    URL = "surrealkv:///tmp/tpc_surrealkv"
+    # DECISIONS #81. Every string, and the evidence for the default it
+    # names, is in bench_common (one per engine, so two lanes cannot
+    # describe the same engine differently).
+    durability = bench_common.DURABILITY_SURREAL_EMBEDDED
+
+    def _open(self):
+        # SURREAL_SYNC_DATA must be in the environment before the datastore is
+        # opened, not passed to it (DECISIONS #90).
+        self.durability = bench_common.at_class(bench_common.DURABILITY_SURREAL_EMBEDDED)
+        surreal_common.apply_durability()
+        import shutil
+        from surrealdb import Surreal
+        shutil.rmtree("/tmp/tpc_surrealkv", ignore_errors=True)
+        self.db = Surreal(self.URL)
+        self.db.use("bench", "bench")
+        self.version = surreal_common.engine_stamp(self.db)   # core version, not the SDK's (F39)
+
+    def connect(self):
+        self._open()
+        self.db.query("REMOVE TABLE IF EXISTS lineitem; REMOVE TABLE IF EXISTS part; "
+                      "REMOVE TABLE IF EXISTS orders_new; REMOVE TABLE IF EXISTS payments; "
+                      "REMOVE TABLE IF EXISTS crud")
+
+    def build(self, li, part):
+        # Index BEFORE the load (2026-09-13): on the SDK's SurrealKV store a
+        # DEFINE INDEX over the 6.0M loaded rows is one transaction record and
+        # failed with "Record is too large to fit in a segment" on mini (qDO);
+        # defined first, each 5,000-row batch maintains it in its own record.
+        self.index_before_load = True
+        with index_timer(self):
+            self.db.query("DEFINE INDEX li_shipdate ON lineitem FIELDS l_shipdate")
+        buf = []
+        for t in li.rows():
+            buf.append(dict(zip(LI_COLS, t)))
+            if len(buf) >= BATCH:
+                self.db.insert("lineitem", buf); buf = []
+        if buf:
+            self.db.insert("lineitem", buf)
+        from surrealdb import RecordID   # a string id would become a string key
+        pr = [{"id": RecordID("part", int(k)), "p_partkey": int(k), "p_retailprice": float(v), "stock": 100}
+              for k, v in part[["p_partkey", "p_retailprice"]].itertuples(index=False, name=None)]
+        for s0 in range(0, len(pr), BATCH):
+            self.db.insert("part", pr[s0:s0 + BATCH])
+
+    Q1 = ("SELECT l_returnflag, l_linestatus, math::sum(l_quantity) AS sum_qty, math::sum(l_extendedprice) AS sum_base, "
+          "math::sum(l_extendedprice * (1 - l_discount)) AS sum_disc, "
+          "math::sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge, "
+          "math::mean(l_quantity) AS avg_qty, math::mean(l_extendedprice) AS avg_price, "
+          "math::mean(l_discount) AS avg_disc, count() AS n "
+          "FROM lineitem WHERE l_shipdate <= '1998-09-02' GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus")
+    Q6 = ("SELECT math::sum(l_extendedprice * l_discount) AS revenue, count() AS n FROM lineitem "
+          "WHERE l_shipdate >= '1994-01-01' "
+          "AND l_shipdate < '1995-01-01' AND l_discount >= 0.05 AND l_discount <= 0.07 AND l_quantity < 24 GROUP ALL")
+    # Subquery form for the ordered group-bys: core 2.3.10 sorts by the group
+    # key after GROUP BY (the l2 finding of 2026-09-11); 3.2.4 accepts both.
+    OLAP = {
+        "top_parts": ("SELECT * FROM (SELECT l_partkey, math::sum(l_extendedprice * (1 - l_discount)) AS rev "
+                      "FROM lineitem GROUP BY l_partkey) ORDER BY rev DESC, l_partkey ASC LIMIT 10"),
+        "ship_mode": "SELECT l_shipmode, count() AS n FROM lineitem GROUP BY l_shipmode ORDER BY l_shipmode",
+        "by_month": ("SELECT * FROM (SELECT string::slice(l_shipdate, 0, 7) AS m, "
+                     "math::sum(l_extendedprice * (1 - l_discount)) AS rev, count() AS n "
+                     "FROM lineitem GROUP BY m) ORDER BY m"),
+    }
+
+    @staticmethod
+    def _rows(res):
+        if isinstance(res, list) and res and isinstance(res[0], dict) and "result" in res[0]:
+            res = res[-1]["result"]
+        return res if isinstance(res, list) else ([res] if res is not None else [])
+
+    def olap(self, which):
+        q = {"q1": self.Q1, "q6": self.Q6}.get(which) or self.OLAP[which]
+        return self._rows(self.db.query(q))
+
+    # BOUND VALUES, SurrealDB's own way (DECISIONS #116 item 2: every engine,
+    # not ArcadeDB alone): `$vars` passed to query(), record ids as RecordID
+    # objects, so nothing is written into the SurrealQL text. Verified on the
+    # pinned SDK (surrealdb==2.0.0, core 2.3.10, embedded surrealkv): the same
+    # orders, stock, and reads as the pasted form. Timing is a wash on the
+    # laptop: three interleaved rounds of new-order put pasted ids, RecordID
+    # vars, and type::thing all within 0.72 to 0.94 ms p50, below the laptop's
+    # reliable range; mini measures it at the re-pin. The served arm inherits these.
+    def new_order(self, i, pkey):
+        from surrealdb import RecordID
+        self.db.query("BEGIN; SELECT p_retailprice, stock FROM ONLY $part; "
+                      "CREATE $order SET okey = $o, pkey = $pk, qty = 1, paid = 0; "
+                      "UPDATE $part SET stock -= 1; COMMIT;",
+                      {"part": RecordID("part", int(pkey)), "order": RecordID("orders_new", int(i)),
+                       "o": int(i), "pk": int(pkey)})
+
+    def payment(self, okey):
+        from surrealdb import RecordID
+        self.db.query("BEGIN; SELECT pkey, qty FROM ONLY $order; "
+                      "UPDATE $order SET paid = 1; "
+                      "CREATE payments SET okey = $o, amount = 1.0; COMMIT;",
+                      {"order": RecordID("orders_new", int(okey)), "o": int(okey)})
+
+    # The four single-record operations (#82a), by record id.
+    def crud_insert(self, i, pkey):
+        from surrealdb import RecordID
+        self.db.query("CREATE $r SET ckey = $c, pkey = $pk, qty = 1, price = 9.99",
+                      {"r": RecordID("crud", int(i)), "c": int(i), "pk": int(pkey)})
+
+    def crud_read(self, i):
+        from surrealdb import RecordID
+        return self._rows(self.db.query("SELECT ckey, pkey, qty FROM $r", {"r": RecordID("crud", int(i))}))
+
+    def crud_update(self, i):
+        from surrealdb import RecordID
+        self.db.query("UPDATE $r SET qty = 2", {"r": RecordID("crud", int(i))})
+
+    def crud_delete(self, i):
+        from surrealdb import RecordID
+        self.db.query("DELETE $r", {"r": RecordID("crud", int(i))})
+
+    def crud_scan(self):
+        return self._rows(self.db.query("SELECT ckey, pkey, qty FROM crud"))
+
+    def oltp_scan(self):
+        return self._rows(self.db.query("SELECT okey, pkey, qty, paid FROM orders_new"))
+
+    def stock_scan(self):
+        return self._rows(self.db.query("SELECT p_partkey, stock FROM part WHERE stock != 100"))
+
+    def payments_n(self):
+        r = self._rows(self.db.query("SELECT count() AS n FROM payments GROUP ALL"))
+        return (r[0].get("n") if r and isinstance(r[0], dict) else 0) or 0
+
+    def close(self):
+        try:
+            self.db.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+class SurrealServedTPC(SurrealTPC):
+    name = "surrealdb_tpc_server"
+    # DECISIONS #81. Every string, and the evidence for the default it
+    # names, is in bench_common (one per engine, so two lanes cannot
+    # describe the same engine differently).
+    durability = bench_common.DURABILITY_SURREAL_SERVER
+
+    def _open(self):
+        # One shared client for every served arm (DECISIONS #91): it sets the
+        # WebSocket options the SDK leaves at the library's defaults, and it
+        # reconnects, re-authenticates and re-selects the namespace once when
+        # the socket dies mid-query.
+        self.db = surreal_common.served_client()
+        self.durability = surreal_common.served_durability()
+        self.version = "surrealdb-server:" + str(self.db.version()).replace("surrealdb-", "")
+
+
+class PostgresTPC:
+    name = "postgres"
+
+    def connect(self):
+        # WHICH #174 CLIENT PATH THIS ARM RAN (issue #261): stamped so a row says it, not only the code.
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), "pg_client_path": "autocommit"}
+        import psycopg
+        host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+        self.cx = psycopg.connect(
+            f"host={host} dbname=bench user=postgres password=dbbenchpass",
+            autocommit=False)
+        # READ, not asserted: the server was started with synchronous_commit=off
+        # (runner.BACKENDS, #81); the row records what the server answers.
+        self.durability = pg_durability(self.cx)
+        # ASK THE SERVER. "postgres" is a name, not a version, and a row
+        # carrying one cannot be re-measured by anyone including us (#156).
+        # Never lose a completed run over provenance: record the reason.
+        try:
+            with self.cx.cursor() as _c:
+                _c.execute("SELECT version()")
+                self.version = _c.fetchone()[0].split(" (")[0]
+            self.cx.rollback()
+        except Exception as e:
+            self.version = f"postgres:unknown ({e.__class__.__name__})"
+
+    def build(self, li, part):
+        cur = self.cx.cursor()
+        cur.execute("CREATE TABLE lineitem (l_orderkey BIGINT, l_partkey BIGINT, "
+                    "l_quantity DOUBLE PRECISION, l_extendedprice DOUBLE PRECISION, "
+                    "l_discount DOUBLE PRECISION, l_returnflag TEXT, "
+                    "l_linestatus TEXT, l_shipdate DATE, l_shipmode TEXT, l_tax DOUBLE PRECISION)")
+        with cur.copy("COPY lineitem FROM STDIN") as cp:
+            for t in li.rows():
+                cp.write_row(t)
+        cur.execute("CREATE TABLE part (p_partkey BIGINT PRIMARY KEY, "
+                    "p_retailprice DOUBLE PRECISION, stock INT DEFAULT 100)")
+        with cur.copy("COPY part (p_partkey, p_retailprice) FROM STDIN") as cp:
+            for t in part.itertuples(index=False):
+                cp.write_row(tuple(t))
+        cur.execute("CREATE TABLE orders_new (okey BIGINT PRIMARY KEY, pkey BIGINT, qty INT, paid INT DEFAULT 0)")
+        cur.execute("CREATE TABLE payments (okey BIGINT, pkey BIGINT, amount DOUBLE PRECISION)")
+        cur.execute("CREATE TABLE crud (ckey BIGINT PRIMARY KEY, pkey BIGINT, qty INT, price DOUBLE PRECISION)")
+        # THE INDEX Q6 ACTUALLY USES, which this arm did not have (BUGS F98).
+        # Q6 is the only analytics query an index can help here: Q1 takes 98%
+        # of the rows and the other three are full aggregates, so a scan is
+        # the right plan for them. Q6's shipdate year is 14.3% of rows and
+        # 1.8% after the discount and quantity predicates, and PostgreSQL's
+        # planner turns that into a bitmap index scan. MEASURED at SF1 on 6.0M
+        # rows, 2026-09-22: 726 ms without the index, 290 ms with it, a 2.5x
+        # difference on a published cell -- against an ArcadeDB arm that has
+        # had the same index since the lane was written and gains 6.1x from
+        # it. ANALYZE after, so the planner costs it from real statistics
+        # rather than from the defaults a freshly loaded table carries.
+        with index_timer(self):
+            cur.execute("CREATE INDEX li_shipdate ON lineitem (l_shipdate)")
+            cur.execute("ANALYZE lineitem")
+        self.cx.commit()
+        # THE TIMED CALLS RUN IN AUTOCOMMIT (G3a, repros/postgres-roundtrips-ab-20261007; DECISIONS #174): psycopg sends
+        # BEGIN as its own round trip, so a one-statement call was three (BEGIN, statement, COMMIT) and is one now; the
+        # vendor's psycopg page says autocommit "has a beneficial performance effect, because less queries are sent".
+        # build() above stays one transaction: the flag is set after its final commit.
+        self.cx.autocommit = True
+
+    def olap(self, which):
+        q = DUCK_OLAP[which]
+        cur = self.cx.cursor()
+        cur.execute(q)
+        return cur.fetchall()
+
+    def new_order(self, i, pkey):
+        # new-order is a transaction: BEGIN, three statements, COMMIT (five sends, the same as before autocommit)
+        with self.cx.transaction():
+            cur = self.cx.cursor()
+            cur.execute("SELECT p_retailprice, stock FROM part WHERE p_partkey=%s",
+                        (pkey,))
+            cur.fetchone()
+            cur.execute("INSERT INTO orders_new VALUES (%s, %s, %s, 0)", (i, pkey, 1))
+            cur.execute("UPDATE part SET stock = stock - 1 WHERE p_partkey=%s",
+                        (pkey,))
+
+    def payment(self, okey):
+        with self.cx.transaction():
+            cur = self.cx.cursor()
+            cur.execute("SELECT okey, pkey, qty FROM orders_new WHERE okey=%s", (okey,))
+            r = cur.fetchone()
+            cur.execute("UPDATE orders_new SET paid = 1 WHERE okey=%s", (okey,))
+            cur.execute("INSERT INTO payments VALUES (%s, %s, %s)", (okey, r[1] if r else 0, 1.0))
+
+    # The four single-record operations (#82a), each one statement committed on its own (autocommit).
+    def crud_insert(self, i, pkey):
+        self.cx.cursor().execute("INSERT INTO crud VALUES (%s, %s, 1, 9.99)", (i, pkey))
+
+    def crud_read(self, i):
+        cur = self.cx.cursor()
+        cur.execute("SELECT ckey, pkey, qty FROM crud WHERE ckey=%s", (i,))
+        return cur.fetchall()
+
+    def crud_update(self, i):
+        self.cx.cursor().execute("UPDATE crud SET qty = 2 WHERE ckey=%s", (i,))
+
+    def crud_delete(self, i):
+        self.cx.cursor().execute("DELETE FROM crud WHERE ckey=%s", (i,))
+
+    def _all(self, sql):
+        cur = self.cx.cursor()
+        cur.execute(sql)
+        return cur.fetchall()
+
+    def crud_scan(self):
+        return self._all("SELECT ckey, pkey, qty FROM crud")
+
+    def oltp_scan(self):
+        return self._all("SELECT okey, pkey, qty, paid FROM orders_new")
+
+    def stock_scan(self):
+        return self._all("SELECT p_partkey, stock FROM part WHERE stock <> 100")
+
+    def payments_n(self):
+        return self._all("SELECT count(*) FROM payments")[0][0]
+
+    def close(self):
+        self.cx.close()
+
+
+class ArcadeTPC:
+    # THE INDEX KINDS THE ENGINE BUILT, asked of it after build() and outside every timer
+    # (CAMPAIGN 7 row 68): the row's `index_kinds`. The lane calls this once the build timer
+    # has stopped; a served arm overrides it with its HTTP query.
+    def index_readback(self):
+        return bench_common.arcadedb_index_readback(
+            lambda: self.db.query("sql", "SELECT FROM schema:indexes").to_list())
+
+    name = "arcadedb_embedded"
+    # DECISIONS #81. Every string, and the evidence for the default it
+    # names, is in bench_common (one per engine, so two lanes cannot
+    # describe the same engine differently).
+    durability = bench_common.DURABILITY_ARCADEDB
+
+    def connect(self):
+        import _arcadedb_import
+        arcadedb = _arcadedb_import.load()
+        self._a = arcadedb
+        heap = os.environ.get("ARCADEDB_HEAP", "4g")
+        self.db = arcadedb.create_database("/tmp/tpc_arcade",
+                                           # -Xms is left unset; heap_size sets -Xmx from the cell's memory budget (the bindings' documented practice, PROTOCOL section 7).
+                                           # txWalFlush passed EXPLICITLY at both classes
+                                           # (DECISIONS #90): 0 relaxed, 2 strict, so the
+                                           # row's claim is a flag this process set rather
+                                           # than a default someone remembered.
+                                           jvm_kwargs={"heap_size": heap,
+                                                       "jvm_args": bench_common.arcade_jvm_args()})
+        self.version = _arcadedb_import.dist_version()
+        # ASKED, not asserted (#81's standard, doubled by #90's second class).
+        self.durability = bench_common.arcade_durability_readback(db=self.db)
+        qr = bench_common.arcade_query_ram_readback()      # {} unless the query heap budget override is on (DECISIONS #175)
+        if qr:
+            self.row_extra = {**(getattr(self, "row_extra", None) or {}), **qr}
+
+    def build(self, li, part):
+        db = self.db
+        # THE MAINTAINERS' BULK PATH FOR A LARGE TYPE (CAMPAIGN item 10, the
+        # ingest side; answered on ArcadeData/arcadedb#8478). LineItem loads
+        # through the async executor's createRecord (insert_many parallel=True)
+        # on a type with as many buckets as the executor has writers (default
+        # cores - 1), or a multiple k of that (BENCH_ARCADE_BUCKETS_PER_WRITER,
+        # 1 or 2 per the answer; the re-pin measures both on the bench host).
+        # One writer owns each bucket, so the default single bucket gave no
+        # gain (F141). Two settings follow from how the executor works:
+        #   - its writers stamp their own WAL flush on every transaction and
+        #     ignore txWalFlush (default NO), so the strict class sets the executor's own
+        #     spelling of it (YES_NOMETADATA, txWalFlush=1, since row 5; YES_FULL was 2) on the
+        #     executor itself or its load would skip the fsyncs;
+        #   - waitCompletion(), which each insert_many call ends with, commits
+        #     every writer's open batch, so each call carries writers x the
+        #     writers' commit size: one commit per writer per call, the batch
+        #     the executor would have used anyway.
+        ex = db.async_executor()
+        self.async_writers = ex.get_parallel_level()
+        self.lineitem_buckets = self.async_writers * int(
+            os.environ.get("BENCH_ARCADE_BUCKETS_PER_WRITER") or 1)
+        # An explicit count overrides the rule, for the control runs only
+        # (the row records what was used).
+        if os.environ.get("BENCH_ARCADE_LINEITEM_BUCKETS"):
+            self.lineitem_buckets = int(os.environ["BENCH_ARCADE_LINEITEM_BUCKETS"])
+        ex.set_transaction_sync(bench_common.arcade_async_sync())
+        self.async_sync = ex.get_transaction_sync()
+        self.load_call_rows = self.async_writers * ex.get_commit_every()
+        db.command("sql", f"CREATE DOCUMENT TYPE LineItem BUCKETS {self.lineitem_buckets}")
+        for c in LI_COLS:
+            t = ("STRING" if c in ("l_returnflag", "l_linestatus", "l_shipdate", "l_shipmode")
+                 else ("LONG" if c.endswith("key") else "DOUBLE"))
+            db.command("sql", f"CREATE PROPERTY LineItem.{c} {t}")
+        # THE THREE ID INDEXES ARE HASH INDEXES: this lane reads, updates, and
+        # deletes by these ids with equality and nothing else, which is the use
+        # ArcadeDB's maintainers name for UNIQUE_HASH (ArcadeData/arcadedb#9169;
+        # CAMPAIGN 7 row 68). The l_shipdate index below stays sorted: Q6 ranges
+        # over it. tests (test_index_kinds.py) pin every statement.
+        db.command("sql", "CREATE DOCUMENT TYPE Part")
+        db.command("sql", "CREATE PROPERTY Part.p_partkey LONG")
+        db.command("sql", "CREATE INDEX ON Part (p_partkey) UNIQUE_HASH")
+        db.command("sql", "CREATE DOCUMENT TYPE OrderNew")
+        db.command("sql", "CREATE PROPERTY OrderNew.okey LONG")
+        db.command("sql", "CREATE INDEX ON OrderNew (okey) UNIQUE_HASH")
+        db.command("sql", "CREATE DOCUMENT TYPE Payment")
+        db.command("sql", "CREATE DOCUMENT TYPE Crud")
+        db.command("sql", "CREATE PROPERTY Crud.ckey LONG")
+        db.command("sql", "CREATE INDEX ON Crud (ckey) UNIQUE_HASH")
+        # THE ENGINE'S BULK PATH, not one SQL statement per row.
+        #
+        # This block used to issue a parameterised INSERT per row and call
+        # itself "bulk path: batched multi-row INSERT". It was neither: at
+        # TPC-H SF10 that is 60M separate db.command() calls, each crossing
+        # JPype, each parsed as its own SQL statement. Measured on mini at
+        # tpch10, build_s medians: DuckDB 113 s, PostgreSQL 245 s, ArcadeDB
+        # 2234 s. A 20x gap against DuckDB that is our binding usage, not the
+        # storage engine -- the fifth instance of "the harness, not the
+        # engine" in this project, and this one handicapped OURSELVES in a
+        # published build_s.
+        #
+        # insert_many serialises a batch to one JSON payload and loops it
+        # Java-side (DocumentBatcher), so the FFI crossing is per BATCH rather
+        # than per row. This is the same class of idiomatic bulk path the
+        # other engines already get here: DuckDB registers an Arrow table,
+        # PostgreSQL uses COPY FROM STDIN. Using per-row SQL for us while they
+        # get native bulk was never a defensible comparison.
+        #
+        # numpy scalars are converted at the boundary on purpose: insert_many
+        # json.dumps the batch and falls back to the slow per-row path on a
+        # TypeError, so an unconverted np.int64 would silently restore exactly
+        # the behaviour this replaces.
+        #
+        # FROM THE 26.10.1 MEASUREMENT THE LOAD IS COLUMNAR (CAMPAIGN section 7 row 63, DECISIONS #153 item 2,
+        # the user's choice, own issue #150): each parquet batch crosses the bridge as whole columns (a long[] or
+        # double[] copied from the numpy buffer, a String[] from a list) and the documents are built in Java, instead
+        # of one JSON payload per batch. The transport is the only change: the same async writers, the same bucket
+        # rule, the same executor flush class, parallel=True. On the laptop the columnar call stored the same count
+        # and sums as insert_many in a fraction of its time (mechanics only; the page's numbers come from the bench
+        # host). A wheel without insert_columns keeps insert_many and the row says nothing, so a
+        # measurement meant to be columnar cannot silently become the other one: `columnar_insert` is recorded only
+        # when the call was made.
+        if hasattr(db, "insert_columns"):
+            self.columnar_insert = "insert_columns"
+            for df in li.frames():
+                db.insert_columns("LineItem", li_columns(df), parallel=True)
+        else:
+            buf = []
+            for t in li.records():
+                buf.append({"l_orderkey": int(t.l_orderkey), "l_partkey": int(t.l_partkey),
+                            "l_quantity": float(t.l_quantity),
+                            "l_extendedprice": float(t.l_extendedprice),
+                            "l_discount": float(t.l_discount),
+                            "l_returnflag": str(t.l_returnflag),
+                            "l_linestatus": str(t.l_linestatus),
+                            "l_shipdate": str(t.l_shipdate),
+                            "l_shipmode": str(t.l_shipmode),
+                            "l_tax": float(t.l_tax)})
+                if len(buf) >= self.load_call_rows:
+                    db.insert_many("LineItem", buf, parallel=True); buf = []
+            if buf:
+                db.insert_many("LineItem", buf, parallel=True)
+        # STORED, not submitted: a record the async writers reject is reported
+        # only through an error callback, and wheels before 2026-09-28 passed
+        # none (insert_many returned the input count while dropping it). A
+        # type count is a per-bucket read, not a scan.
+        stored = int(db.query("sql", "SELECT count(*) AS n FROM LineItem").to_list()[0]["n"])
+        if stored != li.n_streamed:
+            raise SystemExit(f"LineItem stored {stored:,} of {li.n_streamed:,} streamed rows "
+                             f"through the async writers: the load lost records.")
+        for start in range(0, len(part), BATCH):
+            chunk = part.iloc[start:start + BATCH]
+            db.insert_many("Part", [
+                {"p_partkey": int(t.p_partkey),
+                 "p_retailprice": float(t.p_retailprice), "stock": 100}
+                for t in chunk.itertuples(index=False)], commit_every=BATCH)
+        # aggregate columns indexed so Q1/Q6 filters avoid full scans
+        with index_timer(self):
+            db.command("sql", "CREATE INDEX ON LineItem (l_shipdate) NOTUNIQUE")
+
+    def olap(self, which):
+        return self.db.query("sql", ARCADE_OLAP[which]).to_list()
+
+    def new_order(self, i, pkey):
+        db = self.db
+        db.begin()
+        db.query("sql", "SELECT p_retailprice, stock FROM Part WHERE p_partkey=:k",
+                 {"k": pkey}).to_list()
+        db.command("sql", "INSERT INTO OrderNew SET okey=:o, pkey=:p, qty=1, paid=0",
+                   {"o": i, "p": pkey})
+        db.command("sql", "UPDATE Part SET stock = stock - 1 WHERE p_partkey=:k",
+                   {"k": pkey})
+        db.commit()
+
+    def payment(self, okey):
+        db = self.db
+        db.begin()
+        r = db.query("sql", "SELECT pkey, qty FROM OrderNew WHERE okey=:o", {"o": okey}).to_list()
+        db.command("sql", "UPDATE OrderNew SET paid = 1 WHERE okey=:o", {"o": okey})
+        db.command("sql", "INSERT INTO Payment SET okey=:o, pkey=:p, amount=1.0",
+                   {"o": okey, "p": (r[0].get("pkey") if r else 0)})
+        db.commit()
+
+    # The four single-record operations (#82a), each in its own transaction so
+    # the number is a committed write, as it is on every other engine.
+    def crud_insert(self, i, pkey):
+        db = self.db
+        db.begin()
+        db.command("sql", "INSERT INTO Crud SET ckey=:c, pkey=:p, qty=1, price=9.99",
+                   {"c": i, "p": pkey})
+        db.commit()
+
+    def crud_read(self, i):
+        return self.db.query("sql", "SELECT ckey, pkey, qty FROM Crud WHERE ckey=:c",
+                             {"c": i}).to_list()
+
+    def crud_update(self, i):
+        db = self.db
+        db.begin()
+        db.command("sql", "UPDATE Crud SET qty = 2 WHERE ckey=:c", {"c": i})
+        db.commit()
+
+    def crud_delete(self, i):
+        db = self.db
+        db.begin()
+        db.command("sql", "DELETE FROM Crud WHERE ckey=:c", {"c": i})
+        db.commit()
+
+    def crud_scan(self):
+        return self.db.query("sql", "SELECT ckey, pkey, qty FROM Crud LIMIT 1000000").to_list()
+
+    def oltp_scan(self):
+        return self.db.query("sql", "SELECT okey, pkey, qty, paid FROM OrderNew LIMIT 1000000").to_list()
+
+    def stock_scan(self):
+        return self.db.query("sql", "SELECT p_partkey, stock FROM Part WHERE stock <> 100 LIMIT 1000000").to_list()
+
+    def payments_n(self):
+        r = self.db.query("sql", "SELECT count(*) AS n FROM Payment").to_list()
+        return (r[0].get("n") if r else 0) or 0
+
+    def close(self):
+        self.db.close()
+
+
+class ArcadeServerTPC(ArcadeTPC):
+    name = "arcadedb_server"
+    # Rows per `INSERT ... CONTENT :rows` request (#8337: 2,000 reasonable,
+    # 5,000-10,000 may amortize more for small rows); swept on the bench host.
+    load_batch = int(os.environ.get("BENCH_SERVED_LOAD_BATCH") or 2000)
+    # The served twin's txWalFlush is a JAVA_OPTS entry on its container, which
+    # runner.py sets for the strict class and records as durability_server_flags.
+    # There is no HTTP read-back for it, and the string says so rather than
+    # implying the engine was asked.
+    durability = bench_common.DURABILITY_ARCADEDB
+
+    def connect(self):
+        self.durability = (bench_common.at_class(bench_common.DURABILITY_ARCADEDB)
+                           + bench_common.ARCADE_SERVER_DURABILITY_NOTE)
+        import lean_http
+        self.rq = lean_http.Session()
+        host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+        self.base = f"http://{host}:2480/api/v1"
+        self.rq.auth = ("root", "dbbenchpass")
+        # WHICH HTTP CLIENT ran, read from the session (CAMPAIGN 7 row 72), on every row this arm writes
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), **lean_http.row_fields(self.rq)}
+        # ASK THE SERVER, as l1_tabular, l2_graph, l3_sparse and l3d_dense all
+        # already do. "server" is a name, not a version (#156), and this lane
+        # was the last one still asserting it. The same defect in another form
+        # made ArcadeDB rows read "server:latest" while a pinned digest ran.
+        try:
+            info = self.rq.get(f"http://{host}:2480/api/v1/server?mode=basic", timeout=30)
+            self.version = "server:" + (info.json().get("version") or "?")
+        except Exception as e:
+            self.version = f"server:unknown ({e.__class__.__name__})"
+
+    def _cmd(self, command, timeout=1800, language="sql", params=None):
+        body = {"language": language, "command": command}
+        if params is not None:
+            body["params"] = params
+        r = self.rq.post(f"{self.base}/command/bench", json=body, timeout=timeout)
+        r.raise_for_status()
+        return r.json().get("result", [])
+
+    def build(self, li, part):
+        # Hash indexes on the three equality-only ids, as the embedded arm
+        # (CAMPAIGN 7 row 68); l_shipdate is created below and stays sorted.
+        for ddl in ("CREATE DOCUMENT TYPE LineItem",
+                    "CREATE PROPERTY LineItem.l_shipdate STRING",
+                    "CREATE PROPERTY LineItem.l_returnflag STRING",
+                    "CREATE PROPERTY LineItem.l_linestatus STRING",
+                    "CREATE PROPERTY LineItem.l_orderkey LONG",
+                    "CREATE PROPERTY LineItem.l_partkey LONG",
+                    "CREATE PROPERTY LineItem.l_quantity DOUBLE",
+                    "CREATE PROPERTY LineItem.l_extendedprice DOUBLE",
+                    "CREATE PROPERTY LineItem.l_discount DOUBLE",
+                    "CREATE PROPERTY LineItem.l_shipmode STRING",
+                    "CREATE PROPERTY LineItem.l_tax DOUBLE",
+                    "CREATE DOCUMENT TYPE Part",
+                    "CREATE PROPERTY Part.p_partkey LONG",
+                    "CREATE INDEX ON Part (p_partkey) UNIQUE_HASH",
+                    "CREATE DOCUMENT TYPE OrderNew",
+                    "CREATE PROPERTY OrderNew.okey LONG",
+                    "CREATE INDEX ON OrderNew (okey) UNIQUE_HASH",
+                    "CREATE DOCUMENT TYPE Payment",
+                    "CREATE DOCUMENT TYPE Crud",
+                    "CREATE PROPERTY Crud.ckey LONG",
+                    "CREATE INDEX ON Crud (ckey) UNIQUE_HASH"):
+            self._cmd(ddl)
+        # THE SERVED BULK PATH THE MAINTAINERS RECOMMEND (ArcadeData/arcadedb#8337,
+        # DECISIONS #116): one `INSERT ... CONTENT :rows` per batch with the rows
+        # bound as a list, parsed once, instead of a sqlscript of BATCH
+        # `INSERT ... SET` statements with the values written into the text,
+        # each tokenized and parsed (1.5x slower on the laptop). Every comparator
+        # already loads through its vendor's bulk path, so this is parity. The
+        # batch size is swept 2k/5k/10k on the bench host at the re-pin and the
+        # best kept; the row records which one ran.
+        batch = self.load_batch
+        def _flush(type_name, rows):
+            self._cmd(f"INSERT INTO {type_name} CONTENT :rows", params={"rows": rows})
+        rows = []
+        for t in li.records():
+            rows.append({"l_orderkey": int(t.l_orderkey), "l_partkey": int(t.l_partkey),
+                         "l_quantity": float(t.l_quantity), "l_extendedprice": float(t.l_extendedprice),
+                         "l_discount": float(t.l_discount), "l_returnflag": str(t.l_returnflag),
+                         "l_linestatus": str(t.l_linestatus), "l_shipdate": str(t.l_shipdate),
+                         "l_shipmode": str(t.l_shipmode), "l_tax": float(t.l_tax)})
+            if len(rows) >= batch:
+                _flush("LineItem", rows)
+                rows = []
+        if rows:
+            _flush("LineItem", rows)
+        rows = []
+        for t in part.itertuples(index=False):
+            rows.append({"p_partkey": int(t.p_partkey), "p_retailprice": float(t.p_retailprice),
+                         "stock": 100})
+            if len(rows) >= batch:
+                _flush("Part", rows)
+                rows = []
+        if rows:
+            _flush("Part", rows)
+        with index_timer(self):
+            self._cmd("CREATE INDEX ON LineItem (l_shipdate) NOTUNIQUE")
+
+    def index_readback(self):
+        return bench_common.arcadedb_index_readback(lambda: self._query("SELECT FROM schema:indexes"))
+
+    def _query(self, command, timeout=1800, params=None):
+        body = {"language": "sql", "command": command}
+        if params is not None:
+            body["params"] = params
+        r = self.rq.post(f"{self.base}/query/bench", json=body, timeout=timeout)
+        r.raise_for_status()
+        return r.json().get("result", [])
+
+    # THROUGH /query, NOT /command (BUGS F163, CAMPAIGN section 7 row 25).
+    # POST /command wraps even a SELECT in an auto-commit transaction, inside
+    # which a scan stays on one thread, while the embedded twin's db.query runs
+    # with none; since ArcadeData/arcadedb#8792 (7f2c770697) POST /query runs an
+    # idempotent statement without one, so the served analytics can scan in
+    # parallel wherever the embedded arm does. The timed point read moves too;
+    # writes stay on /command (/query refuses them), and so do the untimed
+    # verification scans, whose 20,000-row behaviour there is the known one.
+    def olap(self, which):
+        return self._query(ARCADE_OLAP[which])
+
+    # BOUND VALUES (DECISIONS #116 item 2), as the embedded arm has always
+    # passed them. Each transaction stays ONE sqlscript request, so it stays
+    # atomic and one round trip; the named parameters reach every statement in
+    # the script (verified on the laptop: one :pk used by all three statements,
+    # stock and orders updated as with literals).
+    def new_order(self, i, pkey):
+        self._cmd("SELECT p_retailprice, stock FROM Part WHERE p_partkey = :pk;"
+                  "INSERT INTO OrderNew SET okey = :o, pkey = :pk, qty = 1, paid = 0;"
+                  "UPDATE Part SET stock = stock - 1 WHERE p_partkey = :pk",
+                  language="sqlscript", params={"pk": int(pkey), "o": int(i)})
+
+    def payment(self, okey):
+        # The UPDATE goes last: the server appends "limit 20001" to a script
+        # that opens with SELECT, and an INSERT ... SET as the final statement
+        # cannot parse it (laptop, 2026-09-14); new-order ends with UPDATE too.
+        self._cmd("SELECT pkey, qty FROM OrderNew WHERE okey = :o;"
+                  "INSERT INTO Payment SET okey = :o, amount = 1.0;"
+                  "UPDATE OrderNew SET paid = 1 WHERE okey = :o",
+                  language="sqlscript", params={"o": int(okey)})
+
+    # The four single-record operations (#82a), one HTTP command each, which
+    # on this server is one transaction each.
+    def crud_insert(self, i, pkey):
+        self._cmd("INSERT INTO Crud SET ckey = :c, pkey = :pk, qty = 1, price = 9.99",
+                  params={"c": int(i), "pk": int(pkey)})
+
+    def crud_read(self, i):
+        # /query, as olap above (F163): the embedded twin reads with no transaction.
+        return self._query("SELECT ckey, pkey, qty FROM Crud WHERE ckey = :c", params={"c": int(i)})
+
+    def crud_update(self, i):
+        self._cmd("UPDATE Crud SET qty = 2 WHERE ckey = :c", params={"c": int(i)})
+
+    def crud_delete(self, i):
+        self._cmd("DELETE FROM Crud WHERE ckey = :c", params={"c": int(i)})
+
+    def crud_scan(self):
+        return self._cmd("SELECT ckey, pkey, qty FROM Crud LIMIT 1000000")
+
+    def oltp_scan(self):
+        return self._cmd("SELECT okey, pkey, qty, paid FROM OrderNew LIMIT 1000000")
+
+    def stock_scan(self):
+        return self._cmd("SELECT p_partkey, stock FROM Part WHERE stock <> 100 LIMIT 1000000")
+
+    def payments_n(self):
+        r = self._cmd("SELECT count(*) AS n FROM Payment")
+        return (r[0].get("n") if r else 0) or 0
+
+    def close(self):
+        pass
+
+
+# The buffer-pool ablation reuses this adapter unchanged. Only the SERVER
+# container differs (shared_buffers and friends sized from its memory cap
+# instead of left at the image's start-anywhere defaults), and that is set by
+# runner.py's server_cmd, not by anything on this side of the wire. Making it
+# a subclass rather than a second entry pointing at the same class keeps
+# argparse's --backend choices honest: the runner passes the arm's name down,
+# and a name the lane script does not know must fail loudly, which is how this
+# ablation's first smoke run failed in 19 seconds instead of eight hours.
+class PostgresTunedTPC(PostgresTPC):
+    name = "postgres_tuned"
+
+
+class CrateTPC:
+    """CrateDB 6.4.6 over the PostgreSQL wire (2026-10-23, the multi-model comparator batch): the ANALYTICS table only.
+
+    CrateDB has no multi-statement transaction (a statement is its unit), so new-order and payment cannot be written as one
+    ACID transaction and the arm is registered for the `olap` workload alone (runner.ARM_RUNS; COMPARATORS.md "Not added, and
+    why"). The lineitem and part tables are loaded exactly as the PostgreSQL arm loads them (same columns, same batches, same
+    types: DOUBLE for the money columns, a TIMESTAMP for the ship date); the five queries are the DuckDB texts, which CrateDB's
+    SQL runs unchanged. The load is `INSERT ... SELECT * FROM unnest(<one array per column>)`, one statement per streamed
+    batch, because the PostgreSQL wire has no COPY (cratedb_common.py).
+
+    SETTINGS, each with its vendor source in COMPARATORS.md and read back onto the row (cratedb_common.readback): one shard per
+    CPU of the cell, no replica, the translog durability of the cell's class, the engine's default refresh followed by one
+    explicit REFRESH TABLE inside the build timer. INDEXES: CrateDB indexes every column automatically (the engine default), so there is no index step to time
+    (`index_before_load`); the decision, and the measurement it still owes, are in fairness_check.INDEX_DECISIONS. The engine's own ANALYZE (table statistics for its planner) is the counterpart of the
+    PostgreSQL arm's ANALYZE and is in the build timer too.
+    """
+    name = "cratedb_tpc"
+    index_before_load = True
+
+    def connect(self):
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), "pg_client_path": "unnest_insert"}
+        import cratedb_common
+        self.cc = cratedb_common
+        self.cx = cratedb_common.connect()
+        with self.cx.cursor() as c:
+            c.execute("SELECT version()")
+            self.version = c.fetchone()[0].split(" (")[0]
+
+    def _unnest(self, cur, table, cols, types, arrays, casts=None):
+        """One bulk statement: INSERT INTO table (cols) SELECT * FROM unnest(arrays); `casts` wraps a column's select item."""
+        ph = ", ".join(f"%s::{t}[]" for t in types)
+        names = ", ".join(f"c{i}" for i in range(len(cols)))
+        sel = ", ".join((casts or {}).get(i, f"c{i}") for i in range(len(cols)))
+        cur.execute(f"INSERT INTO {table} ({', '.join(cols)}) SELECT {sel} FROM unnest({ph}) AS t({names})", arrays)
+
+    def build(self, li, part):
+        cur = self.cx.cursor()
+        n = self.cc.ncpu()
+        self._shards = n
+        cur.execute("CREATE TABLE lineitem (l_orderkey BIGINT, l_partkey BIGINT, l_quantity DOUBLE PRECISION, "
+                    "l_extendedprice DOUBLE PRECISION, l_discount DOUBLE PRECISION, l_returnflag TEXT, l_linestatus TEXT, "
+                    "l_shipdate TIMESTAMP WITHOUT TIME ZONE, l_shipmode TEXT, l_tax DOUBLE PRECISION) "
+                    + self.cc.with_clause(n))
+        cols = ["l_orderkey", "l_partkey", "l_quantity", "l_extendedprice", "l_discount", "l_returnflag", "l_linestatus",
+                "l_shipdate", "l_shipmode", "l_tax"]
+        types = ["bigint", "bigint", "double precision", "double precision", "double precision", "text", "text", "text",
+                 "text", "double precision"]
+        casts = {7: "CAST(c7 AS TIMESTAMP WITHOUT TIME ZONE)"}
+        for df in li.frames():
+            self._unnest(cur, "lineitem", cols, types, [df[c].tolist() for c in cols], casts)
+        cur.execute("CREATE TABLE part (p_partkey BIGINT PRIMARY KEY, p_retailprice DOUBLE PRECISION, stock INT DEFAULT 100) "
+                    + self.cc.with_clause(1))
+        for i in range(0, len(part), BATCH):
+            ch = part.iloc[i:i + BATCH]
+            self._unnest(cur, "part", ["p_partkey", "p_retailprice"], ["bigint", "double precision"],
+                         [ch["p_partkey"].tolist(), ch["p_retailprice"].tolist()])
+        # the vendor's settle step: every row visible, then the planner's statistics (the PostgreSQL arm's ANALYZE)
+        self.cc.refresh(self.cx, "lineitem")
+        self.cc.refresh(self.cx, "part")
+        cur.execute("ANALYZE")
+        # READ BACK, after the load and before any timed query: the table's own shards, replicas, translog settings
+        _v, extra, self.durability = self.cc.readback(self.cx, "lineitem", self._shards)
+        self.row_extra = {**self.row_extra, **extra}
+
+    def olap(self, which):
+        cur = self.cx.cursor()
+        cur.execute(CRATE_OLAP[which])
+        return cur.fetchall()
+
+    def close(self):
+        self.cx.close()
+
+
+class ArangoTPC:
+    """ArangoDB 3.12.11 served through python-arango (2026-09-13): lineitem
+    and part as collections through the bulk import API, ISO-text dates like
+    the MongoDB arm, Q1/Q6 in AQL, new-order as one stream transaction (read
+    the part, insert the order, decrement the stock). Server only: the
+    driver is an HTTP client and the engine has no in-process mode."""
+    name = "arangodb_tpc"
+    durability = arango_common.DURABILITY
+
+    def connect(self):
+        self.cl, self.db, self.version = arango_common.connect()
+
+    def build(self, li, part):
+        # waitForSync on the collections the timed writes touch (DECISIONS #90);
+        # the two bulk-loaded ones stay at the default, because #90 keeps bulk
+        # ingest at one setting.
+        _sync = arango_common.sync_flag()
+        lc = self.db.create_collection("lineitem")
+        pc = self.db.create_collection("part")
+        self.db.create_collection("orders_new", sync=_sync)
+        self.db.create_collection("payments", sync=_sync)
+        self.db.create_collection("crud", sync=_sync)
+        buf = []
+        for t in li.rows():
+            buf.append(dict(zip(LI_COLS, t)))
+            if len(buf) >= 50_000:
+                lc.import_bulk(buf); buf = []
+        if buf:
+            lc.import_bulk(buf)
+        pc.import_bulk([{"_key": str(int(k)), "p_partkey": int(k), "p_retailprice": float(v), "stock": 100}
+                        for k, v in part[["p_partkey", "p_retailprice"]].itertuples(index=False, name=None)])
+        # NO l_shipdate INDEX HERE, and like SQLite's this is a measurement
+        # rather than an omission (BUGS F98). ArangoDB had a persistent index
+        # on that field, and its planner takes it: the plan goes from an
+        # EnumerateCollectionNode to an IndexNode and Q6 gets SLOWER, 684 ms
+        # against 881 ms at 1M documents on 2026-09-22. At 14% selectivity on
+        # shipdate the index lookup plus a document fetch per candidate costs
+        # more than the scan it replaces, and ArangoDB has no hint-free way to
+        # decline an index it owns. The OLTP path is untouched: those lookups
+        # go through _key, which is the primary index.
+        #
+        # This one was missed in the first pass of the audit because ArangoDB
+        # spells it `add_index` and the scan looked for `create_index`, so the
+        # arm read as having none. The measurement was taken against a
+        # collection with no index and compared to one with it, which is the
+        # right experiment for the wrong reason: the lane was running the slow
+        # side of it the whole time.
+        # Read back from the collection the timed writes touch (#90).
+        self.durability = arango_common.durability_readback(self.db, "orders_new")
+
+    Q1 = ("FOR l IN lineitem FILTER l.l_shipdate <= '1998-09-02' "
+          "COLLECT f = l.l_returnflag, s = l.l_linestatus "
+          "AGGREGATE sum_qty = SUM(l.l_quantity), sum_base = SUM(l.l_extendedprice), "
+          "sum_disc = SUM(l.l_extendedprice * (1 - l.l_discount)), "
+          "sum_charge = SUM(l.l_extendedprice * (1 - l.l_discount) * (1 + l.l_tax)), "
+          "avg_qty = AVG(l.l_quantity), avg_price = AVG(l.l_extendedprice), avg_disc = AVG(l.l_discount), n = COUNT(1) "
+          "SORT f, s RETURN {f, s, sum_qty, sum_base, sum_disc, sum_charge, avg_qty, avg_price, avg_disc, n}")
+    Q6 = ("FOR l IN lineitem FILTER l.l_shipdate >= '1994-01-01' AND l.l_shipdate < '1995-01-01' "
+          "AND l.l_discount >= 0.05 AND l.l_discount <= 0.07 AND l.l_quantity < 24 "
+          "COLLECT AGGREGATE revenue = SUM(l.l_extendedprice * l.l_discount), n = COUNT(1) "
+          "RETURN {revenue, n}")
+
+    OLAP = {
+        "top_parts": ("FOR l IN lineitem COLLECT k = l.l_partkey "
+                      "AGGREGATE rev = SUM(l.l_extendedprice * (1 - l.l_discount)) "
+                      "SORT rev DESC, k ASC LIMIT 10 RETURN {k, rev}"),
+        "ship_mode": "FOR l IN lineitem COLLECT m = l.l_shipmode WITH COUNT INTO n SORT m RETURN {m, n}",
+        "by_month": ("FOR l IN lineitem COLLECT m = SUBSTRING(l.l_shipdate, 0, 7) "
+                     "AGGREGATE rev = SUM(l.l_extendedprice * (1 - l.l_discount)), n = COUNT(1) "
+                     "SORT m RETURN {m, rev, n}"),
+    }
+
+    def olap(self, which):
+        q = {"q1": self.Q1, "q6": self.Q6}.get(which) or self.OLAP[which]
+        return list(self.db.aql.execute(q, batch_size=10_000))
+
+    def new_order(self, i, pkey):
+        txn = self.db.begin_transaction(write=["part", "orders_new"])
+        try:
+            txn.collection("part").get(str(pkey))
+            txn.collection("orders_new").insert({"_key": str(i), "okey": i, "pkey": pkey, "qty": 1, "paid": 0})
+            txn.aql.execute("LET p = DOCUMENT('part', @k) UPDATE p WITH {stock: p.stock - 1} IN part",
+                            bind_vars={"k": str(pkey)})
+            txn.commit_transaction()
+        except Exception:
+            txn.abort_transaction()
+            raise
+
+    def payment(self, okey):
+        txn = self.db.begin_transaction(write=["orders_new", "payments"])
+        try:
+            o = txn.collection("orders_new").get(str(okey)) or {}
+            txn.aql.execute("LET o = DOCUMENT('orders_new', @k) UPDATE o WITH {paid: 1} IN orders_new",
+                            bind_vars={"k": str(okey)})
+            txn.collection("payments").insert({"okey": okey, "pkey": o.get("pkey", 0), "amount": 1.0})
+            txn.commit_transaction()
+        except Exception:
+            txn.abort_transaction()
+            raise
+
+    # The four single-record operations (#82a). One document operation is one
+    # transaction in ArangoDB, so no stream transaction is opened around it.
+    def crud_insert(self, i, pkey):
+        self.db.collection("crud").insert(
+            {"_key": str(i), "ckey": i, "pkey": pkey, "qty": 1, "price": 9.99})
+
+    def crud_read(self, i):
+        doc = self.db.collection("crud").get(str(i))
+        return [doc] if doc else []
+
+    def crud_update(self, i):
+        self.db.collection("crud").update({"_key": str(i), "qty": 2})
+
+    def crud_delete(self, i):
+        self.db.collection("crud").delete(str(i))
+
+    def crud_scan(self):
+        return list(self.db.aql.execute(
+            "FOR c IN crud RETURN {ckey: c.ckey, pkey: c.pkey, qty: c.qty}", batch_size=10_000))
+
+    def oltp_scan(self):
+        return list(self.db.aql.execute(
+            "FOR o IN orders_new RETURN {okey: o.okey, pkey: o.pkey, qty: o.qty, paid: o.paid}",
+            batch_size=10_000))
+
+    def stock_scan(self):
+        return list(self.db.aql.execute(
+            "FOR p IN part FILTER p.stock != 100 RETURN {p_partkey: p.p_partkey, stock: p.stock}",
+            batch_size=10_000))
+
+    def payments_n(self):
+        return self.db.collection("payments").count()
+
+    def close(self):
+        arango_common.close(self.cl)
+
+
+# THE SENSITIVITY ARM AT THE IMAGE'S OWN JVM DEFAULTS (CAMPAIGN 7 row 69). The
+# adapter is the served arm's, unchanged: only the SERVER container differs (it is
+# started without ARCADEDB_OPTS_MEMORY and ARCADEDB_OPTS_GC, runner.py
+# `_at_image_jvm_defaults`), so the heap and the collector are the image's and
+# nothing on this side of the wire changes. A subclass, like the tuned PostgreSQL
+# arm above, so argparse's --backend choices stay honest.
+class ArcadeServerImgDefaultsTPC(ArcadeServerTPC):
+    name = "arcadedb_imgdefaults_server"
+
+
+class RedisTPC:
+    """Redis 8.10.2 served (2026-10-23, the multi-model comparator batch): the documents model is JSON (RedisJSON, built into the
+    official image) and the analytics are the Redis Query Engine's FT.AGGREGATE, the vendor's own aggregation pipeline.
+
+    LAYOUT. One JSON document per line item (`li:<n>`, the LI_COLS plus `l_shipdate_n`, the date as the integer YYYYMMDD, which
+    is the numeric key the engine's range index needs; the ISO text `l_shipdate` stays beside it as on every other arm), one per
+    part (`part:<partkey>`, with the stock counter), order (`ord:<okey>`), payment (`pay:<seq>`) and single-record row
+    (`crud:<ckey>`). The record key IS the id index (as the dense arm's), so no id index is built.
+
+    INDEX. One `FT.CREATE ... ON JSON PREFIX 1 li:` after the load, inside the index timer like every arm that indexes after the
+    load, and the wait for the background indexer to drain is inside it too. `l_shipdate_n`, `l_discount` and `l_quantity` are
+    NUMERIC (the Q1 and Q6 filters), and the fields the aggregations read are SORTABLE, which is the vendor's rule for FT.AGGREGATE
+    (a field that is not SORTABLE is LOADed from the document, key by key). Q1 and Q6 filter in the query string, so the date
+    range is served by the numeric index as MongoDB's l_shipdate index serves its match.
+
+    QUERIES (all five of the lane, none dropped). Each is one FT.AGGREGATE: APPLY for the revenue expressions, GROUPBY with the
+    REDUCE functions SUM, AVG and COUNT, SORTBY with the same total order the other arms use. `TIMEOUT 0` on every query (the
+    default `search-timeout` is 500 ms, and on a timeout the engine would hand back a PARTIAL answer; the server also runs
+    `--search-on-timeout fail`, so a timeout is an error and never a short answer).
+
+    TRANSACTIONS. new-order and payment are optimistic transactions, the vendor's documented form: WATCH the key read, read it, then
+    MULTI / JSON.SET / JSON.NUMINCRBY / EXEC. Atomic and isolated; durable per the cell's class (appendfsync always syncs the EXEC
+    before it is acknowledged). THERE IS NO ROLLBACK: a command that fails inside EXEC does not undo the others. This workload
+    has no abort path (every transaction commits), so rollback is never exercised, and the row says so in `redis_txn_model`.
+    The single-record operations are single commands, atomic by themselves.
+    """
+    name = "redis_tpc"
+    durability = bench_common.DURABILITY_REDIS
+    index_before_load = False
+    INDEX = "li"
+    LOAD_BATCH = 50_000           # MongoDB's insert_many batch: the closest document arm
+    TXN_MODEL = "WATCH + MULTI/EXEC: atomic and isolated, no rollback; the workload has no abort path"
+
+    def connect(self):
+        import redis
+        import importlib.metadata as _md
+        self.r = redis.Redis(host=os.environ["BENCH_SERVER_HOST"], port=int(os.environ.get("BENCH_SERVER_PORT", "6379")),
+                             socket_timeout=3600, protocol=2)
+        self.version = "redis:" + self.r.info("server")["redis_version"]
+
+        def _cfg(name):
+            v = self.r.config_get(name)
+            return v.get(name) if isinstance(v, dict) else v
+        mods = {}
+        for m in self.r.module_list():
+            m = {(k.decode() if isinstance(k, bytes) else k): v for k, v in m.items()}
+            n = m.get("name")
+            mods[n.decode() if isinstance(n, bytes) else n] = m.get("ver")
+        self.row_extra = {
+            "driver_version": f"redis-py:{_md.version('redis')}",
+            "redis_io_threads": _cfg("io-threads"),
+            "redis_search_workers": _cfg("search-workers"),
+            "redis_maxmemory": _cfg("maxmemory"),
+            "redis_maxmemory_policy": _cfg("maxmemory-policy"),
+            "redis_search_on_timeout": _cfg("search-on-timeout"),
+            "redis_search_module": mods.get("search"),
+            "redis_json_module": mods.get("ReJSON"),
+            "redis_protocol": 2,
+            "redis_txn_model": self.TXN_MODEL,
+        }
+        ao, fsync, save = (_cfg(k) for k in ("appendonly", "appendfsync", "save"))
+        if ao == "no" and save == "3600 1 300 100 60 10000":
+            self.durability = bench_common.DURABILITY_REDIS
+        elif ao == "yes" and fsync == "always":
+            self.durability = bench_common.DURABILITY_REDIS_STRICT
+        else:
+            self.durability = f"appendonly={ao}, appendfsync={fsync}, save={save!r}, which is neither class (DECISIONS #90)"
+        self._pay_seq = 0
+
+    @staticmethod
+    def _date_n(s):
+        return int(s[:4]) * 10000 + int(s[5:7]) * 100 + int(s[8:10])
+
+    def build(self, li, part):
+        r = self.r
+        r.flushall()
+        enc = json.JSONEncoder(default=lambda o: o.item()).encode
+        seq = 0
+        pipe = r.pipeline(transaction=False)
+        for t in li.rows():
+            d = dict(zip(LI_COLS, t))
+            d["l_shipdate_n"] = self._date_n(d["l_shipdate"])
+            pipe.execute_command("JSON.SET", f"li:{seq}", "$", enc(d))
+            seq += 1
+            if seq % self.LOAD_BATCH == 0:
+                pipe.execute()
+        pipe.execute()
+        pipe = r.pipeline(transaction=False)
+        n = 0
+        for k, v in part[["p_partkey", "p_retailprice"]].itertuples(index=False, name=None):
+            pipe.execute_command("JSON.SET", f"part:{int(k)}", "$",
+                                 enc({"p_partkey": int(k), "p_retailprice": float(v), "stock": STOCK_START}))
+            n += 1
+            if n % self.LOAD_BATCH == 0:
+                pipe.execute()
+        pipe.execute()
+        with index_timer(self):
+            r.execute_command(
+                "FT.CREATE", self.INDEX, "ON", "JSON", "PREFIX", "1", "li:", "SCHEMA",
+                "$.l_shipdate_n", "AS", "ship", "NUMERIC",
+                "$.l_discount", "AS", "disc", "NUMERIC", "SORTABLE",
+                "$.l_quantity", "AS", "qty", "NUMERIC", "SORTABLE",
+                "$.l_extendedprice", "AS", "price", "NUMERIC", "SORTABLE",
+                "$.l_tax", "AS", "tax", "NUMERIC", "SORTABLE",
+                "$.l_partkey", "AS", "partkey", "NUMERIC", "SORTABLE",
+                "$.l_returnflag", "AS", "rflag", "TAG", "SORTABLE",
+                "$.l_linestatus", "AS", "lstatus", "TAG", "SORTABLE",
+                "$.l_shipmode", "AS", "smode", "TAG", "SORTABLE",
+                "$.l_shipdate", "AS", "sdate", "TAG", "SORTABLE")
+            self._await_indexed()
+
+    def _await_indexed(self, timeout_s=36000):
+        t = time.perf_counter()
+        while True:
+            s = self.r.info("search")
+            raw = self.r.execute_command("FT.INFO", self.INDEX)
+            raw = raw if isinstance(raw, dict) else {raw[i]: raw[i + 1] for i in range(0, len(raw), 2)}
+            info = {(k.decode() if isinstance(k, bytes) else k): v for k, v in raw.items()}
+            if (int(s.get("search_total_active_write_threads", 0) or 0) == 0
+                    and int(s.get("search_number_of_active_indexes_indexing", 0) or 0) == 0
+                    and float(info.get("percent_indexed", 1) or 1) >= 1.0):
+                self.index_docs = int(float(info.get("num_docs", 0) or 0))
+                return
+            if time.perf_counter() - t > timeout_s:
+                raise RuntimeError(f"redis: index not drained after {timeout_s} s: {info}")
+            time.sleep(0.2)
+
+    def _readback(self):
+        """The count the engine indexed, read back after the build: it must equal the rows the stream delivered."""
+        return {"redis_index_docs": self.index_docs}
+    index_readback = _readback    # the lane's main stamps what an arm read back through this name
+
+    # --- the five analytics queries -------------------------------------------------------------------------------------
+    _DISC = "@price*(1-@disc)"
+
+    def _agg(self, query, *pipeline):
+        res = self.r.execute_command("FT.AGGREGATE", self.INDEX, query, *pipeline, "TIMEOUT", "0", "DIALECT", "2")
+        out = []
+        for row in res[1:]:
+            d = {(row[i].decode() if isinstance(row[i], bytes) else row[i]): row[i + 1] for i in range(0, len(row), 2)}
+            out.append(d)
+        return out
+
+    @staticmethod
+    def _s(v):
+        return v.decode() if isinstance(v, bytes) else v
+
+    def _q1(self):
+        rows = self._agg(
+            "@ship:[-inf 19980902]",
+            "APPLY", self._DISC, "AS", "dp", "APPLY", f"{self._DISC}*(1+@tax)", "AS", "ch",
+            "GROUPBY", "2", "@rflag", "@lstatus",
+            "REDUCE", "SUM", "1", "@qty", "AS", "sum_qty", "REDUCE", "SUM", "1", "@price", "AS", "sum_base",
+            "REDUCE", "SUM", "1", "@dp", "AS", "sum_disc", "REDUCE", "SUM", "1", "@ch", "AS", "sum_charge",
+            "REDUCE", "AVG", "1", "@qty", "AS", "avg_qty", "REDUCE", "AVG", "1", "@price", "AS", "avg_price",
+            "REDUCE", "AVG", "1", "@disc", "AS", "avg_disc", "REDUCE", "COUNT", "0", "AS", "n",
+            "SORTBY", "4", "@rflag", "ASC", "@lstatus", "ASC", "MAX", "100")
+        return [(self._s(d["rflag"]), self._s(d["lstatus"]), float(d["sum_qty"]), float(d["sum_base"]), float(d["sum_disc"]),
+                 float(d["sum_charge"]), float(d["avg_qty"]), float(d["avg_price"]), float(d["avg_disc"]), int(d["n"]))
+                for d in rows]
+
+    def _q6(self):
+        rows = self._agg(
+            "@ship:[19940101 19941231] @disc:[0.05 0.07] @qty:[-inf (24]",
+            "APPLY", "@price*@disc", "AS", "rv",
+            "GROUPBY", "0", "REDUCE", "SUM", "1", "@rv", "AS", "revenue", "REDUCE", "COUNT", "0", "AS", "n")
+        return [(float(d["revenue"]), int(d["n"])) for d in rows]
+
+    def _top_parts(self):
+        rows = self._agg(
+            "*", "APPLY", self._DISC, "AS", "dp",
+            "GROUPBY", "1", "@partkey", "REDUCE", "SUM", "1", "@dp", "AS", "rev",
+            "SORTBY", "4", "@rev", "DESC", "@partkey", "ASC", "MAX", "10")
+        return [(int(float(d["partkey"])), float(d["rev"])) for d in rows]
+
+    def _ship_mode(self):
+        rows = self._agg("*", "GROUPBY", "1", "@smode", "REDUCE", "COUNT", "0", "AS", "n",
+                         "SORTBY", "2", "@smode", "ASC", "MAX", "100")
+        return [(self._s(d["smode"]), int(d["n"])) for d in rows]
+
+    def _by_month(self):
+        rows = self._agg(
+            "*", "APPLY", self._DISC, "AS", "dp", "APPLY", "substr(@sdate,0,7)", "AS", "m",
+            "GROUPBY", "1", "@m", "REDUCE", "SUM", "1", "@dp", "AS", "rev", "REDUCE", "COUNT", "0", "AS", "n",
+            "SORTBY", "2", "@m", "ASC", "MAX", "1000")
+        return [(self._s(d["m"]), float(d["rev"]), int(d["n"])) for d in rows]
+
+    def olap(self, which):
+        return {"q1": self._q1, "q6": self._q6, "top_parts": self._top_parts,
+                "ship_mode": self._ship_mode, "by_month": self._by_month}[which]()
+
+    # --- the two transactions (WATCH, read, MULTI, write, EXEC) --------------------------------------------------------
+    def new_order(self, i, pkey):
+        pk, ok = f"part:{pkey}", f"ord:{i}"
+        with self.r.pipeline() as p:
+            p.watch(pk)
+            p.execute_command("JSON.GET", pk, "$.p_retailprice", "$.stock")
+            p.multi()
+            p.execute_command("JSON.SET", ok, "$", json.dumps({"okey": i, "pkey": pkey, "qty": 1, "paid": 0}))
+            p.execute_command("JSON.NUMINCRBY", pk, "$.stock", -1)
+            p.execute()
+
+    def payment(self, okey):
+        ok = f"ord:{okey}"
+        with self.r.pipeline() as p:
+            p.watch(ok)
+            o = p.execute_command("JSON.GET", ok, "$.pkey", "$.qty")
+            pkey = (json.loads(o).get("$.pkey") or [0])[0] if o else 0
+            p.multi()
+            p.execute_command("JSON.SET", ok, "$.paid", "1")
+            p.execute_command("JSON.SET", f"pay:{self._pay_seq}", "$", json.dumps({"okey": okey, "pkey": pkey, "amount": 1.0}))
+            p.execute()
+        self._pay_seq += 1
+
+    # --- the four single-record operations: single commands, atomic by themselves --------------------------------------
+    def crud_insert(self, i, pkey):
+        self.r.execute_command("JSON.SET", f"crud:{i}", "$", json.dumps({"ckey": i, "pkey": pkey, "qty": 1, "price": 9.99}))
+
+    def crud_read(self, i):
+        v = self.r.execute_command("JSON.GET", f"crud:{i}", "$.ckey", "$.pkey", "$.qty")
+        if not v:
+            return []
+        d = json.loads(v)
+        return [(d["$.ckey"][0], d["$.pkey"][0], d["$.qty"][0])]
+
+    def crud_update(self, i):
+        self.r.execute_command("JSON.SET", f"crud:{i}", "$.qty", "2")
+
+    def crud_delete(self, i):
+        self.r.delete(f"crud:{i}")
+
+    # --- untimed read-backs (the post-state digests) -------------------------------------------------------------------
+    def _scan(self, prefix, *paths):
+        keys = sorted(self.r.scan_iter(match=f"{prefix}*", count=10_000))
+        out = []
+        for lo in range(0, len(keys), 5_000):
+            chunk = keys[lo:lo + 5_000]
+            pipe = self.r.pipeline(transaction=False)
+            for k in chunk:
+                pipe.execute_command("JSON.GET", k, *paths)
+            for v in pipe.execute():
+                if v:
+                    out.append(json.loads(v))
+        return out
+
+    def crud_scan(self):
+        return [(d["$.ckey"][0], d["$.pkey"][0], d["$.qty"][0]) for d in self._scan("crud:", "$.ckey", "$.pkey", "$.qty")]
+
+    def oltp_scan(self):
+        return [(d["$.okey"][0], d["$.pkey"][0], d["$.qty"][0], d["$.paid"][0])
+                for d in self._scan("ord:", "$.okey", "$.pkey", "$.qty", "$.paid")]
+
+    def stock_scan(self):
+        return [(d["$.p_partkey"][0], d["$.stock"][0]) for d in self._scan("part:", "$.p_partkey", "$.stock")
+                if d["$.stock"][0] != STOCK_START]
+
+    def payments_n(self):
+        return sum(1 for _ in self.r.scan_iter(match="pay:*", count=10_000))
+
+    def close(self):
+        self.r.close()
+
+
+BACKENDS = {c.name: c for c in (DuckTPC, SQLiteTPC, MongoTPC, SurrealTPC, SurrealServedTPC, ArangoTPC, PostgresTPC, PostgresTunedTPC, CrateTPC,
+                                ArcadeTPC, ArcadeServerTPC, ArcadeServerImgDefaultsTPC, RedisTPC)}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backend", required=True, choices=list(BACKENDS))
+    ap.add_argument("--workload", required=True, choices=["oltp", "olap"])
+    ap.add_argument("--scale", default="tpch1")
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    # PHASE MARKERS (2026-09-14, same pattern as l3d_dense): a cell that dies
+    # names the phase it was in. Entered and left AROUND the timed work, never
+    # inside a timed loop.
+    _beat = bench_common.PhaseBeat()
+    _beat.mark("corpus-load-start", sf=SF, backend=args.backend)
+    li, part = load_lineitems(), load_part()
+    _beat.mark("corpus-loaded", n_lineitem=len(li), n_part=len(part))
+    out = {"n_lineitem": len(li), "n_part": len(part), "tpch_sf": SF,
+           "li_batch_rows": LI_BATCH_ROWS, "li_row_groups": li.n_row_groups}
+
+    b = BACKENDS[args.backend]()
+    with _beat.phase("connect", backend=args.backend):
+        b.connect()
+    out["engine_version"] = b.version
+    out["engine_backend"] = bench_common.engine_backend()
+    t0 = time.perf_counter()
+    with _beat.phase("build", n=len(li)):
+        b.build(li, part)
+    out["build_s"] = round(time.perf_counter() - t0, 2)
+    # THE SPLIT (FAIRNESS F14). build_s is the whole of build(); index_s is
+    # what the index DDL inside it cost, accumulated by index_timer; ingest is
+    # the remainder. An arm that builds no index reports 0.0, which is a
+    # statement rather than a gap -- F14 records WHY it builds none, and the
+    # two arms that build none here do so because the index measurably costs
+    # them. `index_before_load` marks the arm whose index cannot be timed as a
+    # step because it exists before the first row lands, so the page can say
+    # that instead of printing a near-zero that reads as free.
+    out["ingest_s"], out["index_s"], out["index_before_load"] = \
+        bench_common.index_split(b, out["build_s"])
+    # COUNTED, not asserted: the stream must have delivered every row the
+    # file holds, or the row would publish a per-second figure over a partial
+    # load under the tier's label (the l2 lane's shortfall rule).
+    out["n_lineitem_streamed"] = li.n_streamed
+    out["li_batches"] = li.n_batches
+    if getattr(b, "load_batch", None):
+        out["served_load_batch"] = b.load_batch
+    # The index kinds the engine built (an ArcadeDB arm; CAMPAIGN 7 row 68), after the build
+    # timer has stopped and before any timed operation.
+    if hasattr(b, "index_readback"):
+        b.row_extra = {**(getattr(b, "row_extra", None) or {}), **b.index_readback()}
+    # Settings an arm read back from its engine (the DuckDB thread pool today;
+    # CAMPAIGN section 7 row 21).
+    out.update(getattr(b, "row_extra", None) or {})
+    # item 10's embedded bulk path, as the executor reported it (not as asked)
+    for _k in ("lineitem_buckets", "async_writers", "async_sync", "load_call_rows", "columnar_insert"):
+        if getattr(b, _k, None) is not None:
+            out[_k] = getattr(b, _k)
+    if li.n_streamed != len(li):
+        raise SystemExit(
+            f"streamed {li.n_streamed:,} line items against {len(li):,} in "
+            f"{li.path}: the load is short, so every per-second figure in this "
+            f"row is wrong.")
+
+    # `durability` (what the engine runs), `durability_class` (what the cell
+    # asked for), and `durability_no_setting` (this engine has no knob), all
+    # from one place (DECISIONS #90).
+    bench_common.stamp_durability(out, getattr(b, "durability", None))
+    out["instrument"] = bench_common.INSTRUMENT
+    # BUILD-ONLY MODE (post1_rows.py, runner.py --build-only): stop here, after build() and before any timed work, and write the row
+    # marked row_kind=build_only. Unset by default, so nothing below changes for any run that does not ask for it.
+    if os.environ.get("BENCH_BUILD_ONLY") == "1":
+        import post1_rows
+        post1_rows.finish_build_only(out, args.out, b)
+    if args.workload == "olap":
+        out["olap_iters"] = OLAP_ITER
+        # THE Q1 THIS ROW RAN (row 57, BUGS F170): all ten of TPC-H Q1's output columns. The page's
+        # "the lane's Q1 has seven of its ten columns" sentence retires per row from this field.
+        out[TPCH_Q1_FIELD] = TPCH_Q1
+        for which in OLAP_QUERIES:
+            times = []
+            ref = None
+            _budget_s, _budget_src = budget_lookup.budget_for(
+                "l1tpc", args.scale, which, OLAP_BUDGET_S, "BENCH_DOCS_OLAP_BUDGET_S",
+                n_queries=len(OLAP_QUERIES))
+            _beat.mark(f"query-{which}-start", iters=OLAP_ITER, budget_s=_budget_s)
+            # THE BUDGET STARTS BEFORE THE COLD PASS (#82b, #100): the first
+            # iteration IS the cold pass and always runs, so a censored query
+            # still carries a measurement and its answer digest.
+            _budget_t0 = time.perf_counter()
+            _ran = 0
+            _aband_why = ""
+            for _ in range(OLAP_ITER):
+                if _ran and time.perf_counter() - _budget_t0 > _budget_s:
+                    break
+                # After the cold pass, abandon rather than spend the whole
+                # budget proving what it already showed (DECISIONS #107).
+                if _ran == 1:
+                    _a, _aband_why = budget_lookup.abandon(
+                        time.perf_counter() - _budget_t0, _budget_s, OLAP_ITER)
+                    if _a:
+                        break
+                t = time.perf_counter()
+                r = b.olap(which)
+                _ran += 1
+                # The sample is dropped when the connection broke while it was
+                # being taken (DECISIONS #91); every other engine keeps it.
+                surreal_common.keep(b, times, (time.perf_counter() - t) * 1000)
+                ref = r
+            # Censored is counted on iterations RUN, not samples KEPT, so a
+            # sample #91 dropped cannot read as a budget the engine did not hit.
+            out[f"{which}_budget_s"] = _budget_s
+            out[f"{which}_budget_source"] = _budget_src
+            if _aband_why:
+                out[f"{which}_abandoned"] = _aband_why
+            out[f"{which}_iters"] = len(times)
+            out[f"{which}_elapsed_s"] = round(time.perf_counter() - _budget_t0, 2)
+            out[f"{which}_censored"] = _ran < OLAP_ITER
+            if out[f"{which}_censored"]:
+                _beat.mark(f"query-{which}-censored", iters=_ran, budget_s=_budget_s,
+                           elapsed_s=out[f"{which}_elapsed_s"])
+            out[f"{which}_ms"] = round(statistics.median(times), 2)
+            _s = sorted(times)
+            out[f"{which}_p99_ms"] = round(_s[max(0, int(0.99 * (len(_s) - 1)))], 2)
+            # COLD AND WARM, both free: this loop discards no warmup, so the
+            # published median already BLENDS the first touch with the
+            # repeats, and how much it blends depends on OLAP_ITER. Q1 and Q6
+            # are full-scan and narrow-filter reads over the same fact table,
+            # which is exactly where cache state moves a number: the graph lane
+            # measured Neo4j gaining 9.9x on a second pass while LadybugDB,
+            # resident from load, gained nothing.
+            #
+            # The published field is unchanged so existing numbers stay
+            # comparable. These two say what it is made of.
+            # COLD AND WARM AT p50 AND p99 (DECISIONS #89). The pooled p99
+            # above includes the cold iteration, which at OLAP_ITER=100 IS the
+            # 99th percentile whenever the first touch is the slowest -- so the
+            # published tail was sometimes the cold number wearing a
+            # percentile's name. One naming convention across every lane.
+            bench_common.record_cold_warm(out, which, times, digits=2)
+            # The cell's one cold number, from the first query it ran after the
+            # database opened (DECISIONS #89 as amended); setdefault inside, so
+            # only the first of these five calls sticks.
+            bench_common.record_first_query(out, which, times[0])
+            out[f"{which}_rows"] = len(ref) if ref is not None else 0
+            # THE ANSWER, not just how long it took (DECISIONS #88). Computed
+            # here, outside the timed loop, from the object the LAST timed call
+            # returned; re-running the query to digest it would digest a second
+            # execution against a different cache state.
+            bench_common.record_result(out, which, ref, **OLAP_DIGEST[which])
+            _beat.mark(f"query-{which}-done", p50=out[f"{which}_ms"],
+                       rows=out[f"{which}_rows"],
+                       digest=out[f"res_{which}_digest"])
+    else:
+        rng = random.Random(SEED)
+        keys = part["p_partkey"].tolist()
+        # THE UNTIMED WARM-UP (row 65), on keys below the timed ones: order keys 0..W-1 (the timed orders are
+        # W..W+OLTP_OPS-1), single-record keys 0..W-1 (the timed ones start at W, and the warm-up deletes its own
+        # rows, so the table the timed phases see is empty as it always was). Part keys come from the same
+        # distribution as the timed ones, from their own seeded stream so the timed stream is the one it was.
+        # The first operation of the session is the one timed here, as the cell's cold number (#89 as amended);
+        # the timed new-order i == 0 below no longer is it.
+        W = OLTP_WARMUP
+        ORDER_BASE = CRUD_BASE = W
+        if W:
+            _wrng = random.Random(SEED + 1)
+            _w0 = time.perf_counter()
+            _beat.mark("oltp-warmup-start", n=W)
+            for i in range(W):
+                _t = time.perf_counter()
+                b.new_order(i, int(keys[_wrng.randrange(len(keys))]))
+                if i == 0:
+                    bench_common.record_first_query(out, "new_order", (time.perf_counter() - _t) * 1000)
+            for _ in range(W):
+                b.payment(_wrng.randrange(W))
+            for i in range(W):
+                b.crud_insert(i, int(keys[_wrng.randrange(len(keys))]))
+            for i in range(W):
+                b.crud_read(i)
+            for i in range(W):
+                b.crud_update(i)
+            for i in range(W):
+                b.crud_delete(i)
+            out["oltp_warmup"] = W
+            out["oltp_warmup_s"] = round(time.perf_counter() - _w0, 2)
+            _beat.mark("oltp-warmup-done", t=f"{out['oltp_warmup_s']}s")
+        lat = []
+        _beat.mark("new-order-start", n=OLTP_OPS)
+        for i in range(OLTP_OPS):
+            k = keys[rng.randrange(len(keys))]
+            t = time.perf_counter()
+            b.new_order(ORDER_BASE + i, int(k))
+            _dt = (time.perf_counter() - t) * 1000
+            if i == 0:
+                # The first timed operation of the cell is this lane's cold number under #89 as amended
+                # when nothing ran before it (OLTP_WARMUP=0); setdefault, so the warm-up's first one wins.
+                bench_common.record_first_query(out, "new_order", _dt)
+            if i >= 20:
+                surreal_common.keep(b, lat, _dt)
+        lat.sort()
+        out["neworder_p50_ms"] = round(statistics.median(lat), 3)
+        out["neworder_p99_ms"] = round(lat[int(len(lat) * 0.99)], 3)
+        _beat.mark("new-order-done", n=OLTP_OPS, p50=out["neworder_p50_ms"])
+        # WHAT THE TRANSACTION LEFT BEHIND (#88). A transaction returns nothing
+        # to digest, so what is digested is the state it wrote: every order the
+        # loop placed, read back untimed. A new-order that silently inserted
+        # nothing now fails the gate instead of printing the best number on the
+        # table. Taken BEFORE the payment loop, which changes `paid`.
+        bench_common.record_result(out, "neworder", b.oltp_scan(), **OLTP_STATE_DIGEST)
+        # ...and the stock it decremented (row 58): the same transaction's other write.
+        bench_common.record_result(out, "stock", b.stock_scan(), **STOCK_DIGEST)
+        # PAYMENT (2026-10, DECISIONS #82): the same count, against the orders
+        # new-order just placed, each chosen at random so the read is not a
+        # scan of the newest page. Read the order, mark it paid, insert the
+        # payment, one transaction.
+        plat = []
+        _beat.mark("payment-start", n=OLTP_OPS)
+        for j in range(OLTP_OPS):
+            okey = ORDER_BASE + rng.randrange(OLTP_OPS)
+            t = time.perf_counter()
+            b.payment(okey)
+            if j >= 20:
+                surreal_common.keep(b, plat, (time.perf_counter() - t) * 1000)
+        plat.sort()
+        out["payment_p50_ms"] = round(statistics.median(plat), 3)
+        out["payment_p99_ms"] = round(plat[int(len(plat) * 0.99)], 3)
+        _beat.mark("payment-done", n=OLTP_OPS, p50=out["payment_p50_ms"])
+        # ops/s over BOTH transaction types since 2026-10; the September rows
+        # (new-order alone) carry the same field under the old instrument, and
+        # make_paper_tables keeps the two instruments out of one table.
+        out["oltp_ops_per_s"] = round((len(lat) + len(plat)) / ((sum(lat) + sum(plat)) / 1000), 1)
+        out["oltp_ops"] = len(lat) + len(plat)
+        # The same orders after the payments: the rows the loop marked paid are
+        # decided by the seeded rng, so the post-state is deterministic and the
+        # engines must agree on it.
+        bench_common.record_result(out, "payment", b.oltp_scan(), **OLTP_STATE_DIGEST)
+        out["payments_n"] = b.payments_n()
+        bench_common.record_result(out, "payments", [(out["payments_n"],)], **PAYMENTS_DIGEST)
+
+        # ------------------------------------------------------------------
+        # THE FOUR SINGLE-RECORD OPERATIONS (2026-10, DECISIONS #82a), 1,000 of
+        # each, run in the order a record actually lives: created, read,
+        # updated, deleted. Each phase finishes before the next starts, so the
+        # read reads rows that exist and the delete deletes rows that are there.
+        crud_pkeys = [int(keys[rng.randrange(len(keys))]) for _ in range(CRUD_OPS)]
+        crud_read_rows = []
+        CRUD_WARMUP = min(20, max(0, CRUD_OPS // 10))
+
+        def _crud_phase(label, fn, collect=False):
+            lat = []
+            _beat.mark(f"{label}-start", n=CRUD_OPS)
+            for i in range(CRUD_OPS):
+                t = time.perf_counter()
+                r = fn(i)
+                dt = (time.perf_counter() - t) * 1000
+                if i >= CRUD_WARMUP:
+                    surreal_common.keep(b, lat, dt)
+                if collect and r:
+                    crud_read_rows.extend(r)
+            lat.sort()
+            out[f"{label}_p50_ms"] = round(statistics.median(lat), 3)
+            out[f"{label}_p99_ms"] = round(lat[int(len(lat) * 0.99)], 3)
+            out[f"{label}_ops"] = CRUD_OPS
+            _beat.mark(f"{label}-done", n=CRUD_OPS, p50=out[f"{label}_p50_ms"])
+
+        _crud_phase("crud_insert", lambda i: b.crud_insert(CRUD_BASE + i, crud_pkeys[i]))
+        bench_common.record_result(out, "crud_insert", b.crud_scan(), **CRUD_DIGEST)
+        _crud_phase("crud_read", lambda i: b.crud_read(CRUD_BASE + i), collect=True)
+        # The read's digest is the VALUES THE TIMED READS RETURNED, accumulated
+        # as they came back and hashed here; the three write phases have no
+        # answer of their own and are digested by the state they left.
+        bench_common.record_result(out, "crud_read", crud_read_rows, **CRUD_READ_DIGEST)
+        _crud_phase("crud_update", lambda i: b.crud_update(CRUD_BASE + i))
+        bench_common.record_result(out, "crud_update", b.crud_scan(), **CRUD_DIGEST)
+        _crud_phase("crud_delete", lambda i: b.crud_delete(CRUD_BASE + i))
+        bench_common.record_result(out, "crud_delete", b.crud_scan(), **CRUD_DIGEST)
+
+        # DECISIONS #89: where a measurement does not apply the row says so in
+        # one clause rather than leaving a blank. Not once the operations are timed warm (row 65): the
+        # cold column is the first operation of the session, and "already warm by construction" would
+        # be false and would shadow the cold column's own sentence in export_web._cold_note.
+        if not W:
+            out["cold_warm_na"] = bench_common.NA_COLD_WARM_TXN
+
+    # TIME THE CLOSE, do not merely perform it (#155). A clean close is when
+    # compaction, writeback and WAL truncation happen: measured on 26.8.1 it
+    # settles a roughly fixed 30-87 MB, against nothing at all for an
+    # already-settled comparator. An unrecorded close is an unpriced one, and
+    # the row cannot be told apart from a lane that never settles.
+    _t = time.perf_counter()
+    with _beat.phase("close"):
+        b.close()
+    out["close_s"] = round(time.perf_counter() - _t, 3)
+    # `reconnects` on every SurrealDB row, zero when nothing happened
+    # (DECISIONS #91): a dropped connection has to be visible as a number on
+    # the row, not as a traceback in a log nobody reads until a cell dies.
+    surreal_common.stamp_reconnects(out, b)
+    # THE JPYPE THIS PROCESS RAN (CAMPAIGN 7 row 73): empty when the arm never imported it
+    # (every comparator, every served ArcadeDB client), read after the arm has run.
+    out.update(bench_common.jpype_fields())
+    out.update(bench_common.client_path_fields())
+    with open(args.out, "w") as f:
+        json.dump(out, f)
+    print("RESULT " + json.dumps(out), flush=True)
+    os._exit(0)  # JVM non-daemon threads must not keep a finished container alive
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        os._exit(1)  # guarantee container death on failure too

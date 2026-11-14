@@ -1,0 +1,1638 @@
+#!/usr/bin/env python3
+"""Check that compared systems were actually given the same thing.
+
+claims_check verifies a number against its own artifact. provenance_check
+verifies which engine produced it. Neither asks the question that found three
+defects in one afternoon on 2026-07-31: was the row NEXT TO IT given the same
+resources and the same treatment?
+
+Every number involved was correct about its own run. That is precisely why
+nothing caught them:
+
+  * T5 dense, ArcadeDB got one build and five timed passes with the table
+    using passes 2-5, while every comparator got five builds and one pass
+    each. Worth 4.0-6.1x.
+  * T5 dense, the DEEP-10M envelope was raised from 28g/16g to 36g/24g on
+    2026-07-20 and only ArcadeDB was re-measured under it. Worth 29% more
+    container memory at the scale where memory decides what stays cached.
+  * T5 time series, ArcadeDB's probe took a 30 s settle that no comparator
+    was given. Worth 2.23x one way and 2.5x the other.
+
+All three favoured us. The contract they violate is written down in
+FAIRNESS.md; this file enforces the parts a machine can.
+
+    python3 fairness_check.py
+
+Exit status is 1 if any invariant fails, so it can gate a regeneration.
+"""
+import collections
+import statistics
+import glob
+import json
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import publish_instrument  # noqa: E402
+import vendor_memory  # noqa: E402
+RESULTS = str(publish_instrument.results_dir())
+FULL_CPUSET = "0-11"
+# Fallback only. Every served row records its own mem_split; this is for the
+# handful written before that field existed. Must match runner.py's
+# SERVER_MEM_FRACTION, which is the value the containers were actually built
+# with -- a mismatch here would silently misreport the envelope rather than
+# fail, which is the failure mode this whole module exists to prevent.
+SERVER_MEM_FRACTION_DEFAULT = 0.75
+
+# Envelope deliberately not matched, with the reason. An entry here is a
+# disclosed override; anything else that differs is a defect. Keyed by
+# (lane, scale) -> {backend_substring: why}.
+# EMPTY ON PURPOSE, and that is the finding. The one entry here recorded that
+# DEEP-10M's int8 arm ran a 16 GiB heap against 24 GiB elsewhere, "and the row
+# label names the heap". Both halves stopped being true: int8 was re-measured
+# at 24 GiB like every other arm, and T5's label is "ArcadeDB (emb, int8)"
+# with no heap in it. A disclosure that outlives the thing it discloses is
+# worse than none, because it tells a reviewer to expect an asymmetry that is
+# not there and invites them to distrust the rest.
+DISCLOSED = {}
+
+# THE ONE ARM THAT DIFFERS FROM THE OTHERS ON PURPOSE (CAMPAIGN 7 row 69). Every
+# served ArcadeDB arm runs ONE JVM configuration so that the embedded-versus-served
+# comparison isolates transport: the JVM's default collector (G1) and a heap of half
+# the cell's memory as -Xmx (no -Xms, as the embedded arms). The arm below is started without those
+# settings and runs the vendor image's own defaults instead (ArcadeDB's maintainers,
+# ArcadeData/arcadedb#9167): a heap of 75% of the container limit, the generational
+# ZGC collector, and no -Xms. It changes the heap and the collector
+# together, so it is NOT comparable with the main arm's heap column and
+# it is not an F3 envelope violation: the memory CAP is the same, only the heap the
+# JVM takes inside it differs. It is declared, printed beside the main arm on one lane
+# (documents OLTP, served, the 2M-part cell), and checked against what the JVM itself
+# reports. A backend runner.BACKENDS marks `jvm_defaults` and this map does not name
+# (or the reverse) fails the gate, so an arm cannot join without saying so.
+JVM_DEFAULTS_ARMS = {
+    "arcadedb_imgdefaults_server": "the vendor image's own JVM settings (a heap of 75% of the "
+                                   "container limit, generational ZGC, no -Xms) beside the main "
+                                   "arm's G1 and half-memory -Xmx, documents OLTP, 2M parts",
+}
+
+
+def check_heap_witnesses(rows):
+    """F3c: the two witnesses of a served ArcadeDB's heap agree.
+
+    The container's environment says what the launcher passed (`server_heap`, parsed from -Xmx); the
+    running JVM says what it settled on (`server_jvm_max_heap_bytes`). Where a row has both they must be
+    the same heap (within 1%), or the setting written is not the setting in force. A row with only one
+    is judged by the other gates (the image-defaults arm has no -Xmx and only the JVM's word). Returns
+    the failure count."""
+    print("=== F3c: the heap in the container's environment is the heap the JVM runs ===")
+    bad = judged = 0
+    for r in rows:
+        env, jvm = _gib(r.get("server_heap")), jvm_reported_heap(r)
+        if not str(r.get("backend")).startswith("arcadedb") or env is None or jvm is None or r.get("error"):
+            continue
+        judged += 1
+        got = _gib(jvm)
+        if abs(got - env) > 0.01 * env:
+            print(f"  FAIL {r.get('lane')} {r.get('scale')} {r.get('workload')} {r.get('backend')} rep {r.get('rep')}: "
+                  f"the container's environment sets {r.get('server_heap')} and the running JVM reports {jvm}")
+            bad += 1
+    if not bad:
+        print(f"  ok   {judged} row(s) where both witnesses exist agree")
+    return bad
+
+
+def check_jvm_defaults_arms(rows=None):
+    """The image-defaults arm is declared, and where rows exist its JVM is what it says.
+
+    Static half (needs no rows): runner.BACKENDS marks an arm `jvm_defaults` exactly
+    when JVM_DEFAULTS_ARMS names it, and that arm's server_env sets neither
+    ARCADEDB_OPTS_MEMORY nor ARCADEDB_OPTS_GC (the whole point: the image applies its
+    own). Row half: every row of the arm carries the stamp `server_jvm_defaults` and
+    the JVM's own report of a heap of 75% of the server's cap, the generational ZGC
+    collector, and no -Xms/-Xmx on its command line; no other row claims the stamp.
+    Returns the failure count."""
+    import runner
+    print("=== F3b: the image-defaults arm is declared, and ran at the image's defaults ===")
+    bad = 0
+    marked = {n for n, c in runner.BACKENDS.items() if c.get("jvm_defaults")}
+    for n in sorted(marked - set(JVM_DEFAULTS_ARMS)):
+        print(f"  FAIL {n}: runner.BACKENDS marks it jvm_defaults and fairness_check.JVM_DEFAULTS_ARMS "
+              f"does not declare it; an arm that runs other settings than its siblings says so here")
+        bad += 1
+    for n in sorted(set(JVM_DEFAULTS_ARMS) - marked):
+        print(f"  FAIL {n}: declared in JVM_DEFAULTS_ARMS and not marked jvm_defaults in runner.BACKENDS")
+        bad += 1
+    for n in sorted(marked & set(JVM_DEFAULTS_ARMS)):
+        env = " ".join(str(x) for x in runner.BACKENDS[n].get("server_env", []))
+        leaked = [k for k in ("ARCADEDB_OPTS_MEMORY", "ARCADEDB_OPTS_GC") if k in env]
+        if leaked:
+            print(f"  FAIL {n}: sets {leaked}, so the image's defaults do not apply")
+            bad += 1
+    judged = 0
+    for r in rows or []:
+        be = str(r.get("backend"))
+        stamped = str(r.get("server_jvm_defaults")).lower() in ("true", "1")
+        if be in JVM_DEFAULTS_ARMS:
+            judged += 1
+            where = f"{r.get('lane')} {r.get('scale')} {r.get('workload')} {be} rep {r.get('rep')}"
+            if not stamped:
+                print(f"  FAIL {where}: no `server_jvm_defaults` stamp")
+                bad += 1
+                continue
+            mx, cap = r.get("server_jvm_max_heap_bytes"), _gib(r.get("server_mem_cap"))
+            try:
+                mx = float(mx)
+            except (TypeError, ValueError):
+                mx = None
+            if mx is None or cap is None or abs(mx - 0.75 * cap * (1 << 30)) > 0.02 * 0.75 * cap * (1 << 30):
+                print(f"  FAIL {where}: the JVM reports a heap of {r.get('server_jvm_max_heap_bytes')} bytes in a "
+                      f"{r.get('server_mem_cap')} container; the image default is 75% of the limit")
+                bad += 1
+            if r.get("server_jvm_gc") != "ZGC generational":
+                print(f"  FAIL {where}: collector {r.get('server_jvm_gc')!r}, the image default is generational ZGC")
+                bad += 1
+            if re.search(r"-Xm[sx]", str(r.get("server_jvm_flags") or "")):
+                print(f"  FAIL {where}: -Xms or -Xmx on the command line, so the image's defaults do not apply")
+                bad += 1
+        elif stamped:
+            print(f"  FAIL {r.get('lane')} {be}: claims `server_jvm_defaults` and is not a declared arm")
+            bad += 1
+    if not bad:
+        print(f"  ok   {len(marked)} arm(s) declared; {judged} row(s) held to the JVM's own report")
+    return bad
+
+
+# This gate opens no payload and no freeze: the instrument rule reaches it in
+# one place, _canonical() below, which is load_canonical() and therefore
+# publishes 2026-11 rows only.
+#
+# ONE HAZARD IS LEFT STANDING, deliberately. _served_envelopes() below reads
+# runs.jsonl directly and takes the NEWEST l3d deep10m row per backend, with no
+# instrument term, because the dense lane's envelopes come from a PIN-keyed
+# overlay directory (dense_mp5_<pin>), not from an instrument-stamped row;
+# filtering it by instrument made the map come back EMPTY and F3 failed every
+# dense backend at deep10m. Giving the dense overlay an instrument is its own
+# decision.
+
+
+def _canonical():
+    sys.path.insert(0, HERE)
+    import make_paper_tables as M
+    return M.load_canonical()
+
+
+def _dense_rows():
+    """The dense cells T5 actually prints, from the multipass artifacts.
+
+    Each file is one build followed by five passes, so pass 0 carries the run
+    conditions for the whole cell. Only pass 0 is taken: five passes over one
+    build are one cell's worth of envelope, not five.
+    """
+    out = []
+    # dense_mp5_2681: five INDEPENDENT builds per arm, so pass 0 of each file
+    # is one cell's conditions and there are five cells per arm, not one. The
+    # old directory held a single build per arm and needed a "_build" filter to
+    # skip the two ad-hoc reproducibility extras; here every file is a first
+    # class build and nothing is skipped.
+    import make_paper_tables as _T
+    for fp in sorted(glob.glob(os.path.join(_T.dense_mp_dir(), "mp_*_b*.json"))):
+        try:
+            d = json.load(open(fp))
+        except Exception:
+            continue
+        p0 = d[0] if isinstance(d, list) and d else d
+        if not isinstance(p0, dict) or not p0.get("backend"):
+            continue
+        r = dict(p0)
+        r["lane"] = "l3d"        # the artifacts say l3d_mp; the LANE is l3d
+        r["scale"] = "deep10m"
+        # The freeze withholds an approximate-search row whose recall is below
+        # make_paper_tables.RECALL_FLOOR (BUGS F55); the same rule here, or the
+        # gate judges a cell the page does not print.
+        try:
+            _rec = float(r.get("recall_at_10"))
+        except (TypeError, ValueError):
+            _rec = None
+        if _rec is not None and _rec < _T.RECALL_FLOOR:
+            print(f"  WITHHELD l3d deep10m {r.get('backend')}: recall@10 {_rec:.4f} below the floor; not judged, not printed")
+            continue
+        # Served arms record the client container's cap; the split is the
+        # lane's, not the row's, so name it here rather than guess later.
+        # THE ENVELOPE COMES FROM THE CAMPAIGN ROW, not from the file. The
+        # multipass driver runs inside the client container and writes what it
+        # can see: mem_cap=8g, role=client, nothing about the server side. The
+        # runner stamps server_mem_cap / server_heap / mem_split / client_mem_cap
+        # on the campaign row of the same cell AFTER the cell, from its own
+        # docker knowledge, and the driver ran inside that same envelope
+        # (runner --driver). This once patched three fp32 backends BY
+        # NAME with mem_split=0.75, so the served fp32 arm reduced to 32g, the
+        # served int8 arms to 8g, and F3 failed the tier on the pinned overlay
+        # (BUGS-20260830 F13). Now: any file whose backend has a campaign row
+        # with server_mem_cap at this scale inherits that row's server-side
+        # fields; embedded arms have none and keep their own mem_cap.
+        _srv = _served_envelopes()
+        if r.get("backend") in _srv:
+            for _k, _v in _srv[r["backend"]].items():
+                r.setdefault(_k, _v)
+        out.append(r)
+    return out
+
+
+def _served_envelopes():
+    """backend -> the server-side envelope fields of its newest l3d deep10m
+    campaign row, for every backend whose row carries server_mem_cap."""
+    if getattr(_served_envelopes, "_cache", None) is not None:
+        return _served_envelopes._cache
+    newest = {}
+    try:
+        with open(os.path.join(publish_instrument.results_dir(), "runs.jsonl")) as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("lane") != "l3d" or r.get("scale") != "deep10m" or r.get("error"):
+                    continue
+                be = r.get("backend")
+                if be not in newest or str(r.get("ts_utc")) > str(newest[be].get("ts_utc")):
+                    newest[be] = r
+    except FileNotFoundError:
+        pass
+    # server_query_max_heap_elements: the served ArcadeDB's query limit, which the runner
+    # reads from the engine for the campaign cell and the multipass driver cannot
+    # (CAMPAIGN section 7 row 21, override_registry.py).
+    #
+    # THE OVERRIDE STAMPS COME FROM THE CAMPAIGN ROW TOO, for every dense arm, embedded ones included. The multipass driver
+    # writes none of them (it measures search, the lane's adapter builds the index), so a gate that read them off the overlay
+    # file would fail every real deep10m cell as NOT STAMPED; the campaign row of the same cell is the adapter's own record.
+    import override_registry as _OV
+    _stamp_fields = {c.field for ov in _OV.OVERRIDES for c in ov.carriers if c.lane == "l3d" and c.field}
+    _stamp_fields |= {k for ov in _OV.OVERRIDES if any(c.lane == "l3d" for c in ov.carriers) for k in ov.companions}
+    keys = ("server_mem_cap", "server_heap", "mem_split", "client_mem_cap", "server_mem_cap_g", "role",
+            "server_query_max_heap_elements") + tuple(sorted(_stamp_fields))
+    _served_envelopes._cache = {be: {kk: r[kk] for kk in keys if r.get(kk) is not None} for be, r in newest.items()}
+    return _served_envelopes._cache
+
+
+def check_cpuset(rows):
+    """F1/F2: every published cell on the full cpuset, i.e. serial."""
+    print("=== F1/F2: full cpuset, serial tier ===")
+    bad = [r for r in rows
+           if str(r.get("cpuset")) not in (FULL_CPUSET, "None")]
+    seen = collections.Counter(str(r.get("cpuset")) for r in rows)
+    print(f"  cpuset distribution across {len(rows)} canonical rows: {dict(seen)}")
+    if bad:
+        print(f"  FAIL {len(bad)} row(s) on a PARTIAL cpuset, i.e. measured as a")
+        print("       parallel sweep worker and not eligible for a table:")
+        for r in bad[:10]:
+            print(f"         {r.get('lane')} {r.get('scale')} {r.get('backend')} "
+                  f"cpuset={r.get('cpuset')}")
+        return len(bad)
+    print("  ok: no published row came from a parallel shard")
+    return 0
+
+
+def _gib(s):
+    """'36g' -> 36.0. None/unparseable -> None."""
+    if s is None:
+        return None
+    t = str(s).strip().lower().rstrip("b")
+    try:
+        if t.endswith("g"):
+            return float(t[:-1])
+        if t.endswith("m"):
+            return float(t[:-1]) / 1024.0
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _is_jvm(backend):
+    """Does this backend run on a JVM, and therefore have a heap worth checking.
+
+    Mirrors runner.JVM_BACKENDS. Kept as a substring match on the name so that
+    adding a JVM comparator without listing it shows up as an unchecked heap
+    rather than as an engine that legitimately has none.
+    """
+    return any(t in str(backend) for t in ("arcadedb", "arcade", "neo4j",
+                                           "elasticsearch", "questdb"))
+
+
+def jvm_reported_heap(r):
+    """The heap the running JVM reported for a served row, as '12g' / '2.25g', or None.
+    `server_jvm_max_heap_bytes` is MaxHeapSize from `jcmd VM.flags` (runner.server_jvm_readback)."""
+    try:
+        gib = float(r.get("server_jvm_max_heap_bytes")) / (1 << 30)
+    except (TypeError, ValueError):
+        return None
+    return (f"{gib:.2f}".rstrip("0").rstrip(".") if gib != int(gib) else str(int(gib))) + "g"
+
+
+def _total_envelope(r):
+    """The envelope the CELL got, normalised across topologies.
+
+    F3 says a served backend gets the envelope SPLIT, not doubled:
+    server = 0.75 * total, client = total - server. So a client container
+    legitimately shows a quarter of what an embedded container shows, and
+    comparing the two raw numbers reports a violation that is really the rule
+    being followed.
+
+    That is what this check did. It called five tiers FAIL because
+    arcadedb_sparse_server recorded mem_cap=4g against an embedded 16g, which
+    is 16 * 0.25 exactly. A fairness gate that fails on compliance is worse
+    than no gate: it trains you to skim past its output, and a real violation
+    then sits in the same list as the noise.
+
+    Rows are not uniform about which number they store. A row with
+    role='client' recorded ITS OWN container's cap; others recorded the total.
+    mem_split says what fraction the server side took, so the total is
+    recoverable either way.
+    """
+    # PREFER WHAT WAS OBSERVED. runner.py now reads the server container's real
+    # cpuset, cap and -Xmx from the daemon and stores them as server_*, so a
+    # served cell no longer has to be reconstructed from the split at all: the
+    # envelope is server + client, both measured. Rows written before that
+    # still fall back to the arithmetic below.
+    srv_cap, srv_heap = _gib(r.get("server_mem_cap")), r.get("server_heap")
+    if not srv_heap:
+        # A JVM started WITHOUT -Xmx (the image-defaults arm, CAMPAIGN 7 row 69) has no heap in its
+        # container environment, but the runner read what the running JVM settled on
+        # (`server_jvm_max_heap_bytes`, from jcmd VM.flags): that is a witness too, and the only
+        # honest one for such an arm. A row with neither is still "NO-WITNESS" below.
+        srv_heap = jvm_reported_heap(r)
+    if srv_cap is not None:
+        # DERIVE THE TOTAL FROM THE SERVER SIDE ALONE, never by addition.
+        # Adding mem_cap was wrong and failed five compliant tiers: runner.py
+        # sets mem_cap = MEM_BY_SCALE[scale], the TOTAL, on every row, so
+        # server + total reported 1.75x the envelope and l1/medium read 56g
+        # against an embedded 32g. The rows were correct; this was not.
+        #
+        # It hid because the bug and its trigger arrived separately: preferring
+        # the observed fields landed before any row carried server_mem_cap, so
+        # the branch was dead until the repair chain produced the first ones.
+        #
+        # Addition cannot work anyway, because BOTH row shapes are in the data
+        # and neither is detectable from mem_cap by itself:
+        #     medium  mem_cap 32g, srv 24g   total-shaped   (runner.py:489)
+        #     medium  mem_cap  8g, srv 24g   client-shaped  (run_conditions,
+        #                                    reading the client's own cgroup)
+        # The server's share is a known fraction of the envelope, so the total
+        # is srv_cap / split -- 32g from both shapes above, no classification
+        # required. This function's own docstring says a gate that fails on
+        # compliance is worse than no gate; that is what it had become.
+        # "full+client" means the server container got the WHOLE tier cap and
+        # the driver got its own budget on top, so srv_cap already IS the
+        # envelope and dividing would inflate it. Handled explicitly because
+        # the fallback below silently turns any unparseable split into 0.75,
+        # which for these rows reports 1.33x the true envelope and would have
+        # failed compliant cells across the whole re-campaign.
+        #
+        # Found by PROTOCOL.md, which was assembled from the code the same day
+        # the runner changed and flagged this line as stale before any row
+        # under the new split had been checked.
+        raw = r.get("mem_split")
+        if raw == "full+client":
+            return (str(srv_heap or "n/a"), f"{srv_cap:g}g") if not (
+                not srv_heap and _is_jvm(r.get("backend"))) else (
+                "NO-WITNESS", f"{srv_cap:g}g")
+        try:
+            split = float(raw or SERVER_MEM_FRACTION_DEFAULT)
+        except (TypeError, ValueError):
+            split = SERVER_MEM_FRACTION_DEFAULT
+        if not 0 < split < 1:
+            split = SERVER_MEM_FRACTION_DEFAULT
+        # NO FALLING BACK TO THE REQUEST. srv_heap is the witness, read from
+        # the daemon; r["heap"] is what the cell ASKED for, and it equals
+        # ArcadeDB's by construction. Substituting one for the other made the
+        # gate pass by definition on every served JVM row, so a comparator
+        # silently running its image default was indistinguishable from a
+        # compliant one. That is not hypothetical: make_paper_tables carries an
+        # Elasticsearch-only rule for exactly this, added after ES ran 4g while
+        # its row said 16g.
+        #
+        # A JVM server with no witness is reported as a witness gap. A non-JVM
+        # server legitimately has no heap and is left alone.
+        if not srv_heap and _is_jvm(r.get("backend")):
+            return ("NO-WITNESS", f"{srv_cap / split:g}g")
+        return (str(srv_heap or "n/a"), f"{srv_cap / split:g}g")
+
+    cap = _gib(r.get("mem_cap"))
+    if cap is None:
+        return (str(r.get("heap")), str(r.get("mem_cap")))
+    split = r.get("mem_split")
+    if str(r.get("role")) == "client" and split is not None:
+        try:
+            frac = 1.0 - float(split)
+            if 0 < frac < 1:
+                cap = cap / frac
+        except (TypeError, ValueError):
+            pass
+    return (str(r.get("heap")), f"{cap:g}g")
+
+
+def _vendor_heap(r):
+    """The heap the vendor rule gives this Neo4j or Elasticsearch row's tier (vendor_memory.heap_for), or None when the
+    row's cap is not one the table covers."""
+    import runner  # noqa: E402
+    cap = str(r.get("mem_cap"))
+    scale = r.get("scale")
+    if cap not in vendor_memory.NEO4J_MEMORY or scale not in runner.HEAP_BY_SCALE:
+        return None
+    return vendor_memory.heap_for(r.get("backend"), runner.HEAP_BY_SCALE[scale], cap)
+
+
+def check_envelope(rows):
+    """F3: same memory/heap envelope across backends within a (lane, scale)."""
+    print("\n=== F3: same memory envelope per (lane, scale) ===")
+    # The dense lane's published rows are NOT in runs.jsonl. T5 reads
+    # results/dense_mp_2681/, and runs.jsonl still holds the pre-re-measure
+    # dense rows at 28g/16g. Checking those reported the deep10m envelope as
+    # unmatched long after it had been matched: the comparators were re-run at
+    # 36g, into artifacts this check never opened. Same defect as claims_check
+    # and the figure generator had -- a consumer left pointing at the old
+    # store -- so it is fixed the same way, by reading what the table reads.
+    # Only deep10m moves; l3d small still lives in runs.jsonl and must keep
+    # being checked. Swapping the whole lane silently dropped it.
+    rows = [r for r in rows
+            if not (r.get("lane") == "l3d" and r.get("scale") == "deep10m")]
+    rows = rows + _dense_rows()
+    g = collections.defaultdict(lambda: collections.defaultdict(set))
+    noheap = collections.defaultdict(set)
+    vendor_bad = []
+    for r in rows:
+        h, m = _total_envelope(r)
+        # THE DECLARED IMAGE-DEFAULTS ARM (JVM_DEFAULTS_ARMS): the memory CAP is judged
+        # with everyone else's, its heap is not (it is 75% of the cap on purpose, and
+        # F3b holds it to that against the JVM's own report), so it is not a "no
+        # witness" gap either.
+        if str(r.get("backend")) in JVM_DEFAULTS_ARMS:
+            g[(r["lane"], r["scale"])][r["backend"]].add(("n/a", m))
+            continue
+        # NEO4J AND ELASTICSEARCH RUN THEIR VENDORS' MEMORY RULE (DECISIONS #202, vendor_memory.py): their heap is not
+        # ArcadeDB's, so it is judged against the vendor table below instead of against the other engines' heap. The cap
+        # is judged with everyone else's. A row measured before the rule (no `vendor_memory` stamp) is judged as it always was.
+        # A row that carries no heap witness is left to the NO-WITNESS rule above.
+        if r.get("vendor_memory"):
+            want = _vendor_heap(r)
+            if h not in ("NO-WITNESS", "None", "", "n/a", None) and want is not None and _gib(h) != _gib(want):
+                vendor_bad.append(f"{r['lane']} {r['scale']} {r['backend']}: heap {h}, the vendor rule gives {want}")
+            g[(r["lane"], r["scale"])][r["backend"]].add(("n/a", m))
+            continue
+        # A JVM heap is only comparable between engines that HAVE one. Qdrant,
+        # Milvus, LanceDB and sqlite-vec are Rust/Go/C and report heap=None;
+        # calling that a mismatched envelope against ArcadeDB's 24g compares a
+        # setting to its own absence. The MEMORY CAP is the cross-engine
+        # quantity and is compared for everyone.
+        if h == "NO-WITNESS":
+            # Recorded, not excused: the engine ran a heap nobody observed.
+            noheap[(r["lane"], r["scale"])].add(str(r.get("backend")) + " (no witness)")
+            h = "n/a"
+        elif h in ("None", "", "n/a", None):
+            if _is_jvm(r.get("backend")):
+                # A JVM engine with no recorded heap is a RECORDING gap,
+                # not an engine property. Reported separately rather than
+                # excused, because an unrecorded heap is exactly how an
+                # unmatched one would hide.
+                #
+                # This used to test "arcade" in the backend name, so the same
+                # gap on Neo4j, Elasticsearch or QuestDB was silently treated
+                # as "this engine has no heap". All three are JVM engines.
+                noheap[(r["lane"], r["scale"])].add(r["backend"])
+            h = "n/a"
+        g[(r["lane"], r["scale"])][r["backend"]].add((h, m))
+    bad = 0
+    for line in sorted(set(vendor_bad)):
+        bad += 1
+        print(f"  FAIL {line}")
+    for key in sorted(g, key=str):
+        per_be = g[key]
+        envs = {e for s in per_be.values() for e in s}
+        # The two axes are judged separately: the memory cap must match across
+        # EVERY engine, the heap only across the engines that have one.
+        caps = {m for _, m in envs}
+        heaps = {h for h, _ in envs if h != "n/a"}
+        if len(caps) == 1 and len(heaps) <= 1:
+            m = next(iter(caps))
+            h = next(iter(heaps)) if heaps else "n/a"
+            jvm = sum(1 for s in per_be.values()
+                      for hh, _ in s if hh != "n/a")
+            print(f"  ok   {key[0]:6} {key[1]:8} heap={h} mem={m} "
+                  f"({len(per_be)} backends, {jvm} on a JVM)")
+            if key in noheap:
+                print(f"         note: {', '.join(sorted(noheap[key]))} is a JVM "
+                      "engine but recorded no heap. The cap matches; the heap "
+                      "is unverifiable from the artifact.")
+            continue
+        bad += 1
+        print(f"  FAIL {key[0]:6} {key[1]:8} backends did NOT get the same "
+              f"envelope:")
+        if len(caps) > 1:
+            print(f"         memory caps differ: {sorted(caps)}")
+        if len(heaps) > 1:
+            print(f"         JVM heaps differ: {sorted(heaps)}")
+        for be, s in sorted(per_be.items()):
+            for h, m in sorted(s):
+                print(f"         {be:32} heap={h} mem={m}")
+        note = DISCLOSED.get(key, {}).get("__note__")
+        if note:
+            print(f"         (disclosed override on record: {note})")
+        print("         Raising a resource for one engine obliges a re-measure")
+        print("         of every engine at that tier. See FAIRNESS.md.")
+    return bad
+
+
+def _base_degree(r):
+    """Effective BASE-LAYER graph degree, in one unit, or None.
+
+    The dense lane's engines do not agree on what "M" means. ArcadeDB's
+    maxConnections is a per-layer bound, so it IS the base-layer degree.
+    hnswlib-style engines (Chroma, Qdrant, Milvus, DuckDB-VSS, LanceDB) take an
+    upper-layer M and double it at layer 0. Comparing the raw numbers compares
+    two different quantities, which is how a shared constant of 32 could look
+    matched while giving the comparators twice the degree.
+
+    Rows written from 2026-08-01 carry degree_param/degree_family and answer
+    directly. Older rows carry only `m`, so the family is inferred from the
+    backend name -- inference is acceptable for a check whose failure mode is
+    a warning, and it is why the newer fields exist.
+    """
+    fam, val = r.get("degree_family"), r.get("degree_param")
+    if fam is None:
+        val = r.get("m")
+        be = str(r.get("backend", ""))
+        if be.startswith("arcadedb"):
+            fam = "arcadedb_maxconnections_per_layer"
+        elif be.startswith("sqlite_vec"):
+            fam = "exact_scan_no_ann"
+        else:
+            fam = "hnswlib_m_doubled_at_base"
+    if fam == "exact_scan_no_ann" or val is None:
+        return None
+    return val * 2 if fam == "hnswlib_m_doubled_at_base" else val
+
+
+def check_degree(rows):
+    """F7: same effective base-layer degree across dense backends per scale.
+
+    Added after finding that l3d_dense.py handed ONE constant to
+    both unit systems. It was harmless while the default was 16 (every
+    published comparator row records m=16, and the T5 dense block as printed
+    IS matched), but the default became 32 to fix ArcadeDB and nothing had
+    re-run since. A freeze that re-measures this lane would have
+    built five comparators at twice their intended degree with ArcadeDB
+    correct -- a fourth "all three favoured us" entry for the list above, found
+    before it produced a number rather than after.
+    """
+    print("\n=== F7: same effective base-layer degree per (lane, scale) ===")
+    # Same store defect F3 had, one check down: deep10m's PUBLISHED rows live
+    # in results/dense_mp_2681/, and this was reading runs.jsonl's superseded
+    # ones. It reported "ok, degree 32, 7 backends" for a tier whose actual
+    # artifacts record degree_param=None on every arm. A check that passes on
+    # rows the table does not print is not checking the table.
+    rows = [r for r in rows
+            if not (r.get("lane") == "l3d" and r.get("scale") == "deep10m")]
+    rows = rows + _dense_rows()
+    g = collections.defaultdict(dict)
+    unstamped = collections.defaultdict(set)
+    ivf_bad = []
+    for r in rows:
+        if r.get("lane") != "l3d":
+            continue
+        d = _base_degree(r)
+        if d is not None:
+            g[r["scale"]].setdefault(r["backend"], set()).add(d)
+        elif str(r.get("backend", "")).startswith("sqlite_vec_dense"):  # fp32 and int8: both exact scans
+            # An exact scan has no graph, so it has no degree to match. That is
+            # a property of the engine, like a Rust engine having no JVM heap,
+            # not a recording gap. It is the recall=1.0 baseline precisely
+            # because it builds no approximate structure at all.
+            pass
+        elif r.get("degree_family") == "ivf_flat_no_degree" and r.get("ivf_nlists"):
+            # ArangoDB's vector index is FAISS IVF: inverted lists over trained
+            # centroids, no graph, no degree. Its operating point is matched by
+            # EFFECT instead: nProbe calibrated in the cell to the frozen recall
+            # of ArcadeDB's fp32 arm at the same scale (arango_common). A row
+            # that carries no target, or missed it by more than 0.01, is not a
+            # matched row.
+            try:
+                _t, _c = float(r.get("ivf_recall_target")), float(r.get("ivf_calibration_recall"))
+            except (TypeError, ValueError):
+                ivf_bad.append((r["scale"], r["backend"], "no ivf_recall_target/ivf_calibration_recall"))
+            else:
+                if _c < _t - 0.01:
+                    ivf_bad.append((r["scale"], r["backend"], f"calibrated {_c} against target {_t}"))
+        else:
+            unstamped[r["scale"]].add(r["backend"])
+    if not g and not unstamped:
+        print("  (no dense rows)")
+        return 0
+    bad = 0
+    for _sc, _be, _why in sorted(set(ivf_bad), key=str):
+        bad += 1
+        print(f"  FAIL l3d    {_sc:8} {_be}: IVF row not matched by effect ({_why})")
+    for scale in sorted(set(g) | set(unstamped), key=str):
+        per_be = g.get(scale, {})
+        if scale in unstamped:
+            # NOT a pass and NOT a silent skip. Degree decides recall and
+            # latency together, so a row that does not record the degree it was
+            # built at cannot be shown to be matched -- and F7 exists because
+            # one shared constant once meant two different graphs.
+            bad += 1
+            print(f"  FAIL l3d    {scale:8} {len(unstamped[scale])} backend(s) "
+                  "record NO degree, so the match is unverifiable:")
+            for be in sorted(unstamped[scale]):
+                print(f"         {be}")
+            print("         The lane stamps degree_param/degree_family; the "
+                  "multipass driver does not carry them through.")
+            if per_be:
+                print(f"         (the {len(per_be)} that do: "
+                      f"{sorted({d for s in per_be.values() for d in s})})")
+            continue
+        degrees = {d for s in per_be.values() for d in s}
+        if len(degrees) == 1:
+            print(f"  ok   l3d    {scale:8} base-layer degree "
+                  f"{next(iter(degrees))} ({len(per_be)} backends)")
+            continue
+        bad += 1
+        print(f"  FAIL l3d    {scale:8} backends did NOT get the same "
+              f"base-layer degree:")
+        for be, s in sorted(per_be.items()):
+            print(f"         {be:32} degree={sorted(s)}")
+        print("         Degree decides recall and latency together, so an")
+        print("         unmatched degree makes the whole row incomparable.")
+    return bad
+
+
+def check_protocol_overlays():
+    """F4: overlays that feed tables, and whether their protocol is stated.
+
+    This cannot be fully automated: a protocol lives in a driver, not in the
+    JSON. What CAN be checked is the tell that exposed both known cases, a
+    single build_s shared by every rep. Five reps of one build_s means one
+    build with repeated passes; five distinct values mean independent builds.
+    Neither is wrong, but a table must not mix them.
+    """
+    print("\n=== F4: build protocol per CELL GROUP (one build vs per-rep builds) ===")
+    import re
+    groups = collections.defaultdict(list)
+    for sub in sorted(os.listdir(RESULTS)):
+        d = os.path.join(RESULTS, sub)
+        if not os.path.isdir(d):
+            continue
+        for fp in glob.glob(os.path.join(d, "*.json")):
+            try:
+                obj = json.load(open(fp))
+            except Exception:
+                continue
+            # A cell group is one arm at one tier, so strip the trailing rep
+            # index and key on n_docs too. Lumping a whole directory made
+            # every multi-tier overlay look "mixed" for innocent reasons, and
+            # a check that cries wolf is a check nobody reads.
+            stem = re.sub(r"(_rep|_r)\d+\.json$", "", os.path.basename(fp))
+            for rec in (obj if isinstance(obj, list) else [obj]):
+                if isinstance(rec, dict) and isinstance(
+                        rec.get("build_s"), (int, float)):
+                    key = (sub, stem, rec.get("n_docs") or rec.get("scale"))
+                    groups[key].append(round(rec["build_s"], 1))
+    shapes = {}
+    for key, builds in sorted(groups.items(), key=str):
+        n, distinct = len(builds), len(set(builds))
+        if n < 2:
+            continue
+        shape = ("one-build" if distinct == 1
+                 else "per-rep-builds" if distinct == n else "mixed")
+        shapes.setdefault(shape, []).append(key)
+    for shape in ("one-build", "per-rep-builds", "mixed"):
+        keys = shapes.get(shape, [])
+        if not keys:
+            continue
+        print(f"  {shape:15} {len(keys):3} cell group(s)")
+        for k in keys[:6]:
+            print(f"      {k[0]}/{k[1]}")
+        if len(keys) > 6:
+            print(f"      ... and {len(keys) - 6} more")
+    print("  Neither shape is wrong on its own. It IS a defect when one sits")
+    print("  beside the other in a table: T5's dense row prints ArcadeDB's")
+    print("  one-build passes 2-5 next to comparators' per-rep-build single")
+    print("  pass (#117). queue61 is re-measuring the comparators to match.")
+    return 0
+
+
+
+# Regressions the gate has already caught, filed, and seen fixed upstream: the
+# gate keeps printing them, as KNOWN rather than BAD, on the pin they were
+# measured on, and the page's lifecycle table discloses them (export_web). Empty
+# while the pin carries every fix; an entry is a list per situation, each
+# `{"commit": <short sha>, "versions": (<release prefixes for rows with no
+# commit>), "why": <sentence>}`, removed at the re-pin that carries the fix so
+# the gate is armed again.
+KNOWN_REGRESSIONS = {}
+
+
+def _known_applies(entries, rows):
+    """The known regression these rows come from, or None."""
+    for known in entries or ():
+        if _known_matches(known, rows):
+            return known
+    return None
+
+
+def _known_matches(known, rows):
+    """Do these rows come from the engine the known regression describes?"""
+    if not known:
+        return False
+    for r in rows:
+        commit = str(r.get("engine_commit") or "").strip()
+        if commit:
+            if commit.startswith(known["commit"]):
+                return True
+            continue
+        ver = str(r.get("engine_version") or "")
+        # Anchored so 26.8 does not match 126.8 or 26.80; the served arm spells
+        # itself "server:26.8.1 (build ...)", so this is a search, not a prefix.
+        if any(re.search(r"(?<![\d.])" + re.escape(v) + r"(?![\d])", ver)
+               for v in known["versions"]):
+            return True
+    return False
+
+
+def check_close_cost(rows):
+    """F13: close must be O(what was written), not O(what is stored).
+
+    DECISIONS #50. This is a REGRESSION gate rather than a fairness one, and it
+    lives here because this is where the numbered invariants are. Two ways to
+    fail, and they catch different defects:
+
+      1. A clean close over 100 ms. Grounded twice: close should not cost more
+         than getting started, and JVM startup on these hosts is ~160 ms; and
+         it should sit under the ~100 ms at which a script stops feeling
+         instant.
+      2. A clean close that GROWS with row count while nothing was written.
+         That is the O(stored) shape and it is always a defect, whatever the
+         absolute number. This is the one that would have caught #5747 and
+         #6489 while their absolute values were still small.
+
+    The engine has produced three defects in this family (#5747, #6489 which
+    was ours, #5872), which is why a number that can slide between releases
+    with nobody watching gets a gate instead of a column.
+    """
+    # THE SESSION, not just the close. F13 originally watched clean_close alone,
+    # and PR #6588 upstream is the proof that this is not enough: persisting the
+    # analytical view's CSR moved its cost from close to open, 4032 -> 5.95 ms
+    # closing and 4.94 -> 241.84 ms opening at a million vertices. A close-only
+    # gate goes GREEN on that, and would equally go green on a change that moved
+    # cost the other way and made a session slower overall. What a caller pays is
+    # open plus close, so that is what gets budgeted.
+    # OUR ENGINE'S INVARIANT (DECISIONS #50), checked on our rows. The lane
+    # carries a SurrealDB embedded arm (DECISIONS #95a), and a
+    # cell keyed on (situation, size) alone would take one median over two
+    # engines and judge ArcadeDB's budget against a comparator's numbers. The
+    # comparator's rows are reported beside ours, per situation, and judged
+    # by nothing here: what its session costs is a page number, not a fairness
+    # question.
+    _all = [r for r in rows if r.get("lane") == "lifecycle"
+            and r.get("clean_close_ms") is not None]
+    lc = [r for r in _all if "arcadedb" in str(r.get("backend", ""))]
+    for r in _all:
+        r["_session_ms"] = (r["clean_close_ms"] + (r.get("clean_open_ms") or 0.0))
+    _others = collections.defaultdict(list)
+    for r in _all:
+        if r not in lc:
+            _others[(r.get("backend"), r["workload"], r.get("scale"))].append(r["_session_ms"])
+    if not lc:
+        # NOT a pass. This gate returned 0 for weeks while PAPER_SCALES was
+        # silently deleting every lifecycle row upstream of it, so the one check
+        # that would have caught the deletion reported success because of it.
+        # A gate whose only failure mode is "I saw nothing" has to treat seeing
+        # nothing as the failure.
+        any_lifecycle = any(r.get("lane") == "lifecycle" for r in rows)
+        print("\n== F13 session cost ==\n  NO LIFECYCLE ROWS REACHED THIS GATE.")
+        if any_lifecycle:
+            print("  Rows exist but none carry clean_close_ms; the lane wrote them "
+                  "without the column this gate reads.")
+            return 1
+        # DELETED UPSTREAM versus NOT RUN YET, and only the first is a defect.
+        # The refusal above exists because PAPER_SCALES silently dropped every
+        # lifecycle row for weeks and this gate reported success on the
+        # emptiness that caused it. That catch has to survive. But a campaign
+        # that lands table by table reaches this gate before its lifecycle
+        # stage has run at all -- it is a late stage of the chain -- and
+        # failing then blocks a landing for work that is merely still queued.
+        #
+        # The distinguishing evidence is the MAP, not the rows: if `lifecycle`
+        # is absent from PAPER_SCALES its rows are being deleted, which is the
+        # original defect; if it is present and there are simply no rows, the
+        # lane has not run. Asked of make_paper_tables directly, so the two
+        # cannot drift apart.
+        try:
+            import make_paper_tables as _M
+            _mapped = "lifecycle" in getattr(_M, "PAPER_SCALES", {})
+        except Exception:
+            _mapped = False
+        if _mapped:
+            print("  `lifecycle` IS in PAPER_SCALES, so nothing is deleting its "
+                  "rows: the lane has not run at this pin yet. Reported, not "
+                  "failed -- this gate fails on rows that went missing, not on "
+                  "a stage still queued.")
+            return 0
+        print("  Check PAPER_SCALES in make_paper_tables.py: a lane absent from "
+              "it is deleted by load_canonical before any gate runs.")
+        return 1
+    print("\n== F13 session cost (open+close): O(written), not O(stored), under 100 ms ==")
+    for (be, sit, scale), vals in sorted(_others.items(), key=str):
+        print(f"  info: {be} {sit}/{scale} clean session (open+close) "
+              f"{statistics.median(vals):.1f} ms median of {len(vals)} (comparator, not judged)")
+    bad = 0
+    # AGGREGATE BY MEDIAN, per (situation, scale). The first version of this
+    # assigned into a dict per row, so with N reps it kept whichever rep came
+    # last and compared two arbitrary single measurements. On the first real
+    # data it reported `sparse` growing 4.5x when the medians are 3.90 -> 3.96
+    # ms, a 1.02x. A gate that fires on one noisy rep trains its reader to
+    # ignore it, which is worse than not having it.
+    cells = collections.defaultdict(list)
+    for r in lc:
+        cells[(r["workload"], r.get("scale"))].append(r)
+    by_sit = collections.defaultdict(dict)
+    by_sit_rows = collections.defaultdict(list)
+    for (sit, scale), cell_rows in sorted(cells.items()):
+        vals = [r["_session_ms"] for r in cell_rows]
+        by_sit_rows[sit].extend(cell_rows)
+        med = statistics.median(vals)
+        by_sit[sit][scale] = med
+        if med > 100.0:
+            # The absolute budget gets the same known-regression exception as
+            # the shape test below: on a build with a documented, fixed-upstream
+            # O(stored) close, printing BAD for that cost trains the reader to skip
+            # the line. KNOWN is printed, disclosed on the page, not counted.
+            # Scoped to THIS cell's rows, not to every lifecycle row in the
+            # set: one arm carrying the regressed build was licensing the
+            # exception for arms that did not.
+            known = _known_applies(KNOWN_REGRESSIONS.get(sit), cell_rows)
+            if known:
+                print(f"  KNOWN: {sit}/{scale} clean session (open+close) {med:.1f} ms "
+                      f"median of {len(vals)} exceeds the 100 ms budget: {known['why']}")
+            else:
+                print(f"  BAD: {sit}/{scale} clean session (open+close) {med:.1f} ms "
+                      f"median of {len(vals)} exceeds the 100 ms budget "
+                      f"[{min(vals):.1f}-{max(vals):.1f}]")
+                bad += 1
+    # The shape test. Rows are the same situation at two sizes with nothing
+    # written in either, so any growth beyond noise is growth in what is
+    # STORED. 1.5x over 10x the data is the tolerance: the flat situations in
+    # the matrix move by well under that, and the two that scale move by 10x
+    # or more, so nothing sits near the line.
+    for sit, sizes in sorted(by_sit.items()):
+        if "lc10k" in sizes and "lc100k" in sizes:
+            small, big = sizes["lc10k"], sizes["lc100k"]
+            if small > 0 and big / small > 1.5:
+                known = _known_applies(KNOWN_REGRESSIONS.get(sit), by_sit_rows[sit])
+                if known:
+                    print(f"  KNOWN: {sit} clean session grows {big / small:.1f}x "
+                          f"({small:.1f} -> {big:.1f} ms medians) over 10x the rows: {known['why']}")
+                else:
+                    print(f"  BAD: {sit} clean session grows {big / small:.1f}x "
+                          f"({small:.1f} -> {big:.1f} ms medians) over 10x the "
+                          f"rows, with nothing written. That is O(stored).")
+                    bad += 1
+    if not bad:
+        # "none over budget" read as a contradiction directly under a KNOWN
+        # line that says a cell is over budget. The known ones are disclosed on
+        # the page's own lifecycle table, which is what makes them not failures.
+        print(f"  ok {len(lc)} lifecycle row(s), none over budget or scaling "
+              f"except the known regressions printed above")
+    return bad
+
+
+# ---------------------------------------------------------------------------
+# F10: one durability class per table, and one instrument (DECISIONS #81, #84).
+#
+# Every row measured under the 2026-11 instrument records `durability`, the
+# setting its engine ran at commit, and `instrument`. The matched class is
+# "relaxed" (a commit returns without waiting for the disk); an engine that
+# cannot be relaxed says so with a string starting "fsync at commit" and is
+# the named exception on its tables (Neo4j, DuckDB, LadybugDB). Anything
+# else on a 2026-11 row is a FAIL (FAIRNESS.md F10): a row with no durability,
+# a row whose engine reports a class other than the one its cell asked for in
+# `durability_class` (DECISIONS #90), or a PostgreSQL row whose server did not
+# answer its class's synchronous_commit (off relaxed, on strict).
+STRICT_ALLOWED = {"neo4j_graph", "neo4j_dense", "neo4j_dense_int8", "neo4j_e2", "composed_qdrant_neo4j",
+                  "ladybug_graph", "ladybug_e2", "duckdb", "duckdb_vss_dense", "duckpgq_graph", "duckdb_e2",
+                  # The lifecycle table's in-process arms (DECISIONS #131 item 5): DuckDB and LadybugDB as on
+                  # their other tables, and Chroma, which syncs at every add with no setting (bench_common).
+                  "duckdb_lifecycle", "ladybug_lifecycle", "chroma_lifecycle"}
+
+# NO SETTING THE OTHER WAY: an engine that never syncs at commit and has no
+# setting that would make it. It runs the relaxed class by construction and
+# cannot run the strict one, so it prints one number like the engines above.
+# LanceDB 0.39.0: 0 sync calls over 250 commits under strace (bench_common).
+RELAXED_ONLY_ALLOWED = {"lancedb_lifecycle"}
+
+# THE THIRD CLASS, and the backends allowed to be in it: none since BUGS F165.
+# The five SurrealDB served arms were, on the claim that 3.2.4 had no sync
+# setting; it has one on its storage path, and its default syncs at every
+# commit, which was once run under a "not verified" label in both
+# classes. Any backend that says "not verified" is an engine whose default
+# nobody checked, which is exactly what #81 forbids.
+UNVERIFIED_ALLOWED = set()
+
+# THE CELLS THAT MUST EXIST IN BOTH DURABILITY CLASSES (DECISIONS #90): the six
+# document operations, the three graph writes, and the cross-model transaction.
+# Bulk ingest stays at one setting, because an fsync per batch at ten million
+# vectors is hours and teaches nothing the write cells do not, and every read
+# path is untouched.
+WRITE_CELLS = {("l1tpc", "oltp"), ("l2", "oltp"), ("e2", "hybrid")}
+
+
+# F14: EVERY ARM ON A SELECTIVE-FILTER LANE DECLARES ITS INDEX DECISION, and
+# the declaration names the measurement behind it (BUGS F98, DECISIONS #112).
+#
+# Only two lanes are listed, and the omission is the point rather than an
+# oversight. An index decision can go wrong where a query FILTERS selectively
+# and the engine has a choice: the document lane's Q6 (a shipdate year, 14.3%
+# of rows, 1.8% after three predicates) and the time-series lane's two
+# host-filtered queries. Everywhere else there is no choice to get wrong --
+# the graph lane's reads are point and hop lookups that every engine reaches
+# through its primary key, record id or document handle; its analytics
+# traverse the whole graph; the vector lanes are F7's subject and are matched
+# by degree or calibrated by effect. Adding a lane here without a selective
+# filter would collect declarations nobody can falsify.
+#
+# THE GRAPH LANE'S HALF OF THAT WAS CHECKED, NOT ASSUMED, because
+# the e2 paragraph below is what a scoping judgement is worth unverified. Read
+# query by query: all five analytics queries are whole-graph aggregates with no
+# constant predicate (`top_degree` and `degree_dist` scan person, the two city
+# queries scan knows, and `same_city_edges`'s only WHERE compares an edge's two
+# endpoints to each other rather than to a value); LSQB's nine are pure
+# structural counts over labels with no property predicate at all; and `hop3f`'s
+# `age > HOP3F_MIN_AGE` (graph_common; 41, keeping about half; an
+# older 30 kept no one while every loaded age was 0, BUGS F146) filters a vertex set the traversal has already reached, which no index
+# can narrow. So there is no selective filter on this lane to get wrong.
+#
+# The lane DOES build indexes, and they are matched by effect rather than by
+# rule -- which is why this note names them instead of stopping at "no
+# declaration needed". ArcadeDB, Neo4j, Memgraph and FalkorDB create a unique
+# vertex id index; SurrealDB addresses vertices by record id and LadybugDB by
+# its node key, both of which are primary and need no DDL; ArangoDB creates
+# `knows` and all nine LSQB edge collections with `edge=True`, which is what
+# earns it the automatic _from/_to edge index; DuckPGQ and MongoDB, having
+# neither adjacency nor an edge collection, index the edge endpoints
+# explicitly (k_src/k_dst, s/d); PostgreSQL + AGE gets a primary key on every
+# vertex label's graphid and btree indexes on every edge label's start_id and
+# end_id from AGE itself, and adds a btree on the Person `id` property
+# expression for the reads' `WHERE p.id = $id`. Checked BY EFFECT too: every engine's 1-hop
+# p50 is under 2 ms, none of them showing the scan signature that gave e2's
+# ArangoDB row away (22.52 ms against 3.21 ms indexed).
+#
+# A backend missing from its lane's map is a FAILURE, not a default. That is
+# the shape the capability table's legend uses: refuse the kind you cannot
+# define, rather than printing it and hoping.
+INDEX_DECISIONS = {
+    "l1tpc": {
+        "arcadedb_embedded":    "l_shipdate: 870.7 -> 141.7 ms, 6.1x",
+        "arcadedb_server":      "l_shipdate: the embedded arm's measurement, same engine and schema",
+        "arcadedb_imgdefaults_server": "l_shipdate: the main served arm's measurement, same adapter and schema",
+        "postgres":             "l_shipdate: 726 -> 290 ms, 2.5x",
+        "postgres_tuned":       "l_shipdate: inherits PostgresTPC",
+        "surrealdb_tpc":        "l_shipdate before the load: 4016 -> 1062 ms, 3.8x",
+        "surrealdb_tpc_server": "l_shipdate: inherits SurrealTPC",
+        "mongodb":              "l_shipdate: 280.3 -> 178.1 ms, 1.6x",
+        "sqlite":               "NONE: the index costs it, 53.4 -> 63.3 ms",
+        "arangodb_tpc":         "NONE: the index costs it, 684 -> 881 ms",
+        "redis_tpc":            "l_shipdate_n (NUMERIC) and the aggregated fields SORTABLE in the one FT.CREATE index: the Query Engine "
+                                "cannot aggregate a field that is not in the index without LOADing the document key by key",
+        "duckdb":               "NONE: no effect, 6.0 -> 6.2 ms; columnar with zone maps",
+        # no index DDL exists: every column carries an automatic Lucene index and a column store (the ship date's is the one Q6 uses)
+        "cratedb_tpc":          "the engine default, an automatic Lucene index on every column; `INDEX OFF` on the filtered columns was not measured (owed before the campaign cell, F14)",
+    },
+    # e2 WAS LEFT OUT OF THIS MAP AND SHOULD NOT HAVE BEEN. The scoping note
+    # above said an index decision can only go wrong where a query filters
+    # selectively, and then judged this lane as having no such filter. Its
+    # timed retrieval is `pid IN <the vector search's candidate ids>` over
+    # 50k or 500k products, which is exactly that shape -- and ArangoDB was
+    # scanning the whole collection for it, 22.52 ms against 3.21 ms indexed
+    # (BUGS F98). A scoping judgement is a claim like any other.
+    "e2": {
+        # A hash index since the 26.10.1 re-pin (CAMPAIGN 7 row 68): every read of
+        # pid is an equality or an IN, and nothing ranges over it or orders by it.
+        "arcadedb_e2":            "Product(pid) UNIQUE_HASH",
+        "arcadedb_e2_server":     "Product(pid) UNIQUE_HASH",
+        "pg_age_e2":              "product(pid) PRIMARY KEY",
+        "neo4j_e2":               "index on :Product(pid)",
+        "memgraph_e2":            "label-property index on :Product(pid)",
+        "ladybug_e2":             "pid is the node table's primary key (a hash index)",
+        "duckdb_e2":              "unique index on product(pid), built after the load",
+        "mongodb_e2":             "pid as the vector index's filter path",
+        # Every read now ADDRESSES the record id, including the candidate
+        # ranking, which scanned `WHERE pid INSIDE [...]` until DECISIONS #117
+        # (BUGS F132: 3,638 -> 15.7 ms on the laptop at 50k).
+        "surrealdb_e2":           "record id carries pid (every read addresses it; F132)",
+        "surrealdb_e2_server":    "record id carries pid (every read addresses it; F132)",
+        "arangodb_e2":            "persistent(pid): 22.52 -> 3.21 ms, 7.0x",
+        # The Qdrant half is the server since DECISIONS #117 (BUGS F133); the
+        # candidate filter reads a payload index on pid: 24.4 -> 3.15 ms, 7.7x
+        # (laptop, 50k), and in local mode no index of any kind existed.
+        "composed_qdrant_neo4j":  "Neo4j's index on :Product(pid); Qdrant payload index on pid (F133)",
+        # The embedded trio (2026-10-25): SQLite's pid is the rowid (INTEGER PRIMARY KEY), LadybugDB's is the node
+        # table's primary key (a hash index), and LanceDB's candidate filter reads a BTREE on pid, measured on the
+        # arm's own filtered path (laptop, 50k products, 100 filtered searches, p50, with the index against dropped).
+        "composed_embedded_sqlite_lance_ladybug": "SQLite product(pid) INTEGER PRIMARY KEY (the rowid); LadybugDB node primary key "
+                                                  "(a hash index); LanceDB BTREE on pid: 7.10 -> 5.35 ms, 1.3x",
+    },
+    "l4": {
+        "arcadedb_ts_doc":            "(host, ts)",
+        "arcadedb_ts_doc_server":     "(host, ts)",
+        "arcadedb_ts_native":         "native TIMESERIES type, time-ordered by construction",
+        "arcadedb_ts_native_server":  "native TIMESERIES type, time-ordered by construction",
+        "sqlite":                     "(host, ts): 35.36 -> 0.01 ms last-point",
+        "duckdb":                     "(host, ts): 7.06 -> 6.20 ms last-point",
+        "timescaledb":                "(host, ts DESC)",
+        # Plain PostgreSQL (DECISIONS #131 item 6), measured on ts100
+        # (repros/pg-ts-index/index_probe.py): the host-filtered queries need it,
+        # and the scan-wide 12 h aggregate pays for it (the planner reads through
+        # the index), stated rather than tuned away: the same index as TimescaleDB.
+        "postgres_ts":                "(host, ts DESC): 108.95 -> 0.48 ms last-point, 92.91 -> 1.08 ms windowed; "
+                                      "12 h aggregate 136 -> 217 ms with it present",
+        "surrealdb_ts":               "(host, ts) before the load",
+        "surrealdb_ts_server":        "(host, ts)",
+        "arangodb_ts":                "persistent (host, ts)",
+        "redis_ts":                   "TimeSeries: one series per (host, field), time-ordered chunks by construction; the label index "
+                                      "(host, field) is built as each series is created",
+        "mongodb":                    "time-series collection, metaField=host timeField=ts",
+        "cratedb_ts":                 "the engine default, an automatic Lucene index on every column; `INDEX OFF` on the filtered columns was not measured (owed before the campaign cell, F14)",
+        "questdb":                    "NONE: measured, 1.93 -> 1.75 ms last-point, inside the "
+                                      "spread of seven samples; host is unindexed by default and "
+                                      "the columnar layout answers it in 1.93 ms where SQLite "
+                                      "needed 35 ms unindexed",
+    },
+}
+
+
+# ARCADEDB'S ID INDEXES THAT ARE HASH INDEXES (CAMPAIGN 7 row 68, DECISIONS #158).
+#
+# The maintainers' rule (ArcadeData/arcadedb#9169): an id that is only read,
+# updated, and deleted by equality gets `UNIQUE_HASH`; a key that is also ranged
+# over or ordered stays `UNIQUE`. This is the ONE place the lanes' choice is
+# written down for the readers that must not drift from the DDL: the sentence
+# export_web prints under each table (`_arcadedb_hash_index_notes`) and
+# test_index_kinds.py, which holds this registry equal to the CREATE INDEX text
+# in each lane's source. Each entry is (lane, the workload whose table prints it
+# or None for every workload of the lane, ((type, property), ...)).
+#
+# `l1` is the retired tabular lane: its DDL moves with the others, but it feeds
+# no page table, so no sentence is printed for it. The graph lane's entry is the
+# LDBC message half only, built by the analytics workload.
+ARCADEDB_HASH_ID_INDEXES = (
+    ("l1tpc", None, (("Part", "p_partkey"), ("OrderNew", "okey"), ("Crud", "ckey"))),
+    ("l1", None, (("orders", "id"),)),
+    ("e2", None, (("Product", "pid"),)),
+    ("l2", "olap", tuple((label, "id") for label in
+                         ("Country", "City", "Forum", "Post", "Comment", "Tag", "TagClass"))),
+)
+
+# NOT HERE: the dense lane's `Article(vid)` UNIQUE_HASH index (#291, CAMPAIGN
+# section 7 row 84). It is built together with an id index on every comparator
+# that lacks one, and each row stamps `dense_id_index`; the stamp, not this
+# registry, says which index the delete ran through.
+
+# WHAT STAYS SORTED, and why, so the next reader does not "finish" the change.
+# `Person(id)` on the graph lane: the untimed `person_scan` ranges over it
+# (`q.id >= ...`), and under a hash index that becomes a full label scan. The
+# other sorted ArcadeDB indexes are not id indexes at all: `l_shipdate` and
+# `customer_id` (NOTUNIQUE, ranged or grouped), the time-series `Point(host, ts)`,
+# and the lifecycle and recovery indexes.
+ARCADEDB_SORTED_ID_INDEXES = (("l2", "Person", "id"),)
+
+
+# WHAT THE ENGINE SAID IT BUILT (CAMPAIGN 7 row 68, F14d). `index_kinds` on a row is the
+# engine's own answer to `SELECT FROM schema:indexes`, asked after the schema was built and
+# outside every timer (bench_common.arcadedb_index_readback). The registry above is the
+# claim, this is the evidence: a row of an ArcadeDB arm on those lanes must carry the stamp,
+# every registered id must read HASH in it, and a key that stays sorted must not. An id
+# whose type the row never built is not owed: the graph lane's message half exists only in a
+# cell that loaded it, which the row says with `msg_vertices`.
+ARCADEDB_HASH_ID_REQUIRES = {("l2", "olap"): "msg_vertices"}
+
+# THE UNSTAMPED ROW FAILS (CAMPAIGN section 7, row 68). While this is False, a row with no
+# `index_kinds` is printed as a WARNING and the exit status is left alone. This is the ONLY switch, and
+# it does not touch the other case: a STAMPED row whose kind disagrees with the registry is always a
+# failure (see below).
+INDEX_KINDS_GATE_FAILS = True
+
+
+def check_index_kinds(rows):
+    """F14d: every 2026-11 row of an ArcadeDB arm on a lane that has a changed index records
+    the kinds the engine built, and they are the kinds the registry says (a setting written is
+    not a setting in force). Returns the failure count.
+
+    TWO CASES, TWO RULES. A STAMPED row whose kind disagrees with the registry (an id the
+    engine reports as sorted, a registered id it did not build, Person(id) as HASH) is ALWAYS a
+    failure: only a row this harness wrote can carry the stamp, so it is evidence that the setting
+    did not take, and there is no old row for it to block. A row with NO stamp is a WARNING and
+    counts as a failure only once INDEX_KINDS_GATE_FAILS is True. Either way the unstamped row is
+    also the row the page makes no claim about (export_web)."""
+    from bench_common import parse_index_kinds
+    mode = ("an unstamped row FAILS" if INDEX_KINDS_GATE_FAILS else
+            "an unstamped row is a WARNING until INDEX_KINDS_GATE_FAILS is set; a wrong stamped kind always fails")
+    print(f"=== F14d: the engine reports the index kinds the lanes asked for [{mode}] ===")
+    bad = warned = judged = 0
+    lanes = {lane for lane, _wl, _pairs in ARCADEDB_HASH_ID_INDEXES}
+    for r in rows:
+        be, lane = str(r.get("backend")), str(r.get("lane"))
+        if (not be.startswith("arcadedb") or lane not in lanes or r.get("error")
+                or str(r.get("instrument") or "") != publish_instrument.PUBLISH_INSTRUMENT):
+            continue
+        wl = str(r.get("workload"))
+        judged += 1
+        where = f"{lane} {r.get('scale')} {wl} {be} rep {r.get('rep')}"
+        kinds = parse_index_kinds(r.get("index_kinds"))
+        if not kinds:
+            why = f" ({r.get('index_kinds_error')})" if r.get("index_kinds_error") else ""
+            print(f"  {'' if INDEX_KINDS_GATE_FAILS else 'WARN '}NOT STAMPED {where}: no `index_kinds`{why}")
+            if INDEX_KINDS_GATE_FAILS:
+                bad += 1
+            else:
+                warned += 1
+            continue
+        for ln, w, pairs in ARCADEDB_HASH_ID_INDEXES:
+            if ln != lane or w not in (None, wl):
+                continue
+            need = ARCADEDB_HASH_ID_REQUIRES.get((ln, w))
+            if need and not r.get(need):
+                continue
+            for t, p in pairs:
+                got = kinds.get(f"{t}.{p}")
+                if got != "HASH":
+                    print(f"  WRONG {where}: the engine reports {t}.{p} as {got!r}, the registry says HASH")
+                    bad += 1
+        for ln, t, p in ARCADEDB_SORTED_ID_INDEXES:
+            if ln == lane and kinds.get(f"{t}.{p}") == "HASH":
+                print(f"  WRONG {where}: {t}.{p} is a hash index, and the graph lane's person_scan ranges over it")
+                bad += 1
+    if not bad and not warned:
+        print(f"  ok   {judged} row(s) judged against the engine's own report")
+    if warned:
+        print(f"  {warned} unstamped row(s) warned over {judged} row(s); they do not change the exit status "
+              f"(INDEX_KINDS_GATE_FAILS is True from the re-pin campaign on: an unstamped row fails)")
+    return bad
+
+
+# INDEX DDL A "NONE" ARM STILL TIMES (BUGS F122). index_timer covers every index
+# statement in build(), not only the lane's selective one, so an arm that declares
+# NONE for l_shipdate can still time a key index its transactional workload needs.
+# DuckDB builds o_okey on the EMPTY orders_new table: 0.008-0.012 s, where the
+# l_shipdate index it declares away costs 3.4-3.6 s at SF1 (laptop, DuckDB 1.5.4,
+# three reps each). The bound sits 10x above the first and 34x below
+# the second at SF1, further below at SF10, so the check still catches the removed
+# index coming back. Without this entry the gate refused qOE's first DuckDB rows
+# (index_s=0.01) as "an index that was removed has come back", found by the
+# landing rehearsal before the stage finished.
+NONE_ARM_TIMED_DDL = {
+    ("l1tpc", "duckdb"): ("o_okey, the order-key index, built on the empty orders_new table", 0.1),
+}
+
+
+def _check_index_rows(rows):
+    """F14b: the DECLARATION is a claim; `index_s` on the row is the evidence.
+
+    check_index_decisions below asks whether every arm is declared. It never
+    reads a row, so a map saying "PostgreSQL builds l_shipdate, 2.5x" passes
+    green whether or not the index was built -- and a row measured without one
+    is a perfectly valid row, so nothing else notices either. That is the same
+    shape as every defect this file keeps recording: a setting written is not a
+    setting in force.
+
+    WHY THIS IS NEEDED NOW. Every stage's preflight checks the tree generically
+    (the pull, budget_lookup, equivalence_check, budgets.py); only qOJ checks
+    that the specific fix it exists to measure is present, because that guard
+    was written by hand when the stage was generated. qOD3 and qOE carry the
+    index fixes -- PostgreSQL's l_shipdate, ArangoDB's persistent
+    pid, the two removals -- and verify none of them. A waiting queue script
+    cannot be edited (bash reads it by byte offset), so the check goes where
+    the pull already reaches: here, against the rows the stage produces.
+
+    ONLY THE UNAMBIGUOUS HALF IS ASSERTED, and the rest is counted rather than
+    guessed. A declaration reading `NONE:` means no index is built, and one
+    citing a measured with/without ratio (`870.7 -> 141.7 ms`) means one is.
+    The others -- "record id carries pid", "native TIMESERIES type",
+    "inherits PostgresTPC" -- describe an index that exists with no build step
+    to time, and pattern-matching that prose into an expectation is how a check
+    starts producing fluent false findings. They are reported as unchecked so
+    the coverage is visible, which is the rule absent-is-not-partial asks for.
+    """
+    checked = unchecked = 0
+    bad = 0
+    no_split = collections.Counter()
+    for lane, decided in sorted(INDEX_DECISIONS.items()):
+        for arm, decl in sorted(decided.items()):
+            builds = None
+            if decl.startswith("NONE"):
+                builds = False
+            elif "->" in decl:
+                builds = True
+            if builds is None:
+                unchecked += 1
+                continue
+            got = [r for r in rows
+                   if r.get("lane") == lane and str(r.get("backend")) == arm
+                   and r.get("index_s") is not None]
+            if not got:
+                # Not a failure: every row frozen before the ingest/index split
+                # landed carries no index_s at all, and a lane that has not
+                # re-run since simply has nothing to check yet.
+                no_split[lane] += 1
+                continue
+            checked += 1
+            built = [float(r["index_s"]) for r in got]
+            # A NONE arm may time other index DDL; see NONE_ARM_TIMED_DDL.
+            _other, _bound = NONE_ARM_TIMED_DDL.get((lane, arm), (None, 0.0))
+            any_built = any(v > (0.0 if builds else _bound) for v in built)
+            if builds and not any_built:
+                print(f"  FAIL {lane}/{arm}: declares an index with a measured ratio "
+                      f"({decl}) and every one of its {len(got)} row(s) records "
+                      f"index_s=0. The declaration is a claim; the row is the evidence, "
+                      f"and they disagree.")
+                bad += 1
+            elif not builds and any_built:
+                _allow = (f" (above the {_bound} s allowed for {_other})" if _other else "")
+                print(f"  FAIL {lane}/{arm}: declares NONE ({decl}) and records "
+                      f"index_s={max(built)}{_allow}. An index that was removed for costing "
+                      f"this engine has come back.")
+                bad += 1
+    if no_split:
+        _w = ", ".join(f"{k} ({v})" for k, v in sorted(no_split.items()))
+        print(f"  note: {sum(no_split.values())} arm(s) have no index_s on any row yet, "
+              f"so nothing to check against: {_w}. The split lands with the re-runs.")
+    print(f"  ok   {checked} arm(s) checked against their rows, {unchecked} not asserted "
+          f"(an index with no build step to time)")
+    return bad
+
+
+def check_index_decisions(rows=None):
+    """F14: no arm on a selective-filter lane goes undeclared."""
+    import runner
+    print("=== F14: every arm on a selective-filter lane declares its index decision ===")
+    bad = 0
+    for lane, decided in sorted(INDEX_DECISIONS.items()):
+        arms = list(runner.LANES.get(lane, (None, []))[1])
+        missing = [a for a in arms if a not in decided]
+        stale = [a for a in decided if a not in arms]
+        for a in missing:
+            print(f"  FAIL {lane}/{a}: no index decision declared. An index chosen by "
+                  f"reasoning was wrong for two of seven engines (BUGS F98); declare what "
+                  f"this arm builds and the measurement behind it.")
+            bad += 1
+        for a in stale:
+            print(f"  FAIL {lane}/{a}: declares an index decision and is not on the lane; "
+                  f"the map has outlived the arm")
+            bad += 1
+        if not missing and not stale:
+            unmeasured = [a for a, d in decided.items() if d.startswith("UNMEASURED")]
+            note = f", {len(unmeasured)} unmeasured ({', '.join(unmeasured)})" if unmeasured else ""
+            print(f"  ok   {lane}: {len(arms)} arm(s) declared{note}")
+    if rows is not None:
+        bad += _check_index_rows(rows)
+    return bad
+
+
+# DECISIONS #132. F14c's dense lane, read per adapter rather than per row: a
+# declaration for the arms whose index work genuinely has no separate phase, and
+# a disclosure for an arm that has one and times it inside one timer. Both maps
+# are read by export_web as well, so the page and this gate state the same thing.
+PHASE_SPLIT_DECLARED = {
+    ("l3d", "chroma_dense"): "builds its HNSW index during the load (`add`)",
+    ("l3d", "qdrant_dense"): "builds its HNSW index in the background as points arrive, and the wait for it is inside the build timer",
+    ("l3d", "qdrant_dense_int8"): "builds its HNSW index in the background as points arrive, and the wait for it is inside the build timer",
+    ("l3d", "qdrant_dense_pq"): "builds its HNSW index in the background as points arrive, and the wait for it is inside the build timer",
+    ("l3d", "sqlite_vec_dense"): "has no separate index: `vec0` is a brute-force table",
+    ("l3d", "sqlite_vec_dense_int8"): "has no separate index: `vec0` is a brute-force table",
+    ("l3d", "surrealdb_dense"): "defines its index before the load, which builds it as rows arrive",
+    # #131 item 3. Lucene builds a graph per segment while
+    # documents are indexed and the force-merge rebuilds it into one.
+    ("l3d", "elasticsearch_dense"): "builds its HNSW per segment as documents are indexed, and the refresh and the force-merge into one segment, which rebuilds the graph, are inside the build timer",
+    ("l3d", "cratedb_dense"): "builds its HNSW per segment (Lucene) as documents are indexed, and the refresh and the OPTIMIZE into one segment, which rebuilds the graph, are inside the build timer",
+    ("l3d", "elasticsearch_dense_int8"): "builds its HNSW per segment as documents are indexed, and the refresh and the force-merge into one segment, which rebuilds the graph, are inside the build timer",
+}
+# EMPTY (CAMPAIGN section 7 row 44): DuckDB VSS and ArangoDB
+# now time their load and their index as two timers, as the split arms do,
+# so neither needs a disclosure. An arm added here again is one whose index
+# phase exists and is timed inside one timer.
+PHASE_SPLIT_DISCLOSED = {}
+
+
+def check_phase_split(rows):
+    """F14c: if one arm on a lane splits ingest from index, every arm must.
+
+    The split is what turns "this engine took 40 s to build the corpus" into
+    "it spent 12 s writing and 28 s indexing", and it is the finer measurement
+    the whole instrument is for. It is also exactly the kind of thing that
+    arrives per adapter and then stops arriving: whoever adds the next engine
+    to a lane writes a `build()` and has no reason to know that its neighbours
+    time two phases inside theirs.
+
+    What that costs is not a missing number, it is an unfair TABLE. The column
+    exists because other arms fill it, so the new arm prints a blank where
+    everyone else prints a figure, and a blank in a benchmark reads as a
+    result -- the same confusion between "not measured" and "nothing there"
+    that the censored-cell notes exist to prevent one column over.
+
+    THREE STATES, AND ONLY ONE IS A FINDING. An arm may record the split; or
+    declare `index_before_load`, which is the honest answer where the index is
+    defined before the first row lands and its work is spread through the load
+    (SurrealDB on the document and time-series lanes); or belong to a lane
+    where no arm splits at all, because every engine there builds its index as
+    it ingests (the sparse lane) or creates it in the schema before loading
+    (the graph lane). The finding is the fourth case: a lane where some arms
+    split and one does not, and does not say why.
+    """
+    print("\n=== F14c: on a lane that splits ingest from index, every arm does ===")
+    lanes = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0]))
+    for r in rows:
+        lane = r.get("lane")
+        if not lane or str(r.get("instrument") or "") != publish_instrument.PUBLISH_INSTRUMENT:
+            continue
+        st = lanes[lane][r.get("backend")]
+        st[0] += 1
+        if r.get("index_s") not in (None, "", "None"):
+            st[1] += 1
+        if r.get("index_before_load") or (lane, r.get("backend")) in PHASE_SPLIT_DECLARED:
+            st[2] += 1
+    bad = 0
+    for lane in sorted(lanes, key=str):
+        arms = lanes[lane]
+        split = [b for b, st in arms.items() if st[1]]
+        if not split:
+            print(f"  n/a    {lane}: no arm splits, so there is nothing to be "
+                  f"inconsistent about ({len(arms)} arm(s))")
+            continue
+        disclosed = sorted(b for b, st in arms.items()
+                           if not st[1] and not st[2] and (lane, b) in PHASE_SPLIT_DISCLOSED)
+        missing = sorted(b for b, st in arms.items()
+                         if not st[1] and not st[2] and (lane, b) not in PHASE_SPLIT_DISCLOSED)
+        if missing:
+            print(f"  FAIL   {lane}: {len(split)} of {len(arms)} arms split ingest "
+                  f"from index; these do not, and declare no reason: "
+                  f"{', '.join(missing)}")
+            bad += len(missing)
+        else:
+            declared = [b for b, st in arms.items() if not st[1] and st[2]]
+            extra = f", {len(declared)} declared with no separate index phase" if declared else ""
+            if disclosed:
+                extra += f", {len(disclosed)} disclosed on the page ({', '.join(disclosed)})"
+            print(f"  ok     {lane}: all {len(arms)} arm(s) accounted for "
+                  f"({len(split)} split{extra})")
+    return bad
+
+
+def _durability_classes_required(lane, backend):
+    """The classes a timed write cell of this arm must exist in: both (DECISIONS #90), except for an arm that
+    runner.ARM_RUNS declares runs one class of this lane (CAMPAIGN row 69: the image-defaults arm runs the relaxed
+    class only, so asking it for a strict cell would fail the landing of the last stage for a cell nobody queued)."""
+    import runner
+    declared = (runner.ARM_RUNS.get(backend, {}).get(lane) or {}).get("durability")
+    return {declared} if declared in ("relaxed", "strict") else {"relaxed", "strict"}
+
+
+def check_durability(rows):
+    import bench_common
+    print("=== F10: durability class and instrument per table ===")
+    inst_rows = [r for r in rows if str(r.get("instrument") or "") == publish_instrument.PUBLISH_INSTRUMENT]
+    if not inst_rows:
+        print("  no 2026-11 rows in the canonical set; nothing to check yet")
+        return 0
+    bad = 0
+    unverified = set()
+    no_setting = set()
+    seen_classes = collections.defaultdict(set)   # (lane, scale, workload, backend) -> classes
+    for r in inst_rows:
+        d = str(r.get("durability") or "")
+        # THE TWO THINGS A ROW NOW SAYS (DECISIONS #90): the class the CELL
+        # asked for, and the class the ENGINE reported. A cell that asked for
+        # strict and whose engine reports relaxed is a flag that did not take,
+        # which is the failure a server that silently ignores an environment
+        # variable produces and the reason #81 refuses an asserted string.
+        asked = str(r.get("durability_class") or "relaxed")
+        got = bench_common.durability_class(d)
+        where = f"{r.get('lane')} {r.get('scale')} {r.get('workload')} {r.get('backend')} [{asked}]"
+        key = (r.get("lane"), str(r.get("scale")), r.get("workload"), r.get("backend"))
+        if r.get("durability_no_setting"):
+            no_setting.add(r.get("backend"))
+            seen_classes[key].add("no-setting")
+        else:
+            seen_classes[key].add(asked)
+        if got is None:
+            print(f"  FAIL {where}: 2026-11 row records no durability"); bad += 1
+            continue
+        if r.get("durability_no_setting"):
+            # An engine with no knob reports the same string in both classes,
+            # by construction; #90 puts it on an equal footing by printing that
+            # one number in both columns rather than comparing its strict
+            # number against everyone else's relaxed one.
+            if r.get("backend") not in STRICT_ALLOWED | UNVERIFIED_ALLOWED | RELAXED_ONLY_ALLOWED:
+                print(f"  FAIL {where}: declares no durability setting but is not "
+                      f"one of the named exceptions"); bad += 1
+            if got == "unverified":
+                unverified.add(r.get("backend"))
+            continue
+        if got == "unverified" and r.get("backend") not in UNVERIFIED_ALLOWED:
+            print(f"  FAIL {where}: '{d}' -- an unchecked default on an engine "
+                  f"that is not one of the named exceptions"); bad += 1
+        elif got == "unverified":
+            unverified.add(r.get("backend"))
+        elif got != asked:
+            print(f"  FAIL {where}: the cell asked for the {asked} class and the "
+                  f"engine reports '{d}', which is {got}"); bad += 1
+        elif "NOT the #" in d:
+            print(f"  FAIL {where}: the server answered '{d}'"); bad += 1
+
+    # BOTH CLASSES ON THE WRITE CELLS (DECISIONS #90). "Every timed write
+    # operation runs twice, once with each setting." A write cell that exists
+    # in only one class is a failure unless the engine declared no setting, in
+    # which case one cell is the whole answer and the page says so.
+    for (lane, scale, workload, backend), classes in sorted(seen_classes.items()):
+        if (lane, workload) not in WRITE_CELLS:
+            continue
+        if "no-setting" in classes:
+            continue
+        missing = _durability_classes_required(lane, backend) - classes
+        if missing:
+            print(f"  FAIL {lane} {scale} {workload} {backend}: a timed write cell "
+                  f"in only the {sorted(classes)} class; #90 runs it at both "
+                  f"(missing {sorted(missing)})")
+            bad += 1
+    # The two data-dependent time-series shapes must agree across engines
+    # (l4_tsbs records the counts; a query that returned a different number
+    # of rows measured a different question).
+    # ...and the document analytics shapes, per scale (the three
+    # queries return a fixed count only if every engine grouped the same way).
+    for lane, fields in (("l4", ("q_groupby_rows", "q_high_rows")),
+                         ("l1tpc", ("top_parts_rows", "ship_mode_rows", "by_month_rows"))):
+        for qn in fields:
+            got = {}
+            for r in inst_rows:
+                if r.get("lane") == lane and r.get(qn) not in (None, ""):
+                    got.setdefault((r.get("scale"), str(r.get(qn))), set()).add(r.get("backend"))
+            per_scale = {}
+            for (sc, n), bes in got.items():
+                per_scale.setdefault(sc, {})[n] = sorted(bes)
+            for sc, d in per_scale.items():
+                if len(d) > 1:
+                    print(f"  FAIL {lane} {sc} {qn} disagrees across engines: {d}"); bad += 1
+    if unverified:
+        print(f"  NAMED EXCEPTION: {sorted(unverified)} run at an engine default "
+              f"this project could not establish; their rows and tables say so "
+              f"(FAIRNESS F10)")
+    if no_setting:
+        print(f"  NO SETTING: {sorted(no_setting)} have no durability knob "
+              f"(each straced rather than assumed); they run once and the page "
+              f"prints that one number in both columns (DECISIONS #90)")
+    if not bad:
+        print(f"  ok: {len(inst_rows)} 2026-11 rows, every durability recorded, "
+              f"in the class the cell asked for, and both classes present on "
+              f"every write cell")
+    return bad
+
+
+def check_overrides(rows):
+    """F15: every override a table discloses is stamped on the rows that ran it.
+
+    PROTOCOL.md section 7 lists the settings this benchmark overrides, and the
+    rows its last column marked NOWHERE were recorded nowhere: not on a row, not
+    under a table (CAMPAIGN section 7 row 21). override_registry.py registers each one
+    with the row field its adapter (or the runner, for the served ArcadeDB
+    cap) reads back from the engine, and the value the page sentence claims.
+    A 2026-11 row of such an arm without the field, or with another value, is
+    the page saying something its artifact does not show. page_check holds the
+    sentence half.
+    """
+    import override_registry as OV
+    print("=== F15: every disclosed override is stamped on the rows that ran it ===")
+    bad_list, judged = OV.stamp_findings(rows)
+    if not judged:
+        print("  no 2026-11 row of an arm that runs a registered override; nothing to check yet")
+        return 0
+    groups = {}
+    for f in bad_list:
+        # where = "<lane> <scale> <workload> <backend>": one line per arm, not per row
+        lane, backend = f["where"].split()[0], f["where"].split()[-1]
+        groups.setdefault((f["kind"], f["key"], f["field"], lane, backend), []).append(f)
+    for _group, fs in sorted(groups.items()):
+        more = f"  (+{len(fs) - 1} more row(s) like it)" if len(fs) > 1 else ""
+        print(f"  FAIL {fs[0]['text']}{more}")
+    if not bad_list:
+        print(f"  ok: {judged} row-override pair(s) judged, each stamped with the value its sentence claims")
+    return len(bad_list)
+
+
+def main():
+    try:
+        rows = _canonical()
+    except Exception as e:
+        print(f"cannot load canonical rows: {e}")
+        return 2
+    bad = check_cpuset(rows) + check_envelope(rows)
+    bad += check_jvm_defaults_arms(rows)
+    bad += check_heap_witnesses(rows)
+    bad += check_index_kinds(rows)
+    bad += check_degree(rows)
+    bad += check_close_cost(rows)
+    bad += check_durability(rows)
+    # F15 reads the canonical rows and, where the bench host has them, the dense
+    # multipass overlay records (the dense table's cells come from those).
+    bad += check_overrides(rows + _dense_rows())
+    # F14 reads the LANE ROSTER rather than the rows: an arm that declared no
+    # index decision is a defect whether or not it happened to run this time.
+    # The rows go in as well, for the second half (F14b): a declaration is a
+    # claim and `index_s` is the evidence, and only the rows can say whether
+    # the index the map promises was actually built.
+    bad += check_index_decisions(rows)
+    # F14c is the other direction: F14/F14b ask whether the index DECISION is
+    # declared and real, this asks whether the two PHASES are timed on every
+    # arm of a lane where any arm times them.
+    bad += check_phase_split(rows)
+    check_protocol_overlays()
+    bad += report_producers(rows)
+    print(f"\n{bad} fairness invariant failure(s)")
+    if bad:
+        print("A comparison is only worth printing if both sides were given")
+        print("the same thing. See FAIRNESS.md for the contract and the")
+        print("standing list of known violations.")
+    return 1 if bad else 0
+
+
+
+# ---------------------------------------------------------------------------
+# F6b: published cells come from lane scripts, not bespoke drivers.
+#
+# FAIRNESS.md's structural finding is that both known protocol violations were
+# rows produced by a bespoke driver rather than the lane script, and it states
+# the rule "bespoke drivers investigate, lane scripts publish". Until now that
+# rule lived only in prose, so honouring it per row was an act of memory by
+# whoever promoted a driver's output to a cell. run_conditions() now stamps a
+# "producer" field, which makes it checkable.
+#
+# A row with no producer is NOT passed. Silence is how the overlays got away
+# with recording no conditions at all (#113); an unstamped row predates the
+# stamp, which is exactly the population that needs looking at.
+LANE_SCRIPT = {
+    "l1": {"l1_tabular.py"},
+    "l1tpc": {"l1_tpc.py"},
+    "l2": {"l2_graph.py", "ldbc_snb.py"},
+    "l3s": {"l3_sparse.py"},
+    "l3d": {"l3d_dense.py"},
+    "l4": {"l4_tsbs.py"},
+    "e2": {"e2_hybrid.py"},
+    "e4": {"e4_decomp.py"},
+    "lifecycle": {"l5_lifecycle.py"},
+    "restart": {"l6_restart.py"},
+    "e4_decomp": {"deployment_decomp_probe.py"},
+}
+
+
+def check_producers(rows):
+    """Return (violations, unstamped) for rows that would feed a table."""
+    violations, unstamped = [], []
+    for r in rows:
+        lane = r.get("lane")
+        if lane not in LANE_SCRIPT:
+            continue
+        prod = r.get("producer")
+        if not prod:
+            unstamped.append((lane, r.get("backend"), r.get("scale")))
+        elif prod not in LANE_SCRIPT[lane]:
+            violations.append((lane, r.get("backend"), r.get("scale"), prod))
+    return violations, unstamped
+
+
+def report_producers(rows):
+    """F6b: did published rows come from the lane script or a bespoke driver?
+
+    Was once dead code. check_producers() and LANE_SCRIPT sat
+    BELOW `if __name__ == "__main__": sys.exit(main())`, so running the file
+    as a script exited at that line and never reached their definitions, let
+    alone called them. FAIRNESS.md calls this rule the structural cause of
+    both known protocol violations, and its enforcement had never executed
+    once. Its lane key was also "l1_tpc" where runs.jsonl says "l1tpc", so
+    every TPC-H row would have been skipped even had it run.
+    """
+    print("\n=== F6b: published rows come from lane scripts, not drivers ===")
+    violations, unstamped = check_producers(rows)
+    if violations:
+        print(f"  FAIL {len(violations)} row(s) produced by a bespoke driver:")
+        for lane, be, scale, prod in violations[:12]:
+            print(f"         {lane:6} {str(scale):8} {str(be):30} producer={prod}")
+        print("         Bespoke drivers investigate, lane scripts publish.")
+    if unstamped:
+        seen = collections.Counter(f"{l}/{s}" for l, _, s in unstamped)
+        print(f"  {len(unstamped)} row(s) carry no producer at all "
+              f"(predate the stamp): {dict(list(seen.items())[:6])}")
+        print("    Not passed and not failed: unstamped is the population that")
+        print("    needs looking at, which is why silence is not a pass here.")
+    if not violations and not unstamped:
+        print("  ok: every row names its lane script as producer")
+    return len(violations)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

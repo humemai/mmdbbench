@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Give the sparse lane the multi-pass protocol the dense lane already has.
+
+l3_sparse.py times ONE pass, for every engine. That is fair, and it is also
+blind to a state the dense lane turned out to have: dense_multipass_driver.py
+gave the dense comparators our multi-pass protocol and found that only ArcadeDB
+moves between the first pass and the rest.
+
+    engine       cold    warm    gain
+    Qdrant       1.342   1.312   1.02x
+    Chroma       0.700   0.708   0.99x
+    LanceDB      3.199   3.154   1.01x
+    ArcadeDB     8.869   0.956   9.27x
+
+ArcadeDB pages its index off disk and the comparators are resident from build,
+so the first pass costs us 9x and costs them nothing. Whether the same is true
+of LSM_SPARSE_VECTOR is unknown: nobody has ever run the sparse lane twice.
+Until this runs, the sparse bars on the summary figure are first-pass numbers
+that may understate steady state by an unmeasured amount.
+
+WARM QUERIES ARE DISJOINT FROM COLD ONES, and that is the one place this
+deliberately does NOT copy the dense driver. The dense driver replays the same
+query set on every pass, so its warm number cannot separate two explanations:
+
+    the index is now resident        real, and what a running service gets
+    these exact queries were seen    memoisation, which a service does not get
+
+The evidence favours residency, because int8 gains 3.5x and fp32 9.3x while
+int8 is four times smaller, so the gain tracks DATA SIZE rather than query
+repetition. But that is an inference from a ratio, and a reviewer is entitled
+to reject it. Splitting the query set removes the argument: the warm pass here
+asks questions the engine has never been asked, against an index it has already
+paged in, which is exactly the production condition.
+
+The cost is that cold and warm are measured on different queries, so they are
+not paired per-query. That is fine for a median over hundreds of queries and it
+is the lesser of the two evils.
+
+    BENCH_SPARSE_SOURCE=bigann BENCH_MP_BACKEND=qdrant_sparse \
+        BENCH_MP_SCALE=small PROBE_OUT=/pout/sp_qdrant.json \
+        python -u sparse_multipass_driver.py
+
+Mirrors dense_multipass_driver.py's shape so the two differ in the lane and
+nothing else.
+"""
+import json
+import os
+import statistics
+import time
+
+from l3_sparse import (BACKENDS, K, WARMUP, DIMENSIONS, SCALE_DOCS,
+                       SCALE_QUERIES, gen_queries, pct, recall_at_k, _src)
+from bench_common import run_conditions, SelfMemorySampler
+
+# Read with .get so the module can be imported without the run environment;
+# the dense driver's contract check broke on a module-level os.environ[...].
+BACKEND = os.environ.get("BENCH_MP_BACKEND")
+SCALE = os.environ.get("BENCH_MP_SCALE", "small")
+PASSES = int(os.environ.get("BENCH_MP_PASSES", "5"))
+
+
+def lib_version_of(backend, version):
+    """The adapter's own version string, kept on the pass as `lib_version` (CAMPAIGN section 7 row 64,
+    BUGS F173), and guaranteed to start with the engine's name: Elasticsearch's adapter reports the bare
+    number ("9.5.4"), the others prefix it ("qdrant:1.19.1"), and a reader of a pass file should not have
+    to know which. None when the adapter reported nothing."""
+    if not version:
+        return None
+    family = str(backend).split("_")[0].lower()
+    v = str(version)
+    return v if v.lower().startswith(family) else f"{family}:{v}"
+
+
+def _timed_pass(b, queries, gt, offset):
+    """One timed sweep. Returns (percentiles, recall).
+
+    Recall resolution stays OUT of the timed section, exactly as l3_sparse
+    does it: resolve() is a backend-native id lookup that cost ~4.7s per call
+    at 8.84M, and timing it would measure our resolver rather than the engine.
+    """
+    lats, raw = [], []
+    for idx, vals in queries:
+        t0 = time.perf_counter()
+        ids = b.search(idx, vals, K)
+        lats.append(time.perf_counter() - t0)
+        raw.append(ids)
+    recall = None
+    if gt is not None:
+        rs = [recall_at_k(b.resolve(ids), gt[offset + qi])
+              for qi, ids in enumerate(raw)]
+        recall = round(statistics.mean(rs), 4)
+    return pct(lats), recall
+
+
+def main():
+    if not BACKEND:
+        raise SystemExit("BENCH_MP_BACKEND is required (e.g. qdrant_sparse)")
+
+    n_docs = SCALE_DOCS[SCALE]
+    queries = gen_queries(SCALE_QUERIES[SCALE])
+    gt = _src.load_gt(SCALE) if os.environ.get(
+        "BENCH_SPARSE_SOURCE") == "bigann" else None
+
+    # THE SPLIT. First half answers the cold pass, second half every warm pass.
+    # Both halves are drawn from the same dev query set in the same order, so
+    # the two are the same KIND of query and differ only in never having been
+    # asked. gt is indexed by absolute position, hence the offset.
+    half = len(queries) // 2
+    cold_q, warm_q = queries[:half], queries[half:]
+    if len(warm_q) < 50:
+        raise SystemExit(
+            f"only {len(warm_q)} warm queries at scale {SCALE!r}; a median "
+            "over that few is not worth publishing. Raise SCALE_QUERIES or "
+            "run a bigger tier.")
+
+    b = BACKENDS[BACKEND]()
+    b.connect()
+
+    # Peak memory for the WHOLE cell, build included, matching what the
+    # lane rows mean by peak_anon_mib_sum. Started here rather than
+    # around the query passes because an index build is where a vector
+    # engine's memory actually peaks, and T4's memory column would
+    # otherwise report a steady state the lane column does not.
+    mem = SelfMemorySampler().start()
+
+    t0 = time.perf_counter()
+    b.build(n_docs)
+    b.post_build()          # the vendor settle step, same as the lane
+    build_s = round(time.perf_counter() - t0, 2)
+    print(f"BUILD-DONE {build_s}s", flush=True)
+
+    # The lane's own 5 untimed warmups, so pass 0 here and the lane's single
+    # pass are the same measurement. Taken from the WARM half, so the cold
+    # queries stay genuinely unasked.
+    for idx, vals in warm_q[:WARMUP]:
+        b.search(idx, vals, K)
+
+    out_reps = []
+    for rep in range(0, PASSES + 1):
+        cold = rep == 0
+        qs, off = (cold_q, 0) if cold else (warm_q, half)
+        p, recall = _timed_pass(b, qs, gt, off)
+        rec = {"rep": rep, "pass": "cold" if cold else "warm",
+               "backend": BACKEND, "scale": SCALE, "lane": "l3s_mp",
+               "build_s": build_s, "n_docs": n_docs, "dims": DIMENSIONS,
+               "k": K, "n_queries": len(qs),
+               "queries": "first half" if cold else "second half",
+               "engine_version": getattr(b, "version", "?"),
+               # The BACKEND's own version. run_conditions() below overwrites engine_version with the
+               # arcadedb-embedded package's, so every comparator pass at the pin read "26.10.1.dev0"
+               # (BUGS F173); lib_version keeps what the adapter reported, as the dense driver does.
+               "lib_version": lib_version_of(BACKEND, getattr(b, "version", None)),
+               # What the search returned, on every ArcadeDB pass (row 62): ids, like the comparators.
+               **({"sparse_result": b.SPARSE_RESULT} if getattr(b, "SPARSE_RESULT", None) else {}),
+               # Only Elasticsearch has it, and the 9.0-vs-9.4 recall gap was
+               # diagnosable only because the lane recorded it.
+               "es_prune": getattr(b, "prune", None),
+               # The adapter's read-back and settle evidence, as on the lane's rows.
+               **(getattr(b, "row_extra", None) or {}),
+               "recall_at_10": recall}
+        rec.update({f"query_{k2}": v for k2, v in p.items()})
+        rec.update(run_conditions(lane="l3s_mp"))
+        # AFTER run_conditions, which stamps engine_version from the package in this container: for the
+        # served ArcadeDB arm that reads "unknown" and for the embedded arm it is the wheel, while the
+        # adapter learned the real build on connect() (the dense driver does the same, BUGS F173).
+        if "arcadedb" in BACKEND and getattr(b, "version", None):
+            rec["engine_version"] = b.version
+        out_reps.append(rec)
+        print("RESULT " + json.dumps(rec), flush=True)
+
+    # One peak for the cell, stamped onto every pass of it. finish()
+    # is called ONCE: calling it inside the loop would stop the
+    # sampler on pass 0 and freeze every later row at whatever the
+    # peak happened to be before the warm passes ran.
+    cell_mem = mem.finish()
+    for _r in out_reps:
+        _r.update(cell_mem)
+
+    outp = os.environ.get("PROBE_OUT", "")
+    if outp:
+        with open(outp, "w") as f:
+            json.dump(out_reps, f, indent=1)
+    # Same reason as the dense driver: a backend can leave a JVM or a client
+    # thread alive and the campaign has lost cells to a driver that finished
+    # and never exited.
+    os._exit(0)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        os._exit(1)

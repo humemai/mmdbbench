@@ -1,0 +1,3597 @@
+#!/usr/bin/env python3
+"""L3d dense-vector lane: SIFT1M (ann-benchmarks, exact L2 ground truth).
+
+Data: /data/dense/sift_{train,test,neighbors}.npy (host-prepped by
+gen_dense_npy.py; containers need only numpy).
+
+Fairness: matched HNSW operating point, ef_construction=100, ef_search=100,
+L2 metric, FP32 vectors everywhere. "Matched" is expressed in TWO constants
+because the engines do not share units: ArcadeDB's maxConnections is a
+per-layer bound (M, default 32) while hnswlib-style engines double M at the
+base layer (COMPARATOR_M, default 16). Equal base-layer degree is the match;
+a single shared number would not be one. Every row records the value its own
+backend received, under degree_param/degree_family, so a reader never has to
+know which units a given row is in. Disclosed deviations: LanceDB's HNSW variant
+is IVF_HNSW_SQ (int8 scalar-quantized, its only HNSW offering; nprobes=20
+default); sqlite-vec is an exact scan (no ANN index exists), so it is the
+recall=1.0 embedded baseline. Recall@10 is reported next to latency so every
+precision/algorithm difference is visible.
+
+Scales: small = full 1M (the canonical unit). Smaller scales cap the corpus and
+keep only queries whose true top-k lies inside the cap (subset-exact recall).
+"""
+import argparse
+import json
+import os
+import statistics
+import sys
+import time
+import traceback
+
+import numpy as np
+import bench_common
+import surreal_common
+import dense_beam
+import arango_common
+import mongo_common
+
+DATA = os.environ.get("BENCH_DENSE_DATA", "/data/dense")
+DIM = 128
+K = 10
+# Default is 32, NOT 16, and the difference is the whole point of #5352.
+# ArcadeDB's maxConnections is a per-layer bound; hnswlib doubles M at the base
+# layer. So maxConnections=32 is the equivalent of the M=16 that Chroma, Qdrant,
+# Milvus, DuckDB-VSS and LanceDB are all given below, and 16 would silently
+# build ArcadeDB at half their degree. That mistake is already on the record: it
+# published "recall 0.951 vs 0.971, a small deficit" in the scipy paper, and it
+# is what took this lane's dense recall from 0.87 to 0.95 once corrected.
+#
+# The paper reports this lane as "degree-matched", so the DEFAULT has to be the
+# configuration the paper describes. runner.py only passes BENCH_DENSE_M
+# through, it never sets it, so a default of 16 meant every re-run that forgot
+# to export it reproduced the unmatched configuration and would have read as a
+# regression, or worse been folded into the paper at the October freeze re-measure.
+# Set BENCH_DENSE_M=16 explicitly to run the half-degree ablation on purpose.
+M = int(os.environ.get("BENCH_DENSE_M", "32"))
+
+# The comment above says maxConnections=32 is the equivalent of M=16 for the
+# hnswlib-style engines, and until 2026-08-01 the code did not implement that:
+# ONE constant was handed to both a per-layer bound (ArcadeDB) and to hnswlib's
+# M (Chroma, Qdrant, Milvus, DuckDB-VSS, LanceDB), which are different units.
+#
+# It was harmless while the default was 16, which is why every published
+# comparator row records m=16 and the T5 dense block as printed today IS
+# degree-matched. Raising the default to 32 fixed ArcadeDB and silently
+# mis-set all five comparators, so the code stopped being able to reproduce
+# the configuration the paper describes. Nothing had run since, so no
+# published number is affected -- but the October freeze re-measures this lane,
+# and would have built every comparator at twice its intended degree while
+# ArcadeDB stayed correct. That is the same hazard the comment above was
+# written to prevent, aimed the other way, and it lands in our favour.
+#
+# Verified against the artifacts before changing anything: at deep10m every
+# comparator row carries m=16 dated 2026-07-19, and the ArcadeDB rows that T5
+# prints carry m=32 dated 2026-07-20.
+COMPARATOR_M = int(os.environ.get("BENCH_DENSE_COMPARATOR_M", str(M // 2)))
+
+EF_CONSTRUCTION = 100
+EF_SEARCH = 100
+# Memgraph's USearch defaults (usearch 2.21.4, index.hpp): connectivity 16,
+# expansion_add 128, expansion_search 64, none settable through Memgraph
+# 3.13.1 (see degree_stamp and MemgraphDense).
+MEMGRAPH_USEARCH_CONNECTIVITY = 16
+# CrateDB 6.4.6 builds its HNSW graph through Lucene 10.4.0 with the codec's default format, which neither CrateDB's CrateCodec
+# (it only wraps the delegate's KnnVectorsFormat) nor any table or column setting changes: Lucene99HnswVectorsFormat
+# DEFAULT_MAX_CONN 16 (doubled at layer 0, so hnswlib's M=16) and DEFAULT_BEAM_WIDTH 100 (= EF_CONSTRUCTION), read from the
+# class constants of the jars in the pinned image (2026-10-23, COMPARATORS.md "CrateDB"). Recorded as the value it builds, the
+# way Memgraph's is; it equals COMPARATOR_M only at the lane's default M, which the arm checks at build time.
+CRATEDB_LUCENE_MAX_CONN = 16
+CRATEDB_LUCENE_BEAM_WIDTH = 100
+MEMGRAPH_USEARCH_EXPANSION_ADD = 128
+MEMGRAPH_USEARCH_EXPANSION_SEARCH = 64
+SCALE_DOCS = {"micro": 5_000, "tiny": 100_000, "small": 1_000_000,
+              "deep10m": 9_990_000}
+N_QUERIES = 1_000
+BATCH = 10_000
+# Chroma's add() batch, named so the page's ingest-path sentence can pin its
+# number to it rather than type it (page_check, condition pins, 2026-09-16).
+# The served build's batch is ArcadeServer.load_batch (DECISIONS #116 item 4).
+CHROMA_BATCH = 5_000
+# What an IVF arm records instead of a degree (arango_common); the lane and
+# the multipass driver read the same tuple so they cannot disagree.
+IVF_FIELDS = ("ivf_nlists", "ivf_nprobe", "ivf_recall_target", "ivf_recall_target_source",
+              "ivf_calibration_recall", "ivf_calibration_queries", "ivf_calibration_slice",
+              # What the SERVER says it holds after the build (BUGS F55): the
+              # collection's own count, the index's training state and the
+              # nLists it resolved to, and the index's size in bytes. n_docs
+              # is len(train) and could not have shown a short load or an
+              # untrained index.
+              "ivf_server_doc_count", "ivf_training_state", "ivf_resolved_nlists",
+              "ivf_index_bytes",
+              # The FAISS factory string the server holds for the index, None
+              # for plain IVF over the floats (the int8 arm's SQ8, 2026-10-02).
+              "ivf_factory")
+
+# The DDL's vocabulary and the results' vocabulary disagreed, and a recorded
+# label could not be fed back in as an input.
+#
+# LSM_VECTOR accepts NONE/INT8/BINARY/PRODUCT, and unquantized is spelled by
+# OMITTING the key entirely. But dense_multipass_driver.py records that same
+# state as "fp32", and every T5 fp32 row, task and paper cell calls it fp32
+# too. So the one name everyone uses for the arm was the one name the DDL
+# rejects, and BENCH_DENSE_QUANT=fp32 dies inside CREATE INDEX with
+# "Invalid quantization type: fp32".
+#
+# That cost three full DEEP-10M builds on 2026-08-03 (q3_fp32_b1..b3, ~2.5 min
+# each before the throw). The F5 version gate above them passed, because the
+# wheel WAS the right version; nothing validated the value. Published fp32
+# numbers are unaffected: the lane scripts reach this path with the variable
+# unset, which was always correct.
+#
+# So accept the reported label as input and normalise it, rather than only
+# rejecting it. Anything outside the engine's set now fails here, in the first
+# second, naming the valid values, instead of after the corpus is ingested.
+_QUANT_ALIASES = {"": "", "fp32": "", "float32": "", "f32": "", "none": ""}
+_QUANT_DDL = {"INT8", "BINARY", "PRODUCT"}
+
+
+def lib_version(module, dist):
+    """Report a library's version from its installed distribution metadata.
+
+    `getattr(mod, "__version__", "?")` is not a version check, it is a coin
+    toss: a package that simply does not define the attribute records "?" and
+    the row looks like a lookup failure rather than a package that never
+    exposed it. qdrant-client is exactly that case, and provenance_check
+    rejected the whole Qdrant row on 2026-08-04 for a field that could never
+    have been populated. importlib.metadata reads what pip installed, so it
+    answers for every distribution whether or not the module cooperates.
+
+    Falls back to the attribute, then to a marker that says which lookup
+    failed, because "unknown" with no cause is what made the original problem
+    hard to see.
+    """
+    try:
+        from importlib.metadata import version
+        return version(dist)
+    except Exception:
+        v = getattr(module, "__version__", None)
+        return v if v else f"unknown (no metadata for {dist!r}, no __version__)"
+
+
+def resolve_quant(raw):
+    """Map BENCH_DENSE_QUANT to what LSM_VECTOR's METADATA accepts.
+
+    Returns "" when the quantization key must be omitted (unquantized fp32).
+    """
+    v = (raw or "").strip()
+    if v.lower() in _QUANT_ALIASES:
+        return _QUANT_ALIASES[v.lower()]
+    if v.upper() in _QUANT_DDL:
+        return v.upper()
+    raise SystemExit(
+        f"BENCH_DENSE_QUANT={raw!r} is not a quantization LSM_VECTOR accepts.\n"
+        f"  unquantized (reported as 'fp32'): leave unset, or fp32/none\n"
+        f"  quantized: {'/'.join(sorted(_QUANT_DDL))}"
+    )
+
+
+def degree_stamp(backend):
+    """The degree this backend was given, and the unit it is in.
+
+    Shared so the lane script and dense_multipass_driver cannot disagree. They
+    did: the driver stamped no degree at all, so the DEEP-10M cells the paper
+    prints could not be shown to be degree-matched, while the lane's own small
+    tier could. F7 reported the tier as passing by reading superseded rows.
+    One function, called from both, is the only version of this that stays
+    true.
+    """
+    # The September arms (2026-09-12, BUGS F36): Neo4j (vector.hnsw.m),
+    # pgvector (m), SurrealDB (M) all build HNSW at COMPARATOR_M; missing
+    # from this set they were stamped exact_scan_no_ann, a false provenance
+    # claim that F7 then refused, correctly.
+    hnswlib_style = {"chroma_dense", "lancedb_dense", "qdrant_dense",
+                     "milvus_dense", "duckdb_vss_dense",
+                     "neo4j_dense", "pgvector_dense",
+                     "surrealdb_dense", "surrealdb_dense_server",
+                     # mongot builds a Lucene HNSW graph whose
+                     # hnswOptions.maxEdges is the per-layer bound with the
+                     # base layer doubled, i.e. hnswlib's M.
+                     "mongodb_dense",
+                     # 2026-10-02 (#131 item 3): Elasticsearch's index_options.m
+                     # is Lucene's, doubled at layer 0 like mongot's; FalkorDB's
+                     # vector index takes hnswlib's M itself.
+                     "elasticsearch_dense", "falkordb_dense",
+                     # Redis Query Engine: M is hnswlib's (max edges per layer, layer 0 holds twice that)
+                     "redis_dense"}
+    # A PRECISION ARM IS THE SAME INDEX AT A DIFFERENT PRECISION, so it keeps
+    # its parent's degree and unit. Without this strip, qdrant_dense_int8 and
+    # milvus_dense_int8 missed the set and were stamped "exact_scan_no_ann" --
+    # a false provenance claim (they are HNSW at M=16) that would also have
+    # made F7's degree-matching invariant vacuous for exactly the rows the
+    # ablation exists to compare.
+    # The suffix runs the other way on one arm: lancedb_dense is LanceDB's int8
+    # arm and lancedb_dense_fp32 its unquantized one (2026-10-02), both HNSW at
+    # COMPARATOR_M in the same IVF partitions.
+    base = str(backend)
+    for _suffix in ("_int8", "_fp32", "_pq"):
+        if base.endswith(_suffix):
+            base = base[:-len(_suffix)]
+    if base.startswith("arcadedb"):
+        return M, "arcadedb_maxconnections_per_layer"
+    # Memgraph 3.13.1 builds every vector index with a default-constructed
+    # USearch config (src/storage/v2/indices/vector_index.cpp, `make(metric,
+    # {}, {})`; usearch 2.21.4): connectivity 16, doubled at the base layer,
+    # so hnswlib's M=16 by the engine's own fixed value, not by ours. The
+    # keys are not settable: CREATE VECTOR INDEX accepts unknown config keys
+    # and ignores them (laptop probe 2026-10-02: recall identical at
+    # connectivity 2, 16, and 64). Recorded as the value it builds.
+    if base == "memgraph_dense":
+        return MEMGRAPH_USEARCH_CONNECTIVITY, "hnswlib_m_doubled_at_base"
+    # CrateDB: Lucene's fixed default (CRATEDB_LUCENE_MAX_CONN above), the engine's own value.
+    if base == "cratedb_dense":
+        return CRATEDB_LUCENE_MAX_CONN, "hnswlib_m_doubled_at_base"
+    # LadybugDB's HNSW has two layers: `ml` is the base layer's degree and
+    # `mu` the upper layer's, so the base degree is recorded as is, at the
+    # 2 x COMPARATOR_M the hnswlib-style engines reach at their layer 0.
+    if base == "ladybug_dense":
+        return 2 * COMPARATOR_M, "ladybug_ml_base_degree"
+    # ArangoDB's vector index is FAISS IVF: inverted lists over trained
+    # centroids, no graph and so no degree. Its operating point is nLists and
+    # nProbe, which the row records as ivf_nlists/ivf_nprobe (2026-09-13).
+    # The int8 arm's lists hold SQ8 codes (ivf_factory on its row); the family
+    # names the absent degree, which both arms share, not the list encoding.
+    if base == "arangodb_dense":
+        return None, "ivf_flat_no_degree"
+    if base in hnswlib_style:
+        return COMPARATOR_M, "hnswlib_m_doubled_at_base"
+    return None, "exact_scan_no_ann"
+
+
+# ArcadePageVectorValues.DEFAULT_CACHE_SIZE at the pin. An inline-quantized
+# index (INT8/BINARY) that is left on the default gets exactly this, because a
+# miss reads from an index page rather than a record; only a NON-quantized index
+# auto-sizes against the heap. So 100000 is int8's default, not a bound on it.
+ENGINE_DEFAULT_CACHE_SIZE = 100_000
+
+
+def configured_build_cache():
+    """The value we hand the engine: 0 (its auto) unless the campaign overrides."""
+    return int(os.environ.get("BENCH_DENSE_BUILD_CACHE", "0").strip() or 0)
+
+
+def effective_build_cache(configured, quant):
+    """What the engine will actually use, mirroring computeGraphBuildCacheCapacity.
+
+    Recorded because the configured value alone does not say what happened: 0
+    means 100000 for an int8 index and "as much of the corpus as 25% of the
+    available heap holds" for an fp32 one, and those are wildly different runs.
+    """
+    if configured > 0:
+        return configured, "explicit bound from BENCH_DENSE_BUILD_CACHE"
+    if canonical_quant_label(quant) == "PRODUCT":
+        return 0, "engine auto; not read back for a PRODUCT index (the INT8 and BINARY default does not apply)"
+    if canonical_quant_label(quant) != "fp32":
+        return ENGINE_DEFAULT_CACHE_SIZE, "engine default for an inline-quantized index"
+    return 0, "engine auto: whole corpus when it fits graphBuildCacheMaxHeapPercent (default 25) of AVAILABLE heap"
+
+
+def canonical_quant_label(raw):
+    """The one name for this arm in results, whatever the input spelled."""
+    return resolve_quant(raw) or "fp32"
+
+
+def load_dataset(scale):
+    global DIM
+    if scale == "deep10m":
+        # ann-benchmarks deep-image-96-angular: cosine GT. Rows are normalized
+        # to unit length so L2 ranking == cosine ranking and every adapter's
+        # L2 configuration (and the shipped GT) stays valid unchanged.
+        DIM = 96
+        mm = np.load(os.path.join(DATA, "..", "deep10m", "deep_base.npy"),
+                     mmap_mode="r")
+        # chunked copy+normalize: a single np.array(memmap) holds the 3.8GB
+        # anon copy WHILE the read fills 3.8GB of page cache — transiently
+        # ~7.6GB, which OOM-killed the 7GB client share of server-topology
+        # cells. Chunking keeps cache pages clean/reclaimable (peak ~4.2GB).
+        base = np.empty(mm.shape, dtype=np.float32)
+        CH = 500_000
+        for s in range(0, mm.shape[0], CH):
+            c = np.array(mm[s:s + CH], dtype=np.float32)  # copy: asarray on a float32 memmap returns a read-only view
+            c /= np.maximum(np.linalg.norm(c, axis=1, keepdims=True), 1e-12)
+            base[s:s + CH] = c
+        test = np.load(os.path.join(DATA, "..", "deep10m",
+                                    "deep_query.npy"))[:N_QUERIES]
+        test = test / np.maximum(
+            np.linalg.norm(test, axis=1, keepdims=True), 1e-12)
+        gt = np.load(os.path.join(DATA, "..", "deep10m",
+                                  "deep_gt.npy"))[:N_QUERIES, :K]
+        return base, test.astype(np.float32), gt
+    train = np.load(os.path.join(DATA, "sift_train.npy"), mmap_mode="r")
+    test = np.load(os.path.join(DATA, "sift_test.npy"))[:N_QUERIES]
+    n = SCALE_DOCS[scale]
+    full = np.load(os.path.join(DATA, "sift_train.npy"), mmap_mode="r").shape[0]
+    train = np.asarray(train[:n], dtype=np.float32)
+    if n == full:  # full corpus: use the shipped exact GT
+        gt = np.load(os.path.join(DATA, "sift_neighbors.npy"))[:N_QUERIES, :K]
+    else:  # subset scale: exact GT by chunked brute force (L2)
+        gt = _exact_gt(test, train, n)
+    return train, test, gt
+
+
+def _exact_gt(test, train, n):
+    """Exact top-K by chunked brute force (L2) over train[:n]."""
+    if True:
+        qn = (test ** 2).sum(1)
+        best_d = np.full((len(test), K), np.inf, dtype=np.float64)
+        best_i = np.full((len(test), K), -1, dtype=np.int64)
+        CH = 100_000
+        for s in range(0, n, CH):
+            c = train[s:s + CH]
+            d = qn[:, None] - 2.0 * test @ c.T + (c ** 2).sum(1)[None, :]
+            md = np.concatenate([best_d, d], axis=1)
+            mi = np.concatenate(
+                [best_i, np.broadcast_to(np.arange(s, s + len(c)),
+                                         (len(test), len(c)))], axis=1)
+            top = np.argpartition(md, K - 1, axis=1)[:, :K]
+            rows = np.arange(len(test))[:, None]
+            order = np.argsort(md[rows, top], axis=1)
+            best_d = md[rows, top][rows, order]
+            best_i = mi[rows, top][rows, order]
+        gt = best_i
+    return gt
+
+
+CALIBRATION_SLICE = (N_QUERIES, N_QUERIES + 200)
+
+
+def calibration_slice(scale, train):
+    """Queries [N_QUERIES : N_QUERIES+200] with their ground truth: a held-out
+    slice the timed pass never asks, for an arm that chooses its operating
+    point by effect (ArangoDB's IVF). Both fixtures ship 10,000 queries with
+    ground truth and the lane times only the first 1,000. Loaded only when an
+    arm asks, so nothing else changes."""
+    lo, hi = CALIBRATION_SLICE
+    if scale == "deep10m":
+        q = np.load(os.path.join(DATA, "..", "deep10m", "deep_query.npy"))[lo:hi]
+        q = (q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)).astype(np.float32)
+        return q, np.load(os.path.join(DATA, "..", "deep10m", "deep_gt.npy"))[lo:hi, :K]
+    q = np.load(os.path.join(DATA, "sift_test.npy"))[lo:hi]
+    n = SCALE_DOCS[scale]
+    full = np.load(os.path.join(DATA, "sift_train.npy"), mmap_mode="r").shape[0]
+    if n == full:
+        return q, np.load(os.path.join(DATA, "sift_neighbors.npy"))[lo:hi, :K]
+    return q, _exact_gt(q, train, n)
+
+
+# ---------------------------------------------------------------------------
+# MUTATION OF A BUILT INDEX (DECISIONS #82d). "Dense vector insert-into-a-built-
+# index-then-search and delete-from-a-built-index-then-search, at the one
+# million tier only, reporting latency and the recall after each."
+#
+# `small` IS the one-million tier (SCALE_DOCS above), which is the tier
+# make_paper_tables publishes as 1M. BENCH_DENSE_MUTATE=1 forces the phase on
+# at any scale, which is how the laptop smoke exercises it at micro; =0 forces
+# it off. The row always records which of the three applied, because a phase
+# that silently did not run is indistinguishable from one that ran and found
+# nothing.
+MUTATE_SCALES = ("small",)
+MUTATE_N = int(os.environ.get("BENCH_DENSE_MUTATE_N", "1000"))
+MUTATE_QUERIES = int(os.environ.get("BENCH_DENSE_MUTATE_QUERIES", "1000"))
+
+
+def mutation_enabled(scale):
+    flag = os.environ.get("BENCH_DENSE_MUTATE", "").strip()
+    if flag in ("0", "off", "no"):
+        return False, "disabled by BENCH_DENSE_MUTATE=0"
+    if flag in ("1", "on", "yes"):
+        return True, "forced on by BENCH_DENSE_MUTATE=1"
+    if scale in MUTATE_SCALES:
+        return True, f"scale {scale} is the one-million tier (DECISIONS #82d)"
+    return False, (f"scale {scale} is not the one-million tier; #82d runs the two "
+                   f"mutation operations at {'/'.join(MUTATE_SCALES)} only")
+
+
+# THE ID INDEX FOR THE DELETE (humemai/arcadedb-embedded-python#291, CAMPAIGN section 7 row 84, DECISIONS #178 index parity). The
+# mutation pass deletes by the vector's id. Half the comparators address a record by a key they always index (Chroma,
+# Qdrant, Milvus, Elasticsearch, MongoDB `_id`, ArangoDB `_key`, SurrealDB record ids, sqlite-vec `rowid`, LadybugDB's PRIMARY
+# KEY); ArcadeDB, pgvector, Neo4j, Memgraph, FalkorDB, DuckDB, and LanceDB store the id as a plain property and would scan for it
+# (ArcadeDB at 1M: 8.1x the comparator median on the delete column; a UNIQUE_HASH index on `vid` cut it to 0.24 of that on the
+# laptop). So every engine of the second group gets the index its own docs name for a key lookup, created on the empty store before
+# the load, so its cost is inside `ingest_s`. Every dense row stamps `dense_id_index`, the statement that built the index, or "key"
+# where the engine's own key already serves the delete, so the row shows that every engine deleted through an index.
+
+
+def mutation_victims(gt, n_docs, n):
+    """Which ids to delete: ground-truth members first, so the delete bites.
+
+    Deleting ids no query ever asks for measures the write path and nothing
+    else; deleting the answers is what makes the post-delete recall a real
+    question. Deterministic, so every engine deletes the same set.
+    """
+    victims, seen = [], set()
+    for row in gt:
+        for g in row.tolist():
+            g = int(g)
+            if g not in seen and 0 <= g < n_docs:
+                seen.add(g)
+                victims.append(g)
+                if len(victims) >= n:
+                    return victims
+    step = max(1, n_docs // max(1, n))
+    i = 0
+    while len(victims) < n and i < n_docs:
+        if i not in seen:
+            seen.add(i)
+            victims.append(i)
+        i += step
+    return victims
+
+
+class Base:
+    # Same default as l3_sparse.Base. Every adapter in this lane already sets a
+    # version, which is why the dense table's identities are clean; this exists
+    # so the next one added cannot publish without one by simply forgetting.
+    version = "unset"
+
+    name = "?"
+    version = "?"
+
+    # THE SEARCH BEAM THE 2026-11 SWEEP TURNS (dense_beam.py). "ef" is an HNSW beam read from
+    # the module's EF_SEARCH at every search(), so the default set_beam only has to move that
+    # one global; an adapter that bakes it into the connection or the collection overrides
+    # set_beam. "nprobe" is an IVF engine's lists probed; None is an engine with no setting,
+    # which runs the sweep's single pass and says why in beam_na.
+    beam_kind = "ef"
+    beam_na = None
+
+    def beam_values(self):
+        return dense_beam.ef_values()
+
+    def beam_default(self):
+        return EF_SEARCH
+
+    def set_beam(self, value):
+        global EF_SEARCH
+        EF_SEARCH = int(value)
+
+    def connect(self):
+        pass
+
+    def build(self, vecs):
+        raise NotImplementedError
+
+    def post_build(self):
+        pass
+
+    def readbacks(self):
+        """Settings this arm reads back from its engine for the row (CAMPAIGN
+        section 7 row 21, override_registry.py), as {field: value}.
+
+        Called by main() and the multipass driver AFTER the build timer has
+        stopped, never from build() or post_build(): build_s covers both, and a
+        read-back inside them would add its request to a published timer. An
+        arm that can read its settings at connect() (outside every timer) does
+        that into `row_extra` instead and leaves this empty."""
+        return {}
+
+    # INGEST AND INDEX AS TWO TIMERS (DECISIONS #74 item 2, #66): an adapter
+    # whose engine has the boundary sets both inside build() (or index_s in
+    # post_build() where the index is waited for there); main() records them
+    # beside the unchanged build_s. An engine that indexes while ingesting
+    # (Qdrant, Chroma, SurrealDB, ArangoDB, sqlite-vec) leaves them None and
+    # the page keeps the total for it.
+    ingest_s = None
+    index_s = None
+    # The id index this adapter built for the delete (#291): the statement, or "key" for an engine
+    # whose own record key is the id. None: the build failed before the index.
+    ID_INDEX_DDL = "key"
+    id_index = None
+
+    def engine_stats(self):
+        """Engine-side counters for this run, or {} for engines that have none.
+
+        WHY THIS EXISTS NOW. The pin moved to b7c6c800d, which carries #6858:
+        a query-side delta-scan trigger that is ON BY DEFAULT and deliberately
+        does MORE background rebuild work than the engine used to. If dense
+        timings move against the previous pin, the row has to be able to say
+        whether that trigger fired -- otherwise the campaign records a number
+        and loses the reason, which is the failure this whole harness keeps
+        relearning. Upstream added graphWalkVisitedAvg, deltaScanBudget,
+        deltaScanWorkSinceRebuild and deltaScanWorkTarget precisely so the
+        decision is observable instead of inferred.
+
+        Pass-through, never a fixed key list: the engine grows counters between
+        releases and a whitelist here would silently drop the next one.
+        """
+        return {}
+
+    def search(self, qvec, k):
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # MUTATING A BUILT INDEX (DECISIONS #82d): "insert into a built index
+    # then search, delete from a built index then search, at the one million
+    # tier only, reporting latency and the recall after each".
+    #
+    # The lane runs them in the order DELETE, then INSERT THE SAME IDS BACK,
+    # and that order is the whole reason the recall numbers are exact rather
+    # than approximate. Deleting a set D from a corpus whose ground truth is
+    # known leaves a ground truth that is still known: it is the original one
+    # with D removed. Re-inserting exactly D restores the original ground
+    # truth. Inserting NEW vectors instead would need a brute-force recompute
+    # of the top-k over a million vectors for a thousand queries after every
+    # mutation, on every arm, which is both slow and a second implementation
+    # of the thing being checked.
+    #
+    # The victims are chosen from the ground truth itself, so the deletions
+    # bite: an index that quietly ignores a delete keeps returning them and
+    # the row says how many (mutate_deleted_hits, which must be zero).
+    #
+    # An engine whose index cannot take a mutation declares
+    # MUTATE_UNEXPRESSIBLE and the row records the reason (#88), never silence.
+    MUTATE_UNEXPRESSIBLE = None
+
+    def insert_vectors(self, ids, vecs):
+        raise NotImplementedError(f"{self.name} declares no insert path")
+
+    def delete_vectors(self, ids):
+        raise NotImplementedError(f"{self.name} declares no delete path")
+
+    # An arm that chooses its operating point by effect sets this, and the
+    # lane then loads the held-out calibration slice for it (ArangoDB's IVF).
+    calibrates = False
+
+    def calibrate(self, queries, gt, scale):
+        """Choose an operating point matched by effect, before any timed pass."""
+
+    def close(self):
+        """Release the engine handle. Overridden where there is one to release.
+
+        A no-op here records close_s=0.0, and 0.0 must mean "this engine has
+        nothing to release", never "we did not ask". The distinction decides
+        whether a close cost is comparable: ArcadeDB measured 157.5 s against
+        a 185.9 s build at l3d/small, and reporting that beside an unmeasured
+        0.0 would be the same asymmetry, pointed the other way. Adapters with
+        a real handle override this; adapters whose library exposes none set
+        close_note instead, so the row says which case it is.
+        """
+
+    close_note = None
+
+
+class ArcadeEmbedded(Base):
+    name = "arcadedb_dense_embedded"
+    # Extra METADATA entries that follow the quantization key (the PQ arm's subspaces and clusters)
+    _quant_extra = ""
+    ID_INDEX_DDL = "CREATE INDEX ON Article (vid) UNIQUE_HASH"
+
+    @property
+    def quantization(self):
+        """What this arm actually built, not a constant.
+
+        The stamping guard requires every arm to declare its quantization, and
+        this one had no declaration at all: `arcadedb_dense_embedded` raised
+        SystemExit in 2.9s on every rep of the deep10m campaign and produced no
+        rows. A static "fp32" would be the wrong repair -- build() passes
+        METADATA quantization straight from BENCH_DENSE_QUANT, so this arm does
+        honour the knob, and a constant would refuse a legitimate int8 request
+        (or, worse, mislabel it). Deriving it through the same helper build()
+        uses keeps the label and the DDL from drifting apart.
+
+        ArcadeEmbeddedInt8 shadows this with a plain class attribute, which
+        wins over an inherited property, so that arm is unaffected.
+        """
+        return canonical_quant_label(os.environ.get("BENCH_DENSE_QUANT", ""))
+
+    def connect(self):
+        import _arcadedb_import
+        arcadedb = _arcadedb_import.load()
+        self._a = arcadedb
+        heap = os.environ.get("ARCADEDB_HEAP", "4g")
+        # ARCADEDB_EXTRA_JVM_ARGS: space-separated extras (e.g. an
+        # -agentpath:...  profiler agent for the #3144 heap investigation)
+        extra = os.environ.get("ARCADEDB_EXTRA_JVM_ARGS", "")
+        # THE HNSW BUILD CACHE IS BOUNDED, and this is a disclosed fairness
+        # override rather than a tuning choice.
+        #
+        # Since #3144 the engine auto-sizes this cache to hold the WHOLE corpus
+        # when it fits graphBuildCacheMaxHeapPercent (default 25). At 9.99M x
+        # 128 that is 5.36 GiB of heap, against the flat 100,000-vector bound
+        # (55 MiB) the engine shipped before the fix -- a 100x increase, and it
+        # applies only to the fp32 path where vectors live in the documents.
+        #
+        # No comparator caches its corpus during an index build. Accepting the
+        # default would mean ArcadeDB takes 5.36 GiB that Qdrant, Milvus,
+        # Chroma and LanceDB do not, and then raising the tier's envelope so it
+        # fits -- room only one engine gets. That is the apples-to-oranges
+        # default the config policy exists to equalize, so the bound is
+        # restored to the engine's OWN previous default rather than to a number
+        # we invented.
+        #
+        # BENCH_DENSE_BUILD_CACHE=0 restores the auto-sizing for the ablation
+        # arm, so the cost of the default is measurable rather than asserted.
+        # DEFAULT REVERSED 2026-08-30, from 100000 to 0 (the engine's auto).
+        # The fairness argument above is real but it bought a configuration no
+        # user runs: 100000 is not the default in any profile at this pin, only
+        # the pre-#3144 value. Every arm gets the same cap, and an engine that
+        # spends its share on a build cache is making an engineering choice the
+        # comparison should show rather than suppress.
+        cache = os.environ.get("BENCH_DENSE_BUILD_CACHE", "0").strip()
+        extra = (f"{extra} -Darcadedb.vectorIndex.graphBuildCacheSize={cache}").strip()
+        # THE OTHER HALF OF THE AUTO POLICY. graphBuildCacheSize=0 caches the
+        # whole corpus WHEN IT FITS this percentage of heap, so the percentage
+        # is what decides whether auto-sizing degrades to eviction or takes
+        # everything. At deep10m the corpus cache is 5.36 GiB against a 6.0 GiB
+        # budget at the default 25% of a 24g heap: it fits by 11%, so the
+        # engine grants the full cache and the build is left short. Lowering
+        # the percentage is therefore the knob that could make AUTO-SIZING work
+        # rather than the knob that bypasses it, which is the difference
+        # between testing Luca's mechanism and routing around it.
+        #
+        # HOW SHORT IS NOT SETTLED (2026-08-20). The stall that made the default
+        # look fatal was a SECOND build of the same graph (#6489, see the close()
+        # comment below), so the 5.36 GiB cache and the redundant build were
+        # never separated. Re-run this ablation on a release carrying #6490
+        # before quoting a cost for the default.
+        #
+        # THAT BLOCKER IS GONE (2026-08-30). #6490 (8e89f2b9b) is an ancestor of
+        # BOTH pins the page has used -- 472e5bddf and b7c6c800d -- so the
+        # redundant build was already absent from every measurement taken since.
+        # Nothing stands between us and an honest AUTO number now; the ablation
+        # is simply owed. It matters more than it did, because the bound this
+        # default applies costs the SERVER arm at least 8x at deep10m (>28,800 s
+        # against 3,372-3,750 s measured under AUTO) while costing the embedded
+        # arm nothing, and 533 engine commits also separate the two pins, so
+        # neither the cache nor the pin can currently be blamed for that.
+        pct = os.environ.get("BENCH_DENSE_BUILD_CACHE_PCT", "").strip()
+        if pct:
+            extra = f"{extra} -Darcadedb.vectorIndex.graphBuildCacheMaxHeapPercent={pct}"
+        self.db = arcadedb.create_database(
+            "/tmp/l3d_arcade",
+            jvm_kwargs={"heap_size": heap,
+                        "jvm_args": extra.strip() or None})
+        self.version = _arcadedb_import.dist_version()
+
+    def build(self, vecs):
+        db = self.db
+        db.command("sql", "CREATE VERTEX TYPE Article")
+        db.command("sql", "CREATE PROPERTY Article.vid INTEGER")
+        db.command("sql", "CREATE PROPERTY Article.embedding ARRAY_OF_FLOATS")
+        _t0 = time.perf_counter()
+        db.command("sql", self.ID_INDEX_DDL)
+        self.id_index = self.ID_INDEX_DDL
+        # THE ENGINE'S BULK LOADER, WAL ON (DECISIONS #116 item 3): GraphBatch
+        # with the write-ahead log kept on, as the maintainers recommended for
+        # graph loads on #8287 and as the cross-model lane already loads its
+        # products, each vector handed across as ONE Java float[] (F116). It
+        # replaces a SQL INSERT per vector in BATCH-row transactions: 22k
+        # against 31-32k vectors/s on the laptop (HANDOFF vector-lane audit,
+        # 2026-09-24). Fed a BATCH at a time, so the Java arrays alive at once
+        # stay bounded at deep10m; each batch commits, as before.
+        with db.graph_batch(batch_size=BATCH, commit_every=BATCH, use_wal=True) as gb:
+            for s0 in range(0, len(vecs), BATCH):
+                gb.create_vertices("Article", [
+                    {"vid": s0 + j, "embedding": self._a.to_java_float_array(vecs[s0 + j])}
+                    for j in range(min(BATCH, len(vecs) - s0))])
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        quant = resolve_quant(os.environ.get("BENCH_DENSE_QUANT", ""))
+        qline = f'"quantization": "{quant}", {self._quant_extra}' if quant else ""
+        _t1 = time.perf_counter()
+        db.command("sql", f'''CREATE INDEX ON Article (embedding) LSM_VECTOR
+                   METADATA {{ "dimensions": {DIM}, "similarity": "EUCLIDEAN",
+                   "maxConnections": {M}, "beamWidth": {EF_CONSTRUCTION}, {qline}
+                   "storeVectorsInGraph": false, "addHierarchy": true }}''')
+        self.index_s = round(time.perf_counter() - _t1, 2)
+
+    def readbacks(self):
+        # The layered graph the CREATE INDEX statement asks for, as the engine
+        # records it for the index it built (CAMPAIGN section 7 row 21,
+        # override_registry.py). Read after the build timer, not inside build().
+        return bench_common.arcadedb_hierarchy_readback(self.db, "Article[embedding]")
+
+    def engine_stats(self):
+        """The engine's own counters for this run.
+
+        schema.get_index_by_name returns the raw Java TypeIndex, not the Python
+        wrapper, so this is getStats() and not get_stats(), and the per-bucket
+        LSMVectorIndex underneath is what carries the counters. Same access path
+        delta_scan_probe.py uses, which was verified against the wheel after a
+        first version guessed get_stats() and died having built 200k vectors.
+        """
+        try:
+            ti = self.db.schema.get_index_by_name("Article[embedding]")
+            st = ti.getIndexesOnBuckets()[0].getStats()
+            return {str(k): int(st.get(k)) for k in st.keySet()}
+        except Exception as e:                     # noqa: BLE001
+            # Recorded, not swallowed: a missing stat block must read as a
+            # reason, not as an empty dict indistinguishable from a comparator
+            # that legitimately has no counters.
+            return {"engine_stats_error": f"{type(e).__name__}: {e}"}
+
+    def search(self, qvec, k):
+        rows = self.db.query(
+            "sql",
+            "SELECT vid FROM (SELECT expand(vectorNeighbors(?, ?, ?, ?))) "
+            "ORDER BY distance",
+            "Article[embedding]", self._a.to_java_float_array(qvec), k, EF_SEARCH,
+        ).to_list()
+        return [int(r["vid"]) for r in rows]
+
+    def insert_vectors(self, ids, vecs):
+        db = self.db
+        db.begin()
+        for j, vid in enumerate(ids):
+            db.command("sql", "INSERT INTO Article SET vid = :v, embedding = :e",
+                       {"v": int(vid), "e": self._a.to_java_float_array(vecs[j])})
+        db.commit()
+
+    def delete_vectors(self, ids):
+        # BOUND (DECISIONS #116 item 2): the batch's ids travel as one list
+        # parameter, so every batch is the same text.
+        db = self.db
+        for lo in range(0, len(ids), 200):
+            db.begin()
+            db.command("sql", "DELETE FROM Article WHERE vid IN :ids",
+                       {"ids": [int(v) for v in ids[lo:lo + 200]]})
+            db.commit()
+
+    def close(self):
+        self.db.close()
+
+
+class ArcadeServer(Base):
+    """ArcadeDB over HTTP (client-server), same index/params as embedded."""
+    # fp32 BY CONFIGURATION, not by inability. The note here used to say this
+    # arm "has no qline path: it cannot pass the METADATA quantization key that
+    # ArcadeEmbedded uses". That was wrong: build() already POSTs a METADATA
+    # block over /command/bench and simply omitted the key. The sparse lane had
+    # been running its server arm as int8 the whole time. Corrected 2026-08-30
+    # with ArcadeServerInt8 below; DECISIONS #53 calls this "the first arm this
+    # decision owes", because it is one of ours and can only make our own
+    # numbers look worse or unchanged.
+    #
+    # The label is still DECLARED rather than read from BENCH_DENSE_QUANT: that
+    # knob reaches the embedded adapter's process, not the server container, so
+    # a campaign exporting INT8 used to stamp server rows INT8 over an
+    # unquantized index and the l3d table printed them as the quantized arm.
+    quantization = "fp32"
+    _quant_ddl = ""
+    name = "arcadedb_dense_server"
+    ID_INDEX_DDL = "CREATE INDEX ON Article (vid) UNIQUE_HASH"
+    # Rows per `INSERT ... CONTENT :rows` request; #8337 suggests 2,000-5,000
+    # for vector rows; swept on the bench host at the re-pin, recorded per row.
+    load_batch = int(os.environ.get("BENCH_SERVED_LOAD_BATCH") or 2000)
+
+    def connect(self):
+        import lean_http
+        self.rq = lean_http.Session()
+        self.rq.auth = ("root", "dbbenchpass")
+        # WHICH HTTP CLIENT ran, read from the session (CAMPAIGN 7 row 72), on every row this arm writes
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), **lean_http.row_fields(self.rq)}
+        host = os.environ["BENCH_SERVER_HOST"]
+        port = os.environ.get("BENCH_SERVER_PORT", "2480")
+        self.base = f"http://{host}:{port}/api/v1"
+        try:
+            r = self.rq.get(f"{self.base}/server?mode=basic", timeout=30).json()
+            self.version = "server:" + str(r.get("version", "?"))
+        except Exception:
+            self.version = "server:?"
+
+    def _cmd(self, language, command, timeout=1800, params=None):
+        body = {"language": language, "command": command}
+        if params is not None:
+            body["params"] = params
+        # Only the first characters are looked at: an ingest command can carry
+        # megabytes of values in its text, and upper-casing all of it on every
+        # call would sit inside the timed ingest.
+        if str(command)[:40].lstrip().upper().startswith("CREATE INDEX"):
+            # The statement as sent, kept so the row can say what the index was
+            # asked for (the server returns no index metadata; override_registry.py).
+            self._index_ddl = str(command)
+        r = self.rq.post(f"{self.base}/command/bench", json=body, timeout=timeout)
+        r.raise_for_status()
+        return r.json().get("result", [])
+
+    def build(self, vecs):
+        self._cmd("sql", "CREATE VERTEX TYPE Article")
+        self._cmd("sql", "CREATE PROPERTY Article.vid INTEGER")
+        self._cmd("sql", "CREATE PROPERTY Article.embedding ARRAY_OF_FLOATS")
+        _t0 = time.perf_counter()
+        self._cmd("sql", self.ID_INDEX_DDL)
+        self.id_index = self.ID_INDEX_DDL
+        # BOUND ROWS, NOT VALUES WRITTEN INTO SQL TEXT (ArcadeData/arcadedb#8337,
+        # DECISIONS #116 item 4). One `INSERT ... CONTENT :rows` per batch, the
+        # vectors travelling as JSON arrays. #8337 found the Postgres wire the
+        # fastest vector path FROM JAVA (12.1k rows/s against 8.3k); from this
+        # harness's Python it is not, because psycopg adapts every float in
+        # Python: 50k x 96 on the laptop, sqlscript literals 2,754 rows/s,
+        # psycopg binary 3,990, CONTENT 4,980 (batch 2,000), every path storing
+        # the float32 values exactly. So the arm takes the path that is fastest
+        # for a Python client, which is also the one needing no server plugin.
+        # tolist() of a float32 array gives the exact float32 values as Python
+        # floats, so both deployments still index the same numbers.
+        rows = []
+        for vid in range(len(vecs)):
+            rows.append({"vid": vid, "embedding": vecs[vid].tolist()})
+            if len(rows) >= self.load_batch:
+                self._cmd("sql", "INSERT INTO Article CONTENT :rows", params={"rows": rows})
+                rows = []
+        if rows:
+            self._cmd("sql", "INSERT INTO Article CONTENT :rows", params={"rows": rows})
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        _t1 = time.perf_counter()
+        self._cmd("sql", f'''CREATE INDEX ON Article (embedding) LSM_VECTOR
+                  METADATA {{ "dimensions": {DIM}, "similarity": "EUCLIDEAN",
+                  "maxConnections": {M}, "beamWidth": {EF_CONSTRUCTION},
+                  {self._quant_ddl}
+                  "storeVectorsInGraph": false, "addHierarchy": true }}''',
+                  # A CLIENT TIMEOUT IS NOT A MEASUREMENT. At deep10m under the
+                  # bounded 100k cache this fired at 6h with the server still
+                  # working: its log showed insertion completing in 17,511 s and
+                  # the optimization phase starting, so the row recorded rc=1
+                  # for a build that was progressing normally. Four more reps
+                  # would have spent 24 hours reproducing that. 12h is chosen to
+                  # sit above the slowest build we have observed rather than
+                  # near it, because the cost of a too-short timeout is a whole
+                  # cell and the cost of a too-long one is only lateness.
+                  timeout=12 * 3600)
+        self.index_s = round(time.perf_counter() - _t1, 2)
+
+    def readbacks(self):
+        # What the CREATE INDEX statement asked for, recorded as a REQUEST
+        # because the HTTP API returns no index metadata at this pin (CAMPAIGN
+        # section 7 row 21, override_registry.py); the embedded arm reads it back from
+        # the engine. Taken after the build timer, not inside build().
+        return bench_common.arcadedb_hierarchy_requested(getattr(self, "_index_ddl", ""))
+
+    def search(self, qvec, k):
+        # BOUND, AS THE EMBEDDED ARM ALREADY IS (DECISIONS #116 item 2): the
+        # query vector travels as a JSON array parameter instead of 128 numbers
+        # written into the SQL text for the server to parse on every query.
+        # Laptop, 20k SIFT, 300 queries: identical top-10 on all 300, p50 5.40
+        # -> 4.37 ms (repros/vector-query/served_bound_vector_probe.py).
+        # tolist() of a float32 array is the exact float32 values.
+        r = self.rq.post(f"{self.base}/query/bench", json={
+            "language": "sql",
+            "command": "SELECT vid FROM (SELECT expand(vectorNeighbors("
+                       ":idx, :q, :k, :ef))) ORDER BY distance",
+            "params": {"idx": "Article[embedding]", "q": np.asarray(qvec, dtype=np.float32).tolist(),
+                       "k": int(k), "ef": EF_SEARCH}}, timeout=600)
+        r.raise_for_status()
+        return [int(x["vid"]) for x in r.json().get("result", [])]
+
+    def insert_vectors(self, ids, vecs):
+        # The build's bound path (#8337, DECISIONS #116 items 2 and 4) at the
+        # mutate phase's 200-row batch: one INSERT ... CONTENT :rows request,
+        # one transaction, per batch, instead of 200 statements of literals.
+        for lo in range(0, len(ids), 200):
+            self._cmd("sql", "INSERT INTO Article CONTENT :rows", params={"rows": [
+                {"vid": int(v), "embedding": np.asarray(vecs[lo + j], dtype=np.float32).tolist()}
+                for j, v in enumerate(ids[lo:lo + 200])]})
+
+    def delete_vectors(self, ids):
+        for lo in range(0, len(ids), 200):
+            self._cmd("sql", "DELETE FROM Article WHERE vid IN :ids",
+                      params={"ids": [int(v) for v in ids[lo:lo + 200]]})
+
+
+class Chroma(Base):
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    quantization = "fp32"
+    name = "chroma_dense"
+
+    def set_beam(self, value):
+        # ef_search is collection configuration, but a live index keeps the ef it loaded with: a modify() on the open
+        # collection changed the configuration and not one result (chromadb 1.5.9, recall 0.273 before and after).
+        # So write it, reopen the client at the same path, and read the value back from the reopened collection.
+        import chromadb
+        from chromadb.api.shared_system_client import SharedSystemClient
+        super().set_beam(value)
+        self.col.modify(configuration={"hnsw": {"ef_search": int(value)}})
+        self.client.close()
+        SharedSystemClient.clear_system_cache()
+        self.client = chromadb.PersistentClient(path="/tmp/l3d_chroma")
+        self.col = self.client.get_collection("articles")
+        got = self.col.configuration["hnsw"]["ef_search"]
+        if int(got) != int(value):
+            raise RuntimeError(f"chroma ef_search read back {got!r}, not {value}: the sweep would stamp a beam it did not run")
+
+    # chromadb 1.5.9 HAS a close: Client.close() releases the client's system
+    # and stops it when it is the last client. This said there was none until
+    # 2026-10-02, from dir(chromadb.Client), which is the factory function
+    # rather than the client it returns. Nothing this lane reads depends on it
+    # (no reopen; the client disk reading is taken after the process exits and
+    # is the same with and without it, 6,210,172 bytes both ways at 5,000
+    # vectors on the laptop; every add() is persisted when it returns), but
+    # Base.close's rule is that 0.0 means "nothing to release", never "we did
+    # not ask", so the arm calls it and close_s times it (2 to 10 ms).
+
+    def connect(self):
+        import chromadb
+        self.version = lib_version(chromadb, "chromadb")
+        self.client = chromadb.PersistentClient(path="/tmp/l3d_chroma")
+        self.col = self.client.create_collection("articles", metadata={
+            "hnsw:space": "l2", "hnsw:M": COMPARATOR_M,
+            "hnsw:construction_ef": EF_CONSTRUCTION, "hnsw:search_ef": EF_SEARCH})
+
+    def build(self, vecs):
+        ids = [str(i) for i in range(len(vecs))]
+        for i in range(0, len(vecs), CHROMA_BATCH):
+            self.col.add(ids=ids[i:i + CHROMA_BATCH],
+                         embeddings=vecs[i:i + CHROMA_BATCH].tolist())
+
+    def search(self, qvec, k):
+        res = self.col.query(query_embeddings=[qvec.tolist()], n_results=k)
+        return [int(x) for x in res["ids"][0]]
+
+    def insert_vectors(self, ids, vecs):
+        self.col.add(ids=[str(int(v)) for v in ids], embeddings=[list(map(float, v)) for v in vecs])
+
+    def delete_vectors(self, ids):
+        self.col.delete(ids=[str(int(v)) for v in ids])
+
+    def close(self):
+        self.col = None
+        self.client.close()
+
+
+class LanceDB(Base):
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    # INT8, because that is what build() issues: IVF_HNSW_SQ is scalar
+    # quantization (8 bits, read back from the index's details). The comment
+    # above names three arms that recorded fp32 while building quantized
+    # indexes; qdrant_dense_int8 and milvus_dense_int8 were corrected and THIS
+    # ONE, the third, kept declaring fp32 until 2026-08-30. export_web never
+    # published the wrong value -- it reads precision from DENSE_PRECISION,
+    # hand-built from the adapters, precisely because this field could not be
+    # trusted -- so the page label was right while the row was wrong. Now they
+    # agree.
+    #
+    # NOT LANCEDB'S ONLY HNSW OFFERING ANY MORE. This arm was int8 on the
+    # stated ground that IVF_HNSW_SQ was; 0.39.0 builds IVF_HNSW_FLAT,
+    # unquantized HNSW in the same IVF partitions (the quantization survey,
+    # QUANTIZATION.md, 2026-10-02), so LanceDB now has an fp32 arm beside this
+    # one (lancedb_dense_fp32 below). This arm keeps its name so its history
+    # stays one series; the suffix marks the new arm, as on the sparse lane's
+    # ArcadeDB fp32 arms.
+    quantization = "INT8"
+    name = "lancedb_dense"
+    ID_INDEX_DDL = "create_scalar_index('id', index_type='BTREE')"
+    INDEX_TYPE = "IVF_HNSW_SQ"
+    # lancedb 0.37.1 exposes no close on the connection (checked dir); its
+    # tables are files written on commit.
+    close_note = "lancedb exposes no close()"
+
+    def connect(self):
+        import lancedb
+        self.version = lib_version(lancedb, "lancedb")
+        self.db = lancedb.connect("/tmp/l3d_lance")
+
+    def build(self, vecs):
+        import pyarrow as pa
+        tbl = pa.table({"id": pa.array(range(len(vecs)), type=pa.int64()),
+                        "vector": pa.FixedSizeListArray.from_arrays(
+                            pa.array(vecs.ravel(), type=pa.float32()), DIM)})
+        _t0 = time.perf_counter()
+        self.tbl = self.db.create_table("articles", tbl)
+        # LanceDB builds a scalar index over the rows a table holds, so it follows the load (still inside ingest_s)
+        self.tbl.create_scalar_index("id", index_type="BTREE")
+        self.id_index = self.ID_INDEX_DDL
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        # IVF_HNSW_SQ here (int8 SQ, disclosed above), IVF_HNSW_FLAT on the fp32 arm
+        _t1 = time.perf_counter()
+        self.tbl.create_index(metric="l2", index_type=self.INDEX_TYPE,
+                              m=COMPARATOR_M, ef_construction=EF_CONSTRUCTION)
+        self.index_s = round(time.perf_counter() - _t1, 2)
+        # The engine's own answer, never the option we sent (BUGS F164): the
+        # index type from index_stats, and its details (HNSW degree and beam,
+        # and `compression` on a quantized index) from list_indices.
+        # The VECTOR column's index: the table also holds the id's BTREE, and list_indices
+        # gives no order, so taking the first one read the BTREE back (the #291 smoke).
+        ix = [i for i in self.tbl.list_indices() if list(getattr(i, "columns", None) or []) == ["vector"]]
+        applied = self.tbl.index_stats(ix[0].name).index_type if ix else None
+        if applied != self.INDEX_TYPE:
+            raise RuntimeError(f"lancedb vector index type read back {applied!r}, not {self.INDEX_TYPE!r}: "
+                               f"the row would record {self.quantization} for a different index (BUGS F164)")
+        self.row_extra = {"lancedb_index_type": applied,
+                          "lancedb_index_details": json.dumps(getattr(ix[0], "index_details", None),
+                                                              sort_keys=True, default=str)}
+
+    def search(self, qvec, k):
+        # Apply the search-time knobs. Without .ef() LanceDB used its own
+        # default while every other engine ran at the lane's EF_SEARCH, which
+        # is the operating-point matching F3 requires, and it showed up as
+        # recall 0.711 against ~0.93 for everyone else. That was us measuring
+        # it at defaults, not LanceDB being weak.
+        #
+        # nprobes is set because IVF_HNSW_SQ is IVF-partitioned where the other
+        # HNSW engines are not, so it has a knob they do not have; a sweep
+        # (out_lance_sweep.json) shows recall is flat across nprobes 10/20/50
+        # at 0.9303, so 10 is chosen as the cheapest value that matches.
+        rs = (self.tbl.search(qvec).limit(k)
+              .ef(EF_SEARCH)
+              .nprobes(10)
+              .to_list())
+        return [int(r["id"]) for r in rs]
+
+    def insert_vectors(self, ids, vecs):
+        import pyarrow as pa
+        import numpy as _np
+        arr = _np.asarray(vecs, dtype="float32")
+        self.tbl.add(pa.table({
+            "id": pa.array([int(v) for v in ids], type=pa.int64()),
+            "vector": pa.FixedSizeListArray.from_arrays(
+                pa.array(arr.ravel(), type=pa.float32()), DIM)}))
+
+    def delete_vectors(self, ids):
+        # PASTED BY THE API, not by choice (DECISIONS #116 item 2): LanceDB's
+        # Table.delete takes only a predicate string; there is no parameter
+        # form to bind to.
+        for lo in range(0, len(ids), 500):
+            lst = ",".join(str(int(v)) for v in ids[lo:lo + 500])
+            self.tbl.delete(f"id IN ({lst})")
+
+
+class LanceDBFlat(LanceDB):
+    """LanceDB's IVF_HNSW_FLAT, its unquantized HNSW and the fp32 counterpart
+    of lancedb_dense (the quantization survey, DECISIONS #135): the same IVF
+    partitions, HNSW degree and beam, and search knobs (ef EF_SEARCH, nprobes
+    10), over the float vectors. Read back like the int8 arm's index type."""
+    quantization = "fp32"
+    name = "lancedb_dense_fp32"
+    INDEX_TYPE = "IVF_HNSW_FLAT"
+
+
+class SqliteVec(Base):
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    quantization = "fp32"
+    name = "sqlite_vec_dense"
+    beam_kind = None
+    beam_na = "exact scan (vec0 brute force): there is no search beam to set, recall is 1.0 by construction"
+
+    def close(self):
+        self.cx.close()
+
+    def connect(self):
+        import sqlite3
+        import sqlite_vec
+        self.version = lib_version(sqlite_vec, "sqlite-vec")
+        self.cx = sqlite3.connect("/tmp/l3d_sqlitevec.db")
+        # The same PRAGMAs as every SQLite arm (DECISIONS #70, #74 item 5).
+        self.cx.execute("PRAGMA foreign_keys=ON")
+        self.cx.execute("PRAGMA journal_mode=WAL")
+        self.cx.execute("PRAGMA synchronous=NORMAL")
+        self.cx.enable_load_extension(True)
+        sqlite_vec.load(self.cx)
+        self.cx.enable_load_extension(False)
+
+    def build(self, vecs):
+        self.cx.execute(
+            f"CREATE VIRTUAL TABLE v USING vec0(embedding float[{DIM}])")
+        for i in range(0, len(vecs), BATCH):
+            chunk = vecs[i:i + BATCH]
+            self.cx.executemany(
+                "INSERT INTO v (rowid, embedding) VALUES (?, ?)",
+                [(i + j, chunk[j].tobytes()) for j in range(len(chunk))])
+            self.cx.commit()
+
+    def search(self, qvec, k):
+        rows = self.cx.execute(
+            "SELECT rowid FROM v WHERE embedding MATCH ? AND k = ? "
+            "ORDER BY distance", (qvec.tobytes(), k)).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def insert_vectors(self, ids, vecs):
+        self.cx.executemany("INSERT INTO v (rowid, embedding) VALUES (?, ?)",
+                            [(int(v), vecs[j].tobytes()) for j, v in enumerate(ids)])
+        self.cx.commit()
+
+    def delete_vectors(self, ids):
+        self.cx.executemany("DELETE FROM v WHERE rowid = ?", [(int(v),) for v in ids])
+        self.cx.commit()
+
+
+
+class SqliteVecInt8(SqliteVec):
+    """sqlite-vec with its own shipped int8 column type and quantizer.
+
+    The fp32-only exemption used to read "sqlite-vec is an exact scan by
+    construction, and inventing a quantized configuration an engine does not
+    ship would be a worse comparison than omitting it". The first clause is
+    true and the second does not follow: vec0 ships `int8` as a first-class
+    column type and ships vec_quantize_int8() to fill it, so nothing is being
+    invented here. The scan stays exact; only the stored precision changes,
+    which is exactly the axis this arm exists to price.
+
+    'unit' is the engine's own domain name for [-1, 1], and load_dataset()
+    normalises every row to unit length so L2 ranking equals cosine ranking.
+    So this arm uses the single setting sqlite-vec ships, and chooses nothing --
+    strictly less configuration than QdrantInt8, where we picked quantile 0.99
+    ourselves. No `bit` arm: 0.1.9 ships binary without rescoring.
+    """
+    name = "sqlite_vec_dense_int8"
+    quantization = "INT8"
+    _db_path = "/tmp/l3d_sqlitevec_int8.db"
+
+    def connect(self):
+        import sqlite3
+        import sqlite_vec
+        self.version = lib_version(sqlite_vec, "sqlite-vec")
+        self.cx = sqlite3.connect(self._db_path)
+        self.cx.enable_load_extension(True)
+        sqlite_vec.load(self.cx)
+        self.cx.enable_load_extension(False)
+
+    def build(self, vecs):
+        self.cx.execute(
+            f"CREATE VIRTUAL TABLE v USING vec0(embedding int8[{DIM}])")
+        for i in range(0, len(vecs), BATCH):
+            chunk = vecs[i:i + BATCH]
+            self.cx.executemany(
+                "INSERT INTO v (rowid, embedding) "
+                "VALUES (?, vec_quantize_int8(?, 'unit'))",
+                [(i + j, chunk[j].tobytes()) for j in range(len(chunk))])
+            self.cx.commit()
+
+    def search(self, qvec, k):
+        # The query is quantized the same way the corpus was; comparing a float
+        # probe against int8 storage would measure a type error, not a design.
+        rows = self.cx.execute(
+            "SELECT rowid FROM v WHERE embedding MATCH "
+            "vec_quantize_int8(?, 'unit') AND k = ? "
+            "ORDER BY distance", (qvec.tobytes(), k)).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def insert_vectors(self, ids, vecs):
+        self.cx.executemany(
+            "INSERT INTO v (rowid, embedding) VALUES (?, vec_quantize_int8(?, 'unit'))",
+            [(int(v), vecs[j].tobytes()) for j, v in enumerate(ids)])
+        self.cx.commit()
+
+
+class DuckVSS(Base):
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    quantization = "fp32"
+    name = "duckdb_vss_dense"
+    ID_INDEX_DDL = "CREATE UNIQUE INDEX t_id ON t (id)"
+
+    def close(self):
+        self.cx.close()
+
+    def connect(self):
+        import duckdb
+        self.version = lib_version(duckdb, "duckdb")
+        self.cx = duckdb.connect("/tmp/l3d_duck.db")
+        # F6: DuckDB sizes its pool from the host (20 threads) under the 12-thread
+        # cpuset; only sched_getaffinity sees the cpuset. Same fix as l1_tabular.
+        self.cx.execute(f"PRAGMA threads={len(os.sched_getaffinity(0))}")
+        self.cx.execute("INSTALL vss; LOAD vss;")
+        self.cx.execute("SET hnsw_enable_experimental_persistence=true;")
+        # Both settings as the engine reports them, on the row (CAMPAIGN
+        # section 7 row 21, override_registry.py): the thread pool against the cell's
+        # cpuset, and the experimental persistence flag the HNSW index needs.
+        self.row_extra = bench_common.duckdb_readback(self.cx, vss=True)
+
+    def build(self, vecs):
+        # native bulk path: Arrow FixedSizeList -> DuckDB FLOAT[DIM] in one
+        # relational insert (fairness: executemany over Python lists measured
+        # ~2h for 1M x 128 and is a harness artifact, not the engine)
+        import pyarrow as pa
+        flat = pa.array(vecs.astype("float32").reshape(-1), type=pa.float32())
+        tbl = pa.table({
+            "id": pa.array(range(len(vecs)), type=pa.int64()),
+            "vec": pa.FixedSizeListArray.from_arrays(flat, DIM),
+        })
+        # INGEST AND INDEX AS TWO TIMERS (DECISIONS #132, CAMPAIGN section 7
+        # row 44): the load and the HNSW build are two statements, so the
+        # boundary exists and the row records both, as the split arms do.
+        _t0 = time.perf_counter()
+        self.cx.register("src", tbl)
+        self.cx.execute(f"CREATE TABLE t AS SELECT id, vec::FLOAT[{DIM}] AS vec FROM src")
+        self.cx.unregister("src")
+        # CREATE TABLE AS makes the table and loads it in one statement, so the index follows the load (inside ingest_s)
+        self.cx.execute(self.ID_INDEX_DDL)
+        self.id_index = self.ID_INDEX_DDL
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        _t1 = time.perf_counter()
+        self.cx.execute(
+            f"CREATE INDEX hn ON t USING HNSW (vec) "
+            f"WITH (metric = 'l2sq', M = {COMPARATOR_M}, "
+            f"ef_construction = {EF_CONSTRUCTION})")
+        self.index_s = round(time.perf_counter() - _t1, 2)
+        self.cx.execute(f"SET hnsw_ef_search = {EF_SEARCH}")
+
+    def set_beam(self, value):
+        super().set_beam(value)
+        self.cx.execute(f"SET hnsw_ef_search = {int(value)}")
+
+    def search(self, qvec, k):
+        rows = self.cx.execute(
+            f"SELECT id FROM t ORDER BY array_distance(vec, ?::FLOAT[{DIM}]) "
+            f"LIMIT {k}", [qvec.tolist()]).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def insert_vectors(self, ids, vecs):
+        self.cx.executemany(f"INSERT INTO t VALUES (?, ?::FLOAT[{DIM}])",
+                            [(int(v), vecs[j].tolist()) for j, v in enumerate(ids)])
+
+    def delete_vectors(self, ids):
+        # BOUND (DECISIONS #116 item 2): the batch as one BIGINT[] parameter.
+        # Same rows and same time as the literal IN list (2,000 of 20k on an
+        # HNSW table, 279 against 277 ms, duckdb 1.5.4, laptop 2026-09-26).
+        for lo in range(0, len(ids), 500):
+            self.cx.execute("DELETE FROM t WHERE id IN (SELECT unnest(?::BIGINT[]))",
+                            [[int(v) for v in ids[lo:lo + 500]]])
+
+
+class Qdrant(Base):
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    quantization = "fp32"
+    name = "qdrant_dense"
+
+    def connect(self):
+        from qdrant_client import QdrantClient
+        import qdrant_client
+        # gRPC, the vendor's documented performance path (qdrant.tech/documentation/interfaces: "We recommend using gRPC ... to optimize the
+        # performance"). A laptop A/B (repros qdrant-transport-ab) measured REST 1.3x to 1.5x slower per query at p50 on the dense, int8,
+        # sparse and composed searches, with client CPU per call at 0.6x and identical answers; the bulk loads did not move. REST was the
+        # handicap, so the comparator takes the faster transport (the knob rule; DECISIONS #169). Recorded as qdrant_transport.
+        self.cl = QdrantClient(host=os.environ["BENCH_SERVER_HOST"], port=6333, grpc_port=6334,
+                               prefer_grpc=True, timeout=600)
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), "qdrant_transport": "grpc"}
+        # THE SERVER'S version, and AFTER the client exists. lib_version reads
+        # the CLIENT package, which is right for an embedded comparator and
+        # wrong for a served one: the sparse lane records "qdrant:1.18.2" (the
+        # server) while this recorded "1.19.0" (the client), so one paper
+        # carried two meanings under one column name. The first version of this
+        # fix asked before constructing self.cl, so the fallback fired every
+        # time and it silently kept reporting the client -- caught by the smoke
+        # only because the recorded string named which branch had run.
+        try:
+            self.version = "qdrant:" + str(self.cl.info().version)
+        except Exception as e:
+            self.version = ("qdrant-client:" + lib_version(qdrant_client, "qdrant-client")
+                            + f" (server unreachable: {e.__class__.__name__})")
+
+    def build(self, vecs):
+        from qdrant_client import models as qm
+        self.cl.create_collection(
+            "articles",
+            vectors_config=qm.VectorParams(
+                size=DIM, distance=qm.Distance.EUCLID,
+                hnsw_config=qm.HnswConfigDiff(m=COMPARATOR_M,
+                                              ef_construct=EF_CONSTRUCTION)))
+        for i in range(0, len(vecs), BATCH):
+            self.cl.upsert("articles", points=qm.Batch(
+                ids=list(range(i, i + len(vecs[i:i + BATCH]))),
+                vectors=vecs[i:i + BATCH].tolist()))
+
+    def post_build(self):  # settle: wait for green status (indexing done)
+        from qdrant_client import models as qm  # noqa: F401
+        for _ in range(600):
+            if self.cl.get_collection("articles").status == "green":
+                return
+            time.sleep(1)
+
+    def search(self, qvec, k):
+        from qdrant_client import models as qm
+        res = self.cl.query_points(
+            "articles", query=qvec.tolist(), limit=k,
+            search_params=qm.SearchParams(hnsw_ef=EF_SEARCH))
+        return [int(p.id) for p in res.points]
+
+    def insert_vectors(self, ids, vecs):
+        from qdrant_client import models as qm
+        self.cl.upsert("articles", points=qm.Batch(
+            ids=[int(v) for v in ids], vectors=[list(map(float, v)) for v in vecs]), wait=True)
+
+    def delete_vectors(self, ids):
+        from qdrant_client import models as qm
+        self.cl.delete("articles",
+                       points_selector=qm.PointIdsList(points=[int(v) for v in ids]),
+                       wait=True)
+
+
+class PgVector(Base):
+    """pgvector 0.8 on PostgreSQL 17 (2026-09-11): a vector(DIM) column, COPY
+    ingest, HNSW at the matched operating point (m=COMPARATOR_M,
+    ef_construction=EF_CONSTRUCTION, hnsw.ef_search=EF_SEARCH), L2 distance.
+    The server runs with shared_buffers, effective_cache_size and
+    maintenance_work_mem fitted to the cell's cap (runner.BACKENDS), the same
+    resource fitting the Neo4j page cache and DuckDB's thread pool get; at the
+    defaults (64 MB maintenance_work_mem) a 10M HNSW build would not finish
+    in the envelope, which makes the comparison meaningless rather than
+    unfair."""
+    quantization = "fp32"
+    name = "pgvector_dense"
+    ID_INDEX_DDL = "vid INTEGER PRIMARY KEY"
+
+    def connect(self):
+        # WHICH #174 CLIENT PATH THIS ARM RAN (issue #261): stamped so a row says it, not only the code.
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), "pg_client_path": "copy_binary"}
+        import psycopg
+        host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+        self.cx = psycopg.connect(f"host={host} dbname=bench user=postgres password=dbbenchpass",
+                                  autocommit=True)
+        with self.cx.cursor() as c:
+            c.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            c.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+            ev = c.fetchone()[0]
+            c.execute("SELECT version()")
+            pv = c.fetchone()[0].split(" (")[0]
+        # pgvector-python's psycopg adapters, for the binary COPY in build() (the pgvector README's bulk-loading path). Imported here, not at
+        # module level, so a stage that never touches pgvector never needs the package (G3c, repros/postgres-roundtrips-ab-20261007; DECISIONS #174).
+        from pgvector.psycopg import register_vector
+        register_vector(self.cx)
+        self.version = f"pgvector:{ev} on {pv}"
+
+    def build(self, vecs):
+        with self.cx.cursor() as c:
+            _t0 = time.perf_counter()
+            c.execute(f"CREATE TABLE articles (vid INTEGER PRIMARY KEY, embedding vector({DIM}))")
+            self.id_index = self.ID_INDEX_DDL
+            # BINARY COPY WITH pgvector-python's TYPES (G3c: 11.6x on the ingest column at 200,000 SIFT vectors, 13.2x on DEEP-shaped ones,
+            # identical stored rows); the text path formatted every float with "%.9g" in Python inside this timer
+            with c.copy("COPY articles (vid, embedding) FROM STDIN WITH (FORMAT BINARY)") as cp:
+                cp.set_types(["int4", "vector"])
+                for i in range(len(vecs)):
+                    cp.write_row((i, vecs[i]))
+            self.ingest_s = round(time.perf_counter() - _t0, 2)
+            _t1 = time.perf_counter()
+            c.execute(f"CREATE INDEX ON articles USING hnsw (embedding vector_l2_ops) "
+                      f"WITH (m = {COMPARATOR_M}, ef_construction = {EF_CONSTRUCTION})")
+            self.index_s = round(time.perf_counter() - _t1, 2)
+            c.execute(f"SET hnsw.ef_search = {EF_SEARCH}")
+
+    def set_beam(self, value):
+        super().set_beam(value)
+        with self.cx.cursor() as c:
+            c.execute(f"SET hnsw.ef_search = {int(value)}")
+
+    def search(self, qvec, k):
+        with self.cx.cursor() as c:
+            c.execute("SELECT vid FROM articles ORDER BY embedding <-> %s::vector LIMIT %s",
+                      ("[" + ",".join("%.9g" % x for x in qvec) + "]", k))
+            return [int(r[0]) for r in c.fetchall()]
+
+    def insert_vectors(self, ids, vecs):
+        with self.cx.cursor() as c:
+            c.executemany("INSERT INTO articles (vid, embedding) VALUES (%s, %s::vector)",
+                          [(int(v), "[" + ",".join("%.9g" % x for x in vecs[j]) + "]")
+                           for j, v in enumerate(ids)])
+        self.cx.commit()
+
+    def delete_vectors(self, ids):
+        with self.cx.cursor() as c:
+            c.execute("DELETE FROM articles WHERE vid = ANY(%s)", ([int(v) for v in ids],))
+        self.cx.commit()
+
+    def close(self):
+        self.cx.close()
+
+
+class CrateDense(Base):
+    """CrateDB 6.4.6 over the PostgreSQL wire (2026-10-23, the multi-model comparator batch): a `float_vector(DIM)` column, the
+    Lucene HNSW index CrateDB builds on it, and `knn_match(col, query, k)` for the search.
+
+    F7, DEGREE: CrateDB exposes no HNSW parameter (no m, no ef_construction; CREATE TABLE and the float_vector type take none).
+    The graph is Lucene's default, MaxConn 16 (doubled at layer 0 = hnswlib's M 16) and BeamWidth 100 = EF_CONSTRUCTION, read
+    from the class constants of Lucene 10.4.0 in the pinned image and from CrateCodec, which sets no format of its own
+    (CRATEDB_LUCENE_MAX_CONN). So the engine's fixed degree and the lane's matched COMPARATOR_M coincide at the default M, which
+    build() asserts; at any other M the arm refuses rather than print a label the engine did not run. Stamped as a fixed-degree
+    engine would be: the value it builds, family hnswlib_m_doubled_at_base.
+
+    SEARCH BEAM: `knn_match`'s k is Lucene's per-shard candidate count (CrateDB's scalar-functions page), the counterpart of
+    ef_search, and with ONE shard it is the whole query's. The arm asks for max(k, EF_SEARCH) candidates, keeps the best k by
+    `_score`, exactly as Elasticsearch's `num_candidates` and Neo4j's SEARCH ... LIMIT do. `_score` is
+    1 / (1 + squared L2) for the default euclidean similarity, so descending `_score` is ascending L2.
+
+    SETTLE: REFRESH TABLE then OPTIMIZE TABLE ... WITH (max_num_segments = 1), the Lucene-engine counterpart of Elasticsearch's
+    refresh + force-merge, inside the build timer. NO INGEST/INDEX SPLIT (F14c, fairness_check.PHASE_SPLIT_DECLARED): Lucene
+    builds the graph per segment while documents are indexed, and the merge rebuilds it.
+    """
+    quantization = "fp32"
+    name = "cratedb_dense"
+    ID_INDEX_DDL = "vid INTEGER PRIMARY KEY"
+
+    def connect(self):
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), "pg_client_path": "executemany_insert"}
+        import cratedb_common
+        self.cc = cratedb_common
+        self.cx = cratedb_common.connect()
+        with self.cx.cursor() as c:
+            c.execute("SELECT version()")
+            self.version = "cratedb:" + c.fetchone()[0].split(" (")[0].replace("CrateDB ", "")
+
+    def build(self, vecs):
+        if COMPARATOR_M != CRATEDB_LUCENE_MAX_CONN or EF_CONSTRUCTION != CRATEDB_LUCENE_BEAM_WIDTH:
+            raise RuntimeError(f"cratedb builds Lucene's fixed MaxConn {CRATEDB_LUCENE_MAX_CONN} / BeamWidth "
+                               f"{CRATEDB_LUCENE_BEAM_WIDTH}; the lane asks for M={COMPARATOR_M}, efc={EF_CONSTRUCTION}: "
+                               f"F7 cannot be met at this point")
+        with self.cx.cursor() as c:
+            _t0 = time.perf_counter()
+            c.execute(f"CREATE TABLE articles (vid INTEGER PRIMARY KEY, embedding FLOAT_VECTOR({DIM})) "
+                      + self.cc.with_clause(1))
+            self.id_index = self.ID_INDEX_DDL
+            for i in range(0, len(vecs), BATCH):
+                c.executemany("INSERT INTO articles (vid, embedding) VALUES (%s, %s)",
+                              [(i + j, vecs[i + j].tolist()) for j in range(len(vecs[i:i + BATCH]))])
+            self.ingest_s = round(time.perf_counter() - _t0, 2)
+
+    def post_build(self):
+        self.cc.refresh(self.cx, "articles")
+        with self.cx.cursor() as c:
+            c.execute("OPTIMIZE TABLE articles WITH (max_num_segments = 1)")
+        _v, extra, self.durability = self.cc.readback(self.cx, "articles", 1)
+        self.row_extra = {**self.row_extra, **extra, "cratedb_knn_candidates": EF_SEARCH,
+                          "cratedb_lucene_max_conn": CRATEDB_LUCENE_MAX_CONN,
+                          "cratedb_lucene_beam_width": CRATEDB_LUCENE_BEAM_WIDTH}
+
+    def search(self, qvec, k):
+        with self.cx.cursor() as c:
+            c.execute("SELECT vid FROM articles WHERE knn_match(embedding, %s, %s) ORDER BY _score DESC LIMIT %s",
+                      (qvec.tolist(), max(k, EF_SEARCH), k))
+            return [int(r[0]) for r in c.fetchall()]
+
+    def insert_vectors(self, ids, vecs):
+        with self.cx.cursor() as c:
+            c.executemany("INSERT INTO articles (vid, embedding) VALUES (%s, %s)",
+                          [(int(v), [float(x) for x in vecs[j]]) for j, v in enumerate(ids)])
+            c.execute("REFRESH TABLE articles")
+
+    def delete_vectors(self, ids):
+        with self.cx.cursor() as c:
+            c.execute("DELETE FROM articles WHERE vid = ANY(%s)", ([int(v) for v in ids],))
+            c.execute("REFRESH TABLE articles")
+
+    def close(self):
+        self.cx.close()
+
+
+class Neo4jVector(Base):
+    """Neo4j's own vector index (2026-09-11): Article nodes with an embedding
+    property loaded through UNWIND batches over bolt, then CREATE VECTOR INDEX
+    at the matched operating point (vector.hnsw.m, vector.hnsw.ef_construction)
+    with euclidean similarity; queries through db.index.vector.queryNodes.
+    Neo4j exposes no per-query ef_search; the note under the table says so.
+
+    THE QUANTIZATION IS SET, NOT LEFT TO THE DEFAULT (BUGS F164, DECISIONS
+    #135). Neo4j 2026.08.1 to 2026.10.0 build a vector index BINARY-quantized, with a
+    search expansion factor of 3, when the definition names no
+    `vector.quantization.type`, and this arm's definition named none until
+    2026-10-02 while it recorded fp32: every Neo4j dense row at the October
+    pin measured a binary search. The type is now part of the definition
+    (`NONE` here, `SCALAR` on the int8 arm below), and the applied index
+    configuration is read back onto the row; a mismatch refuses the cell
+    rather than recording a label the engine did not run."""
+    quantization = "fp32"
+    name = "neo4j_dense"
+    ID_INDEX_DDL = "CREATE CONSTRAINT art_vid IF NOT EXISTS FOR (a:Article) REQUIRE a.vid IS UNIQUE"
+    QUANT_TYPE = "NONE"
+    # THE SEARCH EXPANSION, SET AND READ BACK (2026-10-02). Each quantization
+    # type brings its own default `vector.default_search_expansion_factor`
+    # (2026.08.1, 2026.09.0 and 2026.10.0: NONE 1.0, SCALAR 1.5, BINARY 3.0), the multiple
+    # of the requested candidates the index searches before re-scoring. The lane
+    # matches search effort at ef 100 and Neo4j, which has no per-query ef, asks
+    # for 100 candidates and keeps 10, so a default 1.5 would give the int8 arm
+    # 150 where its fp32 twin and every other engine search 100: both arms set
+    # 1.0, as the Elasticsearch int8 arm sets the minimum oversample.
+    SEARCH_EXPANSION = 1.0
+
+    def connect(self):
+        from neo4j import GraphDatabase
+        host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+        self.drv = GraphDatabase.driver(f"bolt://{host}:7687", auth=("neo4j", "dbbenchpass"))
+        with self.drv.session() as s:
+            v = s.run("CALL dbms.components() YIELD versions RETURN versions[0] AS v").single()["v"]
+            # The page cache the runner fitted to the cell, as the engine reports
+            # it (CAMPAIGN section 7 row 21, override_registry.py).
+            self._settings = bench_common.neo4j_readback(s)
+        self.version = f"neo4j:{v}"
+
+    def build(self, vecs):
+        with self.drv.session() as s:
+            _t0 = time.perf_counter()
+            s.run(self.ID_INDEX_DDL).consume()
+            s.run("CALL db.awaitIndexes(3600)").consume()
+            self.id_index = self.ID_INDEX_DDL
+            for i in range(0, len(vecs), BATCH):
+                rows = [{"vid": i + j, "e": vecs[i + j].tolist()} for j in range(len(vecs[i:i + BATCH]))]
+                s.run("UNWIND $rows AS r CREATE (:Article {vid: r.vid, embedding: r.e})", rows=rows).consume()
+            self.ingest_s = round(time.perf_counter() - _t0, 2)
+            _t1 = time.perf_counter()
+            s.run(f"CREATE VECTOR INDEX art_emb IF NOT EXISTS FOR (a:Article) ON (a.embedding) "
+                  f"OPTIONS {{indexConfig: {{`vector.dimensions`: {DIM}, "
+                  f"`vector.similarity_function`: 'euclidean', "
+                  f"`vector.quantization.type`: '{self.QUANT_TYPE}', "
+                  f"`vector.default_search_expansion_factor`: {self.SEARCH_EXPANSION}, "
+                  f"`vector.hnsw.m`: {COMPARATOR_M}, `vector.hnsw.ef_construction`: {EF_CONSTRUCTION}}}}}").consume()
+            s.run("CALL db.awaitIndexes(36000)").consume()
+            self.index_s = round(time.perf_counter() - _t1, 2)
+            # The engine's own answer, never the option we sent (F164).
+            cfg = s.run("SHOW VECTOR INDEXES YIELD name, options WHERE name = 'art_emb' "
+                        "RETURN options.indexConfig AS c").single()["c"]
+        applied = cfg.get("vector.quantization.type")
+        if applied != self.QUANT_TYPE:
+            raise RuntimeError(f"neo4j vector index quantization read back {applied!r}, not {self.QUANT_TYPE!r}: "
+                               f"the row would record {self.quantization} for a different index (BUGS F164)")
+        expansion = cfg.get("vector.default_search_expansion_factor")
+        if float(expansion or 0) != self.SEARCH_EXPANSION:
+            raise RuntimeError(f"neo4j vector index search expansion read back {expansion!r}, not "
+                               f"{self.SEARCH_EXPANSION}: the arm would search a different candidate pool")
+        self.row_extra = {"neo4j_vector_quantization": applied,
+                          "neo4j_vector_search_expansion": expansion,
+                          "neo4j_vector_index_config": json.dumps(cfg, sort_keys=True, default=str),
+                          **getattr(self, "_settings", {})}
+
+    def search(self, qvec, k):
+        with self.drv.session() as s:
+            # Cypher 25 SEARCH clause (GA in 2026.02); db.index.vector.queryNodes
+            # is deprecated since 2026.04 and warned on every call.
+            # SEARCH has no candidate-count option, and LIMIT k alone returned
+            # half the true neighbours at micro scale (recall 0.50 against 0.94
+            # through the deprecated procedure). Asking the index for
+            # EF_SEARCH candidates and keeping the best k is the same operating
+            # point every other engine runs at (ef_search=100).
+            r = s.run("CYPHER 25 MATCH (a:Article) SEARCH a IN (VECTOR INDEX art_emb FOR $q LIMIT $ef) "
+                      "SCORE AS score RETURN a.vid AS vid ORDER BY score DESC LIMIT $k",
+                      k=k, ef=max(k, EF_SEARCH), q=qvec.tolist()).data()
+        return [int(x["vid"]) for x in r]
+
+    def insert_vectors(self, ids, vecs):
+        rows = [{"vid": int(v), "e": [float(x) for x in vecs[j]]} for j, v in enumerate(ids)]
+        with self.drv.session() as s:
+            s.run("UNWIND $rows AS r CREATE (:Article {vid: r.vid, embedding: r.e})",
+                  rows=rows).consume()
+            s.run("CALL db.awaitIndexes(3600)").consume()
+
+    def delete_vectors(self, ids):
+        with self.drv.session() as s:
+            s.run("UNWIND $ids AS i MATCH (a:Article {vid: i}) DELETE a",
+                  ids=[int(v) for v in ids]).consume()
+            s.run("CALL db.awaitIndexes(3600)").consume()
+
+    def close(self):
+        self.drv.close()
+
+
+class Neo4jVectorInt8(Neo4jVector):
+    """Neo4j's scalar-quantized vector index, its int8-class arm (#53, DECISIONS
+    #135): the same arm with `vector.quantization.type: 'SCALAR'`, read back
+    onto the row like the fp32 arm's `NONE`."""
+    quantization = "int8"
+    name = "neo4j_dense_int8"
+    QUANT_TYPE = "SCALAR"
+
+
+class SurrealDense(Base):
+    """SurrealDB embedded through its Python SDK on SurrealKV (SDK 2.0.0, which carries core 2.3.10):
+    article records with an embedding array under a SurrealQL HNSW index at
+    the matched operating point (M=COMPARATOR_M, EFC=EF_CONSTRUCTION), the
+    <|k,ef|> nearest-neighbour operator at EF_SEARCH (2026-09-11). The served
+    twin runs the 3.2.4 server on RocksDB."""
+    quantization = "fp32"
+    name = "surrealdb_dense"
+    URL = "surrealkv:///tmp/l3d_surrealkv"
+
+    def _open(self):
+        import shutil
+        from surrealdb import Surreal
+        shutil.rmtree("/tmp/l3d_surrealkv", ignore_errors=True)
+        self.db = Surreal(self.URL)
+        self.db.use("bench", "bench")
+        self.version = surreal_common.engine_stamp(self.db)   # core version, not the SDK's (F39)
+
+    def connect(self):
+        self._open()
+        self.db.query("REMOVE TABLE IF EXISTS article")
+
+    def build(self, vecs):
+        self.db.query(f"DEFINE INDEX art_emb ON article FIELDS embedding HNSW DIMENSION {DIM} DIST EUCLIDEAN TYPE F32 "
+                      f"EFC {EF_CONSTRUCTION} M {COMPARATOR_M}")
+        from surrealdb import RecordID   # a string id would become a string key
+        for i in range(0, len(vecs), 5_000):
+            chunk = vecs[i:i + 5_000]
+            self.db.insert("article", [{"id": RecordID("article", i + j), "vid": i + j, "embedding": chunk[j].tolist()}
+                                       for j in range(len(chunk))])
+
+    @staticmethod
+    def _rows(res):
+        if isinstance(res, list) and res and isinstance(res[0], dict) and "result" in res[0]:
+            res = res[-1]["result"]
+        return res if isinstance(res, list) else ([res] if res is not None else [])
+
+    def search(self, qvec, k):
+        # BOUND (DECISIONS #116 item 2): the query vector as $q. k and ef stay
+        # in the text because the KNN operator takes only integer literals
+        # there ("expected an unsigned integer" for a parameter, SDK 2.0.0);
+        # both are constant in a cell, so the text still repeats. Same top-10
+        # as the pasted form (laptop, 2026-09-26).
+        rows = self._rows(self.db.query(f"SELECT vid FROM article WHERE embedding <|{int(k)},{EF_SEARCH}|> $q",
+                                        {"q": np.asarray(qvec, dtype=np.float32).tolist()}))
+        return [int(r["vid"]) for r in rows]
+
+    def insert_vectors(self, ids, vecs):
+        from surrealdb import RecordID
+        self.db.insert("article", [
+            {"id": RecordID("article", int(v)), "vid": int(v),
+             "embedding": [float(x) for x in vecs[j]]} for j, v in enumerate(ids)])
+
+    def delete_vectors(self, ids):
+        # ONE STATEMENT, ONE TRANSACTION PER BATCH, bound (BUGS F130; DECISIONS
+        # #116 item 2). It was 200 `DELETE article:N` joined by `;`, which
+        # SurrealDB runs as 200 transactions, where ArcadeDB commits once per 200.
+        from surrealdb import RecordID
+        for lo in range(0, len(ids), 200):
+            self.db.query("DELETE $ids", {"ids": [RecordID("article", int(v)) for v in ids[lo:lo + 200]]})
+
+    def close(self):
+        try:
+            self.db.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+class SurrealDenseServer(SurrealDense):
+    name = "surrealdb_dense_server"
+
+    def _open(self):
+        # One shared client for every served arm (DECISIONS #91): it sets the
+        # WebSocket options the SDK leaves at the library's defaults, and it
+        # reconnects, re-authenticates and re-selects the namespace once when
+        # the socket dies mid-query.
+        self.db = surreal_common.served_client()
+        self.durability = surreal_common.served_durability()
+        self.version = "surrealdb-server:" + str(self.db.version()).replace("surrealdb-", "")
+
+    # THE SERVER BUILDS THE INDEX IN THE BACKGROUND, SO THE BUILD WAITS FOR IT
+    # (BUGS F134, DECISIONS #117). Defined before the load, as the embedded
+    # twin does, the 3.2.4 server fills the HNSW index asynchronously: the
+    # insert returns long before the index holds the rows, INFO FOR INDEX says
+    # `ready` throughout, and queries in that window brute-force the backlog
+    # (September published this arm at 1,510 ms p50 at 1M). Defining it after
+    # the load instead runs the whole build as one RocksDB transaction, which
+    # failed with a transaction conflict in the lane at 50k. So the order stays
+    # and the build waits, inside the timer, until a KNN probe's latency has
+    # stopped falling (surreal_common.await_hnsw_settled): the build time
+    # counts the index work and the first timed query meets a finished index.
+    def build(self, vecs):
+        _t = time.perf_counter()
+        super().build(vecs)
+        self.ingest_s = round(time.perf_counter() - _t, 2)
+        _t = time.perf_counter()
+        self.settle = surreal_common.await_hnsw_settled(
+            self.db, "article", "embedding", DIM,
+            log=lambda m: print(m, file=sys.stderr, flush=True))
+        self.index_s = round(time.perf_counter() - _t, 2)
+
+class MongoDense(Base):
+    """MongoDB 9.0.4 with MongoDB Search (mongot) Community 1.70.5, served
+    (2026-09-15): article documents with an embedding array through
+    insert_many, then a `vectorSearch` index that mongot builds out of band,
+    queried with the $vectorSearch aggregation stage.
+
+    DECISIONS #68 recorded MongoDB's vector search as not joining, because it
+    "needs the separate mongot process, a two-container server the runner
+    cannot start yet". Both halves of that have changed: MongoDB Search went
+    generally available for Community Edition on 2026-06-30, and the pair runs
+    in ONE container here (Dockerfile.mongosearch), which is the deployment
+    MongoDB's own default mongot config is written for and the only one that
+    puts the whole engine inside the single cgroup the runner caps and
+    samples.
+
+    MATCHED OPERATING POINT, EXPRESSIBLE AND EXPRESSED: hnswOptions.maxEdges =
+    COMPARATOR_M, hnswOptions.numEdgeCandidates = EF_CONSTRUCTION, and the
+    stage's numCandidates = EF_SEARCH. maxEdges is Lucene HNSW's per-layer
+    bound with the base layer doubled, so this arm is degree-matched in the
+    same units as Qdrant, pgvector, Neo4j and SurrealDB.
+
+    INGEST AND INDEX ARE TWO TIMERS HERE (DECISIONS #66, #74 item 2), and the
+    boundary is real rather than nominal: mongod accepts the documents, and
+    mongot builds the index afterwards from the oplog. The wait for the index
+    to become queryable is index_s, for the reason BUGS F8 records for Milvus
+    -- an engine that answers a query before its index exists reports a build
+    time that is not one and a recall that did not come from the index under
+    test.
+
+    THE SEARCH PROCESS IS A JVM AND ITS HEAP IS NOT PINNED. mongot runs on a
+    bundled JDK and sizes its heap from the container, so this arm's engine
+    holds a JVM whose heap the harness does not set, while the row records
+    heap=None because the backend name is not in runner.JVM_BACKENDS. Stamping
+    the tier heap would be worse -- a claim about a flag nobody passed -- so
+    the row stays blank and this says why. F3's envelope still holds: the cap
+    is the cell's, and mongot's default is a fraction of it.
+
+    index_s CARRIES A FIXED FLOOR OF ROUGHLY 12 TO 30 SECONDS, and at the small
+    tiers that floor IS the number. Measured on this pin (laptop, 2026-09-15):
+    a ONE-DOCUMENT collection's index becomes queryable in 12.51, 29.63, 30.12
+    and 30.10 s on four consecutive attempts, and 1,000 and 20,000 documents
+    take the same 28 to 30 s. That is mongot noticing the index exists, not
+    mongot building it. So this arm's micro and tiny build numbers are a poll
+    interval wearing a build timer's name and must not be put beside another
+    engine's; only the one-million and ten-million tiers, where real index work
+    dominates, say anything about MongoDB's build speed. Reported rather than
+    subtracted: an adapter that quietly removed a constant from its own engine's
+    timer would be doing the comparator's arithmetic for it.
+    """
+    quantization = "fp32"
+    name = "mongodb_dense"
+    # THE REPRESENTATION IS SET AND READ BACK (BUGS F164, DECISIONS #135):
+    # `quantization` on the index's vector field, `none` here and `scalar` on
+    # the int8 arm below, read back from mongot's latestDefinition after the
+    # index is queryable; a mismatch refuses the cell.
+    MONGOT_QUANTIZATION = "none"
+    # Every mutation costs a poll on mongot's own view of the data, because
+    # the index is eventually consistent with the collection; the constant is
+    # here rather than inline so the row can say what bound it ran under.
+    MUTATE_SETTLE_S = float(os.environ.get("BENCH_MONGO_SETTLE_S", "600"))
+
+    def connect(self):
+        self.cl, self.db, mongod = mongo_common.connect(auth=True)
+        # BOTH BINARIES ON THE ROW. $vectorSearch is served by mongot, which
+        # has its own release line; a row naming only mongod describes half
+        # the deployment and cannot be re-measured.
+        self.version = mongod + " + " + mongo_common.search_version(self.cl)
+        self.coll = self.db["articles"]
+
+    def build(self, vecs):
+        _t0 = time.perf_counter()
+        for i in range(0, len(vecs), BATCH):
+            chunk = vecs[i:i + BATCH]
+            self.coll.insert_many(
+                [{"_id": i + j, "vid": i + j, "embedding": chunk[j].tolist()}
+                 for j in range(len(chunk))], ordered=False)
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        _t1 = time.perf_counter()
+        mongo_common.create_vector_index(self.coll, "embedding", DIM,
+                                         COMPARATOR_M, EF_CONSTRUCTION,
+                                         similarity="euclidean",
+                                         quantization=self.MONGOT_QUANTIZATION)
+        self._index_state = mongo_common.wait_queryable(self.coll)
+        self.index_s = round(time.perf_counter() - _t1, 2)
+        applied = mongo_common.index_quantization(self.coll)
+        if applied != self.MONGOT_QUANTIZATION:
+            raise RuntimeError(f"mongot vector index quantization read back {applied!r}, not "
+                               f"{self.MONGOT_QUANTIZATION!r}: the row would record {self.quantization} "
+                               f"for a different index (BUGS F164)")
+        self.row_extra = {"mongot_vector_quantization": applied}
+
+    def engine_stats(self):
+        """What mongot says it built, read after the fact and never asserted.
+
+        The whole point of the two-process design is that the index is not the
+        collection, so the row carries mongot's own description of the index it
+        is serving -- including whether it silently dropped the hnswOptions we
+        asked for, which is the one way this arm could stop being
+        degree-matched without any error.
+        """
+        # THE ONE WAY THIS ARM'S SERVER DIFFERS FROM THE DOCUMENT ARM'S, on the
+        # row rather than only in a comment: mongot authenticates to its sync
+        # source with SCRAM and mongod authorizes it through the
+        # searchCoordinator role, so access control is ON here and OFF on the
+        # `mongodb` arm. Nothing we chose; there is no way to run mongot
+        # without it.
+        out = {"mongo_access_control": True}
+        try:
+            idx = [i for i in self.coll.list_search_indexes()
+                   if i.get("name") == mongo_common.VECTOR_INDEX]
+            if idx:
+                d = idx[0]
+                out["mongot_index_status"] = d.get("status")
+                out["mongot_index_queryable"] = d.get("queryable")
+                fields = (d.get("latestDefinition") or {}).get("fields") or []
+                vec = next((f for f in fields if f.get("type") == "vector"), {})
+                out["mongot_indexing_method"] = vec.get("indexingMethod")
+                out["mongot_hnsw_options"] = vec.get("hnswOptions")
+                out["mongot_similarity"] = vec.get("similarity")
+                out["mongot_quantization"] = vec.get("quantization")
+        except Exception as e:                            # noqa: BLE001
+            out["mongot_index_state_error"] = f"{type(e).__name__}: {e}"[:200]
+        return out
+
+    def search(self, qvec, k):
+        return [int(d["vid"]) for d in self.coll.aggregate([
+            {"$vectorSearch": {"index": mongo_common.VECTOR_INDEX,
+                               "path": "embedding",
+                               "queryVector": [float(x) for x in qvec],
+                               "numCandidates": max(k, EF_SEARCH), "limit": k}},
+            {"$project": {"_id": 0, "vid": 1}}])]
+
+    def _settle(self, ids, vecs, want_present):
+        """Wait until mongot's index reflects a mutation mongod has accepted.
+
+        THE WAIT IS INSIDE THE TIMED SECTION ON PURPOSE, exactly as it is for
+        Milvus: "insert into a built index then search" is only that operation
+        once the index can answer for it, and an arm that returned as soon as
+        mongod acked would be timing a different, cheaper operation than every
+        other arm on the table. The probe asks the index for the mutated
+        vector itself, which is its own nearest neighbour, so a hit is
+        unambiguous.
+
+        THE BOUND IS A BOUND, NOT THE CHECK. If it expires the wait stops and
+        the cell carries on, because the row already holds the authoritative
+        evidence: `mutate_deleted_hits` must be zero and
+        `mutate_reinserted_hits` must be the victim count, both measured by the
+        lane from real queries after the mutation. A timeout writes a line to
+        stderr, which the runner captures as the cell's clientlog, so the
+        reason is readable beside the numbers that show it.
+        """
+        deadline = time.time() + self.MUTATE_SETTLE_S
+        probe_id, probe_vec = int(ids[-1]), vecs[-1]
+        while time.time() < deadline:
+            got = set(self.search(probe_vec, 1))
+            if (probe_id in got) == want_present:
+                return True
+            time.sleep(0.25)
+        print(f"[{self.name}] mongot did not reflect the mutation of vid={probe_id} "
+              f"(want_present={want_present}) within {self.MUTATE_SETTLE_S}s; read "
+              f"mutate_deleted_hits / mutate_reinserted_hits on the row",
+              file=sys.stderr, flush=True)
+        return False
+
+    def insert_vectors(self, ids, vecs):
+        rows = [{"_id": int(v), "vid": int(v),
+                 "embedding": [float(x) for x in vecs[j]]} for j, v in enumerate(ids)]
+        self.coll.insert_many(rows, ordered=False)
+        self._settle(ids, [r["embedding"] for r in rows], True)
+
+    def delete_vectors(self, ids):
+        # The embeddings are read back BEFORE the delete so the settle probe
+        # has something to ask for afterwards; that read is a cost of this
+        # engine's eventual-consistency boundary and is left inside the timer.
+        keep = [d["embedding"] for d in
+                self.coll.find({"_id": {"$in": [int(v) for v in ids[-1:]]}}, {"embedding": 1})]
+        self.coll.delete_many({"_id": {"$in": [int(v) for v in ids]}})
+        if keep:
+            self._settle(ids, keep, False)
+
+    def close(self):
+        mongo_common.close(self.cl)
+
+
+class MongoDenseInt8(MongoDense):
+    """mongot's scalar-quantized vector index, MongoDB's int8 arm (#53, the
+    quantization survey, DECISIONS #135): the same arm with `quantization:
+    "scalar"` on the vector field, read back like the fp32 arm's `none`. The
+    stage's numCandidates stays EF_SEARCH; whatever mongot does with the
+    full-fidelity vectors after the quantized search is its own default, which
+    the recall on the row reflects."""
+    quantization = "INT8"
+    name = "mongodb_dense_int8"
+    MONGOT_QUANTIZATION = "scalar"
+
+
+class ArangoDense(Base):
+    """ArangoDB 3.12.11 served (2026-09-13): article documents with an
+    embedding array through the bulk import API, then the engine's vector
+    index, which is FAISS IVF (trained centroids, inverted lists), not HNSW:
+    no degree to match, so the row records nLists and nProbe instead
+    (arango_common.ivf_params). Queries through APPROX_NEAR_L2 in AQL. The
+    server runs with --vector-index true, the feature's opt-in in 3.12."""
+    quantization = "fp32"
+    name = "arangodb_dense"
+    calibrates = True
+    # IVF has no HNSW beam; the sweep turns nProbe around the calibrated value (dense_beam.nprobe_values)
+    beam_kind = "nprobe"
+
+    def beam_values(self):
+        return dense_beam.nprobe_values(self.ivf_nprobe, self.ivf_nlists)
+
+    def beam_default(self):
+        return self.ivf_nprobe
+
+    def set_beam(self, value):
+        self.ivf_nprobe = int(value)
+
+    # None: plain IVF over the floats. The int8 arm sets a FAISS factory
+    # string; either way the server's params are read back and a mismatch
+    # refuses the cell (BUGS F164).
+    FACTORY = None
+
+    def connect(self):
+        self.cl, self.db, self.version = arango_common.connect()
+
+    def build(self, vecs):
+        col = self.db.create_collection("article")
+        # INGEST AND INDEX AS TWO TIMERS (DECISIONS #132, CAMPAIGN section 7
+        # row 44): the bulk import, then the vector index's training and
+        # build, which only starts once the documents are in.
+        _t0 = time.perf_counter()
+        for i in range(0, len(vecs), BATCH):
+            chunk = vecs[i:i + BATCH]
+            # Every batch's answer is checked: a short batch raises here, in
+            # the load, instead of surfacing as a recall of 0.0 two hours
+            # later with n_docs still claiming the full corpus (BUGS F55).
+            arango_common.imported(
+                col.import_bulk([{"_key": str(i + j), "vid": i + j, "embedding": chunk[j].tolist()}
+                                 for j in range(len(chunk))]), len(chunk))
+        self.ivf_server_doc_count = int(col.count())
+        if self.ivf_server_doc_count != len(vecs):
+            raise RuntimeError(f"arangodb: server holds {self.ivf_server_doc_count} documents, "
+                               f"the corpus has {len(vecs)}; refusing to index a short load")
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        _t1 = time.perf_counter()
+        self.ivf_nlists, self.ivf_nprobe = arango_common.vector_index(col, "embedding", DIM, len(vecs),
+                                                                      factory=self.FACTORY)
+        self.index_s = round(time.perf_counter() - _t1, 2)
+        # The index as the server reports it, not as we asked for it: from
+        # 3.12.10 a failed training leaves the index "unusable" and the
+        # create call still succeeds; an index that is not "ready" answers by
+        # a linear scan, which is a different experiment.
+        rb = arango_common.index_readback(arango_common.DB, "article")
+        self.ivf_training_state = rb.get("trainingState")
+        self.ivf_resolved_nlists = rb.get("resolvedNLists")
+        self.ivf_index_bytes = rb.get("memory")
+        if self.ivf_training_state != "ready":
+            raise RuntimeError(f"arangodb: vector index is {self.ivf_training_state!r}, not ready: "
+                               f"{rb.get('errorMessage')!r}")
+        self.ivf_factory = (rb.get("params") or {}).get("factory")
+        want = self.FACTORY.format(nlists=self.ivf_nlists) if self.FACTORY else None
+        if self.ivf_factory != want:
+            raise RuntimeError(f"arangodb vector index factory read back {self.ivf_factory!r}, not {want!r}: "
+                               f"the row would record {self.quantization} for a different index (BUGS F164)")
+
+    def search(self, qvec, k, nprobe=None):
+        cur = self.db.aql.execute(
+            "FOR d IN article LET s = APPROX_NEAR_L2(d.embedding, @q, {nProbe: @np}) "
+            "SORT s LIMIT @k RETURN d.vid",
+            bind_vars={"q": qvec.tolist(), "np": nprobe or self.ivf_nprobe, "k": k})
+        return [int(v) for v in cur]
+
+    def insert_vectors(self, ids, vecs):
+        self.db.collection("article").import_bulk(
+            [{"_key": str(int(v)), "vid": int(v), "embedding": [float(x) for x in vecs[j]]}
+             for j, v in enumerate(ids)])
+
+    def delete_vectors(self, ids):
+        self.db.collection("article").delete_many([{"_key": str(int(v))} for v in ids])
+
+    def calibrate(self, queries, gt, scale):
+        target, src = arango_common.recall_target(scale)
+        np_, rec = arango_common.calibrate_nprobe(self.search, queries, gt, target, self.ivf_nlists, k=K)
+        self.ivf_nprobe = np_
+        self.ivf_recall_target = target
+        self.ivf_recall_target_source = src
+        self.ivf_calibration_recall = round(rec, 4)
+        self.ivf_calibration_queries = len(queries)
+        self.ivf_calibration_slice = f"{CALIBRATION_SLICE[0]}:{CALIBRATION_SLICE[1]}"
+
+    def close(self):
+        arango_common.close(self.cl)
+
+
+class ArangoDenseInt8(ArangoDense):
+    """ArangoDB's IVF with 8-bit scalar-quantized lists, its int8 arm (#53, the
+    quantization survey, DECISIONS #135): the FAISS factory string
+    "IVF<nLists>,SQ8" at the fp32 arm's nLists, trained the same way, and
+    nProbe calibrated to the same recall target on the same held-out slice, so
+    the pair is matched by effect as the fp32 arm is matched to the HNSW arms.
+    The lists hold SQ8 codes and FAISS ranks by the distance to them; nothing
+    re-ranks against the stored floats. ArangoDB forwards `factory` to FAISS
+    and validates it at creation only from 3.12.12 (its 3.12 vector-index
+    docs; the 26.10.1 measurement runs 3.12.12, before it 3.12.11 did not), so
+    the training state and the read-back factory string stay the evidence that
+    the server built what the row says."""
+    quantization = "INT8"
+    name = "arangodb_dense_int8"
+    FACTORY = "IVF{nlists},SQ8"
+
+
+class Milvus(Base):
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    quantization = "fp32"
+    name = "milvus_dense"
+
+    def connect(self):
+        from pymilvus import MilvusClient
+        import pymilvus
+        self.cl = MilvusClient(
+            uri=f"http://{os.environ['BENCH_SERVER_HOST']}:19530", timeout=600)
+        # THE SERVER'S version, and AFTER the client exists (see Qdrant above
+        # for the ordering bug this had). The sparse lane records
+        # "milvus:pkg/v2.6.13" while this recorded "3.0.1", which is pymilvus.
+        try:
+            self.version = "milvus:" + str(self.cl.get_server_version())
+        except Exception as e:
+            self.version = ("pymilvus:" + lib_version(pymilvus, "pymilvus")
+                            + f" (server unreachable: {e.__class__.__name__})")
+
+    INDEX_TYPE = "HNSW"
+    INDEX_EXTRA = {}
+
+    def build(self, vecs):
+        """Bulk import (Zilliz 2026-10-22, https://milvus.io/docs/import-data.md): the collection is created with its
+        index, the rows go to Parquet in Milvus's own MinIO through RemoteBulkWriter, and ONE import job loads them.
+        milvus_common documents the timing: file preparation, upload and the job are all inside ingest_s."""
+        from pymilvus import DataType
+        import milvus_common
+        sch = self.cl.create_schema()
+        sch.add_field("id", DataType.INT64, is_primary=True)
+        sch.add_field("vec", DataType.FLOAT_VECTOR, dim=DIM)
+        idx = self.cl.prepare_index_params()
+        idx.add_index("vec", index_type=self.INDEX_TYPE, metric_type="L2",
+                      params={"M": COMPARATOR_M, "efConstruction": EF_CONSTRUCTION, **self.INDEX_EXTRA})
+        self.cl.create_collection("articles", schema=sch, index_params=idx)
+        self._n_rows = len(vecs)
+        # The orm schema RemoteBulkWriter wants, rebuilt from the same fields
+        from pymilvus import CollectionSchema, FieldSchema
+        orm = CollectionSchema([FieldSchema("id", DataType.INT64, is_primary=True),
+                                FieldSchema("vec", DataType.FLOAT_VECTOR, dim=DIM)])
+        info = milvus_common.bulk_import(
+            self.cl, os.environ["BENCH_SERVER_HOST"], "articles", orm,
+            ({"id": i, "vec": vecs[i]} for i in range(len(vecs))))
+        # The boundary Milvus has: the import job is complete here; post_build() waits until every segment is sealed,
+        # the index is built on all of them, compacts, and loads, and that whole wait is index_s (#74 item 2).
+        self.ingest_s = info.pop("ingest_s")
+        self._bulk_info = info
+
+    def post_build(self):
+        """Wait for the HNSW index to EXIST before stopping the clock.
+
+        flush() + load_collection() was not a settle. `load_collection` returns
+        once the collection is loadable, which is true while its real index is
+        still building: probed, it returned LoadState.Loaded with
+            {"state": "InProgress", "indexed_rows": 0,
+             "total_rows": 1000000, "pending_index_rows": 1000000}
+        and Milvus then answers queries from a TEMPORARY index. The pinned
+        image's own milvus.yaml says so:
+            interimIndex.enableIndex: true   # "a temporary index for growing
+                segments and sealed segments not yet indexed"
+            denseVectorIndexType: IVF_FLAT_CC, nlist 128, nprobe 16
+        which is why the deep10m row read recall 0.993 -- HIGHER than Qdrant's
+        0.978 on the same degree -- at a p50 14x SLOWER. Higher recall AND
+        slower is not HNSW; it is a coarse interim index.
+
+        The published rates make it unarguable. A graph build is superlinear,
+        so its rate must FALL as the corpus grows. Ours did the opposite:
+            milvus_sparse  tiny/small/medium   9,083 / 9,787 / 8,819 docs/s
+            milvus_dense   small / deep10m    56,813 / 70,881 docs/s
+        Flat across an 88x corpus, and RISING on the dense arm. That is ingest.
+
+        STATE ALONE IS NOT ENOUGH. The probe caught
+            {"state": "Finished", "indexed_rows": 1000000,
+             "total_rows": 1000000, "pending_index_rows": 855349}
+        held for seconds. All three conjuncts below are load-bearing.
+
+        This MOVES A PUBLISHED NUMBER by roughly 4-5x, so every Milvus cell at
+        every scale has to be re-run and the change disclosed. It is not a patch
+        to apply quietly to existing rows.
+        """
+        # The comments above and below are the dense lane's history; the steps themselves now live in milvus_common
+        # (seal -> index -> compaction passes until the segment set stops moving, re-waiting the index after each -> load),
+        # and each wait is timed on its own and recorded by engine_stats().
+        import milvus_common
+        _t1 = time.perf_counter()
+        self._waits = milvus_common.wait_sealed_and_indexed(self.cl, "articles", "vec", self._n_rows, compact=True)
+        self._compactions = self._waits["milvus_compactions_forced"]
+        self._segments_trace = self._waits["milvus_segments_trace"]
+        self.index_s = round(time.perf_counter() - _t1, 2)
+
+    def engine_stats(self):
+        """Report whether the HNSW index actually EXISTS, without changing timing.
+
+        NOTHING verified this. Milvus builds indexes on sealed segments in the
+        background, and a collection can serve queries by brute force while its
+        index is still building -- which produces exactly the row we have at
+        deep10m: recall 0.993, HIGHER than Qdrant's 0.976-0.981 on nominally the
+        same parameters, with a query p50 of 18.3 ms, 14x SLOWER than Qdrant's
+        1.27 ms. High recall with slow queries is the brute-force signature.
+
+        If that is what happened, the 167 s / 59,668 docs/s build is not a build
+        time at all, and the comparison that says Milvus builds 13-64x faster
+        than ArcadeDB is measuring different things on the two sides.
+
+        This only OBSERVES: it runs after the timed window and records what it
+        finds. Deciding whether to WAIT for the index is a separate change, and
+        it would move a published number, so it does not belong in the same step
+        as finding out.
+        """
+        import milvus_common
+        out = dict(milvus_common.SEARCH_SHAPE)
+        out.update(getattr(self, "_bulk_info", {}))
+        out.update({k: v for k, v in getattr(self, "_waits", {}).items()
+                    if k not in ("milvus_compactions_forced", "milvus_segments_trace")})
+        try:
+            desc = self.cl.describe_index("articles", "vec")
+            for k in ("index_type", "state", "indexed_rows", "total_rows",
+                      "pending_index_rows", "metric_type"):
+                if isinstance(desc, dict) and k in desc:
+                    out[f"milvus_{k}"] = desc[k]
+            # The segment layout is the discriminator F8 lacked.
+            try:
+                out["milvus_persistent_segments"] = len(self.cl.list_persistent_segments("articles"))
+                out["milvus_loaded_segments"] = len(self.cl.list_loaded_segments("articles"))
+                out["milvus_compactions_forced"] = getattr(self, "_compactions", None)
+                out["milvus_segments_trace"] = getattr(self, "_segments_trace", None)
+            except Exception as e:                          # noqa: BLE001
+                out["milvus_segments_error"] = f"{type(e).__name__}: {e}"[:120]
+            if not out and desc is not None:
+                out["milvus_describe_index"] = str(desc)[:300]
+        except Exception as e:                            # noqa: BLE001
+            out["milvus_index_state_error"] = f"{type(e).__name__}: {e}"
+        return out
+
+    def search(self, qvec, k):
+        # ids and distances only: no output_fields, no vector field, no filter (recorded by engine_stats)
+        res = self.cl.search("articles", data=[qvec.tolist()], limit=k, filter="", output_fields=[],
+                             search_params={"params": {"ef": EF_SEARCH}})
+        return [int(h["id"]) for h in res[0]]
+
+    def insert_vectors(self, ids, vecs):
+        self.cl.insert("articles", [{"id": int(v), "vec": [float(x) for x in vecs[j]]}
+                                    for j, v in enumerate(ids)])
+        # Milvus accepts a write into a growing segment and serves it by brute
+        # force until the segment seals; flush() + load makes the mutation
+        # visible to the INDEX, which is what "insert into a built index then
+        # search" means. Inside the timed section on purpose: it is the cost.
+        self.cl.flush("articles")
+        self.cl.load_collection("articles")
+
+    def delete_vectors(self, ids):
+        # By primary key through the client's ids= argument (DECISIONS #116
+        # item 2), not a filter expression with the ids written into it.
+        for lo in range(0, len(ids), 500):
+            self.cl.delete("articles", ids=[int(v) for v in ids[lo:lo + 500]])
+        self.cl.flush("articles")
+        self.cl.load_collection("articles")
+
+
+# ---------------------------------------------------------------- int8 arms
+#
+# EVERY ENGINE THAT CAN QUANTIZE, MEASURED AT BOTH PRECISIONS. The sparse lane
+# has done this for ArcadeDB since #5143 (int8 default + an fp32 ablation); the
+# dense lane did not, so T5 compared our fp32 against a mix of fp32 engines and
+# ONE int8 engine (LanceDB, whose IVF_HNSW_SQ is its only HNSW offering), with
+# the precision visible only in a row label. Our own int8 dense numbers came
+# from a bespoke overlay rather than the lane.
+#
+# Each arm SUBCLASSES its fp32 sibling so the operating point cannot drift:
+# same corpus, same degree, same ef, same settle step, same queries. Precision
+# is the only variable, which is what makes the pair an ablation rather than
+# two unrelated configurations.
+#
+# Chroma, DuckDB-VSS and sqlite-vec have no int8 path and get no arm:
+# sqlite-vec is an exact scan by construction, and inventing a quantized
+# configuration an engine does not ship would be a worse comparison than
+# omitting it.
+
+
+class ArcadeServerInt8(ArcadeServer):
+    """ArcadeDB over HTTP with LSM_VECTOR INT8, the server twin of the embedded arm.
+
+    The arm DECISIONS #53 owed us. The dense table published ArcadeDB at two
+    precisions and every comparator at one, and the one ArcadeDB deployment that
+    was single-precision was single-precision because a comment claimed the
+    server could not pass the METADATA quantization key. It always could: the
+    key travels in the same POSTed DDL as dimensions and similarity, which is
+    why the sparse lane's server arm has been int8 all along.
+
+    Declared, not read from BENCH_DENSE_QUANT: that variable is set in the
+    driver's process and the index is created inside the server container, so
+    the knob cannot reach the thing it would be labelling.
+    """
+    name = "arcadedb_dense_server_int8"
+    quantization = "INT8"
+    _quant_ddl = '"quantization": "INT8",'
+
+
+class ArcadeEmbeddedInt8(ArcadeEmbedded):
+    """ArcadeDB with LSM_VECTOR INT8 quantization, its documented compact mode."""
+    name = "arcadedb_dense_embedded_int8"
+    # DECLARED, not inferred from the environment. See the stamping site: the
+    # row's quantization used to be read from BENCH_DENSE_QUANT before connect(),
+    # while this arm sets that variable inside build(), which runs later. Every
+    # int8 row therefore recorded "fp32" while genuinely building an INT8 index.
+    # The measurements were right and the label was wrong, which is the harder
+    # defect to notice: nothing fails, the arm just stops being distinguishable
+    # from the fp32 one in any check or table keyed on quantization.
+    quantization = "INT8"
+
+    def build(self, vecs):
+        # resolve_quant reads BENCH_DENSE_QUANT; set it for this arm only so
+        # the parent's DDL path is reused verbatim rather than duplicated.
+        prev = os.environ.get("BENCH_DENSE_QUANT")
+        os.environ["BENCH_DENSE_QUANT"] = "INT8"
+        try:
+            super().build(vecs)
+        finally:
+            if prev is None:
+                os.environ.pop("BENCH_DENSE_QUANT", None)
+            else:
+                os.environ["BENCH_DENSE_QUANT"] = prev
+
+
+class QdrantInt8(Qdrant):
+    """Qdrant with scalar quantization (int8), its documented compact mode.
+
+    quantile=0.99 and always_ram are Qdrant's own recommended defaults for
+    scalar quantization.
+
+    RESCORE MUST BE ASKED FOR AT SEARCH TIME, and assuming otherwise cost a
+    whole tier of rows. The first version of this arm configured quantization
+    on the collection and inherited Qdrant's plain search params, so every
+    query was answered from int8 approximations alone with no re-ranking
+    against the stored vectors. Recall came out at 0.2355 where every other
+    dense arm sits between 0.93 and 1.00 -- caught by the monitor's recall
+    range rule, not by reading the code.
+
+    Rescore is what makes a quantized index a compression technique rather than
+    a different algorithm: the int8 vectors narrow the candidate set and the
+    originals decide the order. Without it the comparison would have published
+    Qdrant-at-int8 as catastrophically inaccurate, which would have been our
+    misconfiguration reported as their result -- the exact failure this lane's
+    matched-operating-point rule exists to prevent.
+    """
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    quantization = "INT8"
+    name = "qdrant_dense_int8"
+
+    def search(self, qvec, k):
+        from qdrant_client import models as qm
+        res = self.cl.query_points(
+            "articles", query=qvec.tolist(), limit=k,
+            search_params=qm.SearchParams(
+                hnsw_ef=EF_SEARCH,
+                quantization=qm.QuantizationSearchParams(rescore=True)))
+        return [int(p.id) for p in res.points]
+
+    def build(self, vecs):
+        from qdrant_client import models as qm
+        self.cl.create_collection(
+            "articles",
+            vectors_config=qm.VectorParams(
+                size=DIM, distance=qm.Distance.EUCLID,
+                hnsw_config=qm.HnswConfigDiff(m=COMPARATOR_M,
+                                              ef_construct=EF_CONSTRUCTION)),
+            quantization_config=qm.ScalarQuantization(
+                scalar=qm.ScalarQuantizationConfig(
+                    type=qm.ScalarType.INT8, quantile=0.99, always_ram=True)))
+        for i in range(0, len(vecs), BATCH):
+            self.cl.upsert("articles", points=qm.Batch(
+                ids=list(range(i, i + len(vecs[i:i + BATCH]))),
+                vectors=vecs[i:i + BATCH].tolist()))
+
+
+class MilvusInt8(Milvus):
+    """Milvus HNSW_SQ at SQ8, its int8 scalar-quantized HNSW variant."""
+    # DECLARED, not inferred from BENCH_DENSE_QUANT. Every arm that is genuinely
+    # quantized says so on the class, so the row never has to consult an
+    # environment variable that a different arm may have set for a different
+    # reason. Before this, qdrant_dense_int8, milvus_dense_int8 and lancedb_dense
+    # all recorded quantization="fp32", which made every int8 comparator row
+    # indistinguishable from its fp32 sibling on the one field that names the
+    # ablation.
+    quantization = "INT8"
+    name = "milvus_dense_int8"
+    INDEX_TYPE = "HNSW_SQ"
+    INDEX_EXTRA = {"sq_type": "SQ8"}
+
+
+class ElasticDense(Base):
+    """Elasticsearch served (2026-10-02, DECISIONS #131 item 3, CAMPAIGN section 7
+    row 37): a `dense_vector` field with `index_options.type: hnsw` at the matched
+    operating point (`m` = COMPARATOR_M, Lucene's per-layer bound doubled at
+    layer 0 like hnswlib's; `ef_construction` = EF_CONSTRUCTION), L2 similarity,
+    one shard, no replica; queries through the `knn` search with
+    `num_candidates` = EF_SEARCH, Elasticsearch's per-shard candidate count and
+    the counterpart of ef_search. Same pinned server and heap fitting as the
+    sparse lane's arm (runner.BACKENDS), and the same settle step: refresh, then
+    a force-merge into one segment.
+
+    NO INGEST/INDEX SPLIT, DECLARED (F14c, fairness_check.PHASE_SPLIT_DECLARED):
+    Lucene builds an HNSW graph per segment while documents are indexed, and
+    the force-merge rebuilds it into one graph, so index work is spread through
+    the load and the settle, both inside the build timer.
+
+    THE HEAP AND THE PROCESSOR COUNT ARE READ BACK from `_nodes`, onto the row,
+    as CAMPAIGN section 7 row 20 asks of every JVM engine: the ENV we pass is a
+    claim, `jvm.mem.heap_max_in_bytes` is the answer.
+    """
+    quantization = "fp32"
+    name = "elasticsearch_dense"
+    IDX = "articles"
+    INDEX_TYPE = "hnsw"
+    RESCORE_OVERSAMPLE = None
+
+    def connect(self):
+        from elasticsearch import Elasticsearch, helpers
+        self.helpers = helpers
+        host = os.environ["BENCH_SERVER_HOST"]
+        self.es = Elasticsearch(f"http://{host}:9200", request_timeout=36000)
+        self.version = "elasticsearch:" + self.es.info()["version"]["number"]
+        node = next(iter(self.es.nodes.info(metric=["jvm", "os"])["nodes"].values()))
+        self.row_extra = {
+            "es_heap_max_mib": int(node["jvm"]["mem"]["heap_max_in_bytes"]) >> 20,
+            "es_allocated_processors": node["os"].get("allocated_processors"),
+            "es_available_processors": node["os"].get("available_processors"),
+            "es_index_type": self.INDEX_TYPE,
+            "es_num_candidates": EF_SEARCH,
+            "es_rescore_oversample": self.RESCORE_OVERSAMPLE,
+            "es_json_serializer": bench_common.es_json_serializer(self.es),
+        }
+
+    def build(self, vecs):
+        self.es.indices.create(index=self.IDX, mappings={"properties": {"emb": {
+            "type": "dense_vector", "dims": DIM, "index": True, "similarity": "l2_norm",
+            "index_options": {"type": self.INDEX_TYPE, "m": COMPARATOR_M,
+                              "ef_construction": EF_CONSTRUCTION}}}},
+            settings={"number_of_shards": 1, "number_of_replicas": 0})
+
+        def actions():
+            for i in range(len(vecs)):
+                yield {"_index": self.IDX, "_id": i, "_source": {"emb": vecs[i].tolist()}}
+        self.helpers.bulk(self.es, actions(), chunk_size=CHROMA_BATCH, request_timeout=36000)
+
+    def post_build(self):
+        self.es.indices.refresh(index=self.IDX)
+        self.es.indices.forcemerge(index=self.IDX, max_num_segments=1, request_timeout=36000)
+        # The mapping as the server holds it, so a default that overrode our
+        # index_options would show on the row rather than hide behind our DDL.
+        _opts = self.es.indices.get_mapping(index=self.IDX)[self.IDX]["mappings"]["properties"]["emb"].get("index_options") or {}
+        self.row_extra.update({"es_index_options": json.dumps(_opts, sort_keys=True)})
+
+    def readbacks(self):
+        # The two overrides a reader meets under this table (security off on
+        # the server, no replica on the index), asked of the engine once the
+        # index exists and the build timer has stopped (CAMPAIGN section 7
+        # row 21, override_registry.py).
+        return bench_common.es_readback(self.es, self.IDX)
+
+    def search(self, qvec, k):
+        knn = {"field": "emb", "query_vector": qvec.tolist(), "k": k,
+               "num_candidates": max(k, EF_SEARCH)}
+        if self.RESCORE_OVERSAMPLE:
+            knn["rescore_vector"] = {"oversample": self.RESCORE_OVERSAMPLE}
+        res = self.es.search(index=self.IDX, knn=knn, size=k, _source=False)
+        return [int(h["_id"]) for h in res["hits"]["hits"]]
+
+    def insert_vectors(self, ids, vecs):
+        self.helpers.bulk(self.es, ({"_index": self.IDX, "_id": int(v), "_source": {"emb": [float(x) for x in vecs[j]]}}
+                                    for j, v in enumerate(ids)), refresh="wait_for")
+
+    def delete_vectors(self, ids):
+        self.helpers.bulk(self.es, ({"_op_type": "delete", "_index": self.IDX, "_id": int(v)} for v in ids),
+                          refresh="wait_for")
+
+    def close(self):
+        self.es.close()
+
+
+class ElasticDenseInt8(ElasticDense):
+    """Elasticsearch's `int8_hnsw`, its own default for float vectors of this
+    width and its documented compact mode (#131 item 3, the quantization survey's
+    rule, #53): the graph is built and searched over int8 copies, and the top k
+    are re-scored against the stored floats (`rescore_vector.oversample` 1.0,
+    the minimum), which is what the Qdrant int8 arm asks for with rescore=True.
+    Without it, recall at 20k SIFT vectors was 0.979 against 0.982 with it and
+    0.9975 for the fp32 arm (laptop probe 2026-10-02): a quantized index used as a
+    compression technique, not as a different algorithm."""
+    quantization = "INT8"
+    name = "elasticsearch_dense_int8"
+    INDEX_TYPE = "int8_hnsw"
+    RESCORE_OVERSAMPLE = 1.0
+
+
+class MemgraphDense(Base):
+    """Memgraph served (2026-10-02, #131 item 3, CAMPAIGN section 7 row 38): Article
+    nodes loaded through UNWIND batches over Bolt, then `CREATE VECTOR INDEX` with
+    L2 (`l2sq`) over f32, and `vector_search.search` for queries. Same pinned image
+    and the same fitted flags as the graph arm (runner.BACKENDS: Bolt workers and
+    snapshot threads from the cpuset, the memory limit at 90% of the cap), read
+    back from SHOW CONFIG onto the row.
+
+    THE HNSW PARAMETERS ARE THE ENGINE'S OWN AND FIXED. Memgraph 3.13.1 builds
+    every vector index from a default-constructed USearch config (usearch
+    2.21.4: connectivity 16, doubled at the base layer, expansion_add 128,
+    expansion_search 64), and its WITH CONFIG accepts and ignores any other key.
+    The degree therefore matches the lane's hnswlib M=16 by the engine's value
+    (degree_stamp). ef_construction cannot be matched: 128 against the lane's
+    100, recorded on the row. ef_search is matched the way the Neo4j arm
+    matches it: the index is asked for EF_SEARCH results and the best k are
+    kept, and USearch expands at least as many candidates as it is asked for.
+
+    INGEST AND INDEX AS TWO TIMERS: the index is created after the load, and
+    CREATE VECTOR INDEX returns once it holds every node (its `size` is read
+    back and checked).
+    """
+    quantization = "fp32"
+    name = "memgraph_dense"
+    beam_kind = None
+    beam_na = ("USearch expansion_search is fixed at the engine's default (64) and not settable through "
+               "Memgraph 3.13.1; the query's LIMIT is a result count, not a beam, so there is no beam to sweep")
+    ID_INDEX_DDL = "CREATE INDEX ON :Article(vid)"
+    # The element type USearch stores, set in the definition and read back from
+    # SHOW VECTOR INDEX INFO onto the row; a mismatch refuses the cell (F164).
+    SCALAR_KIND = "f32"
+
+    def connect(self):
+        from neo4j import GraphDatabase
+        import neo4j
+        host = os.environ["BENCH_SERVER_HOST"]
+        self.drv = GraphDatabase.driver(f"bolt://{host}:7687", auth=None)
+        with self.drv.session() as s:
+            v = s.run("SHOW VERSION").single()["version"]
+            cfg = {r["name"]: r["current_value"] for r in s.run("SHOW CONFIG")}
+        self.version = f"memgraph:{v}"
+        self.row_extra = {
+            "driver_version": f"neo4j-driver:{neo4j.__version__}",
+            "memgraph_storage_mode": cfg.get("storage_mode"),
+            "memgraph_bolt_workers": cfg.get("bolt_num_workers"),
+            "memgraph_memory_limit_mib": cfg.get("memory_limit"),
+            # the escape hatch of #344, as the engine reports it (the image default is 1 s)
+            "memgraph_storage_access_timeout_s": cfg.get("storage_access_timeout_sec"),
+            "memgraph_vector_connectivity": MEMGRAPH_USEARCH_CONNECTIVITY,
+            "memgraph_vector_expansion_add": MEMGRAPH_USEARCH_EXPANSION_ADD,
+            "memgraph_vector_expansion_search": MEMGRAPH_USEARCH_EXPANSION_SEARCH,
+            "memgraph_search_count": EF_SEARCH,
+        }
+
+    def build(self, vecs):
+        with self.drv.session() as s:
+            _t0 = time.perf_counter()
+            s.run(self.ID_INDEX_DDL).consume()
+            self.id_index = self.ID_INDEX_DDL
+            for i in range(0, len(vecs), CHROMA_BATCH):
+                rows = [{"vid": i + j, "e": vecs[i + j].tolist()} for j in range(len(vecs[i:i + CHROMA_BATCH]))]
+                s.run("UNWIND $rows AS r CREATE (:Article {vid: r.vid, embedding: r.e})", rows=rows).consume()
+            self.ingest_s = round(time.perf_counter() - _t0, 2)
+            _t1 = time.perf_counter()
+            s.run(f'CREATE VECTOR INDEX art ON :Article(embedding) WITH CONFIG {{"dimension": {DIM}, '
+                  f'"capacity": {len(vecs) + MUTATE_N}, "metric": "l2sq", '
+                  f'"scalar_kind": "{self.SCALAR_KIND}"}}').consume()
+            self.index_s = round(time.perf_counter() - _t1, 2)
+            info = [dict(r) for r in s.run("SHOW VECTOR INDEX INFO")]
+        art = next((r for r in info if r.get("index_name") == "art"), {})
+        size = int(art["size"]) if art.get("size") is not None else None
+        if size != len(vecs):
+            raise RuntimeError(f"memgraph: vector index holds {size} of {len(vecs)} nodes after CREATE")
+        if art.get("scalar_kind") != self.SCALAR_KIND:
+            raise RuntimeError(f"memgraph vector index scalar_kind read back {art.get('scalar_kind')!r}, not "
+                               f"{self.SCALAR_KIND!r}: the row would record {self.quantization} for a "
+                               f"different index (BUGS F164)")
+        self.row_extra["memgraph_vector_scalar_kind"] = art.get("scalar_kind")
+
+    def search(self, qvec, k):
+        with self.drv.session() as s:
+            r = s.run("CALL vector_search.search('art', $n, $q) YIELD node, distance "
+                      "RETURN node.vid AS vid ORDER BY distance LIMIT $k",
+                      n=max(k, EF_SEARCH), q=qvec.tolist(), k=k).data()
+        return [int(x["vid"]) for x in r]
+
+    def insert_vectors(self, ids, vecs):
+        rows = [{"vid": int(v), "e": [float(x) for x in vecs[j]]} for j, v in enumerate(ids)]
+        with self.drv.session() as s:
+            s.run("UNWIND $rows AS r CREATE (:Article {vid: r.vid, embedding: r.e})", rows=rows).consume()
+
+    def delete_vectors(self, ids):
+        # A COMMITTED DELETE STAYS IN THE VECTOR INDEX UNTIL THE STORAGE GC RUNS
+        # (memgraph/memgraph#4975, open; storage_gc_cycle_sec, default 30 s):
+        # until then vector_search.search returns the deleted nodes and reading
+        # any property of one raises "Trying to get a property from a deleted
+        # object" (repros/memgraph-vector-delete/, 3.13.1, the newest release).
+        # FREE MEMORY forces that GC, after which the search is right. It runs
+        # inside the timed delete, as the lane times every engine's own settle
+        # after a mutation (Neo4j's db.awaitIndexes, FalkorDB's OPERATIONAL
+        # wait), so Memgraph's delete pays for its cleanup rather than hiding it;
+        # the row records that it ran (memgraph_delete_settle).
+        with self.drv.session() as s:
+            s.run("MATCH (a:Article) WHERE a.vid IN $ids DELETE a", ids=[int(v) for v in ids]).consume()
+            s.run("FREE MEMORY").consume()
+        self.row_extra["memgraph_delete_settle"] = "FREE MEMORY after the delete (memgraph/memgraph#4975)"
+
+    def close(self):
+        self.drv.close()
+
+
+class MemgraphDenseInt8(MemgraphDense):
+    """Memgraph's `scalar_kind: "i8"` vector index, its int8 arm (#53, the
+    quantization survey, DECISIONS #135): USearch stores and compares int8
+    copies, with no re-ranking against the floats (vector_search.search orders
+    by the i8 distance), at the same fixed USearch graph parameters and the
+    same EF_SEARCH candidate request as the f32 arm. Read back from SHOW VECTOR
+    INDEX INFO like the f32 arm's `f32`."""
+    quantization = "INT8"
+    name = "memgraph_dense_int8"
+    SCALAR_KIND = "i8"
+
+
+class FalkorDense(Base):
+    """FalkorDB 6.0.1 served (2026-10-02, #131 item 3, CAMPAIGN section 7 row 38):
+    Article nodes with a `vecf32` embedding loaded through UNWIND batches, then
+    `CREATE VECTOR INDEX` at the matched operating point (M = COMPARATOR_M,
+    hnswlib's; efConstruction = EF_CONSTRUCTION; efRuntime = EF_SEARCH) with
+    euclidean similarity, queried through `db.idx.vector.queryNodes`. Pinned to
+    6.0.1 because 4.20.6 and 4.22.0 crash on a write in a vector statement
+    (`repros/falkordb-vector-write/`); this lane makes no such write, and #129's
+    re-pin takes FalkorDB to 6.0.x everywhere.
+
+    THE INDEX IS BUILT IN THE BACKGROUND. CREATE VECTOR INDEX returns at once and
+    the index answers from a partial graph until `db.indexes()` reports it
+    OPERATIONAL: queried early on the laptop (20k vectors), recall was 0.05;
+    after the wait, 0.9985. The wait is inside the build timer and is index_s,
+    the BUGS F134 lesson applied before the first row rather than after.
+
+    THREADS FITTED as the graph arm's are (FAIRNESS F6): THREAD_COUNT from the
+    cpuset through FALKORDB_ARGS, read back with GRAPH.CONFIG GET.
+    """
+    quantization = "fp32"
+    name = "falkordb_dense"
+    beam_kind = None
+    beam_na = ("efRuntime is an index-creation option and db.idx.vector.queryNodes takes no per-query beam, "
+               "so the built index has one operating point")
+    ID_INDEX_DDL = "CREATE INDEX FOR (a:Article) ON (a.vid)"
+
+    def connect(self):
+        import falkordb
+        import importlib.metadata as _md
+        host = os.environ["BENCH_SERVER_HOST"]
+        self.db = falkordb.FalkorDB(host=host, port=int(os.environ.get("BENCH_SERVER_PORT", "6379")))
+        self.g = self.db.select_graph("dense")
+        mods = {m.get("name"): m.get("ver") for m in self.db.connection.module_list()}
+        ver = int(mods.get("graph") or 0)
+        self.version = f"falkordb:{ver // 10000}.{(ver // 100) % 100}.{ver % 100}"
+
+        def _cfg(name):
+            v = self.db.config_get(name)
+            return v[-1] if isinstance(v, (list, tuple)) else v
+        self.row_extra = {
+            "driver_version": f"falkordb:{_md.version('falkordb')}",
+            "falkordb_thread_count": _cfg("THREAD_COUNT"),
+            "falkordb_omp_threads": _cfg("OMP_THREAD_COUNT"),
+            "falkordb_resultset_size": _cfg("RESULTSET_SIZE"),
+        }
+
+    def build(self, vecs):
+        _t0 = time.perf_counter()
+        self.g.query(self.ID_INDEX_DDL)
+        self.id_index = self.ID_INDEX_DDL
+        for i in range(0, len(vecs), CHROMA_BATCH):
+            rows = [{"vid": i + j, "e": vecs[i + j].tolist()} for j in range(len(vecs[i:i + CHROMA_BATCH]))]
+            self.g.query("UNWIND $rows AS r CREATE (:Article {vid: r.vid, embedding: vecf32(r.e)})", {"rows": rows})
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        _t1 = time.perf_counter()
+        self.g.query(f"CREATE VECTOR INDEX FOR (a:Article) ON (a.embedding) OPTIONS {{dimension: {DIM}, "
+                     f"similarityFunction: 'euclidean', M: {COMPARATOR_M}, efConstruction: {EF_CONSTRUCTION}, "
+                     f"efRuntime: {EF_SEARCH}}}")
+        self._await_operational()
+        self.index_s = round(time.perf_counter() - _t1, 2)
+
+    def _await_operational(self, timeout_s=36000):
+        t = time.perf_counter()
+        while True:
+            st = self.g.query("CALL db.indexes() YIELD label, status RETURN label, status").result_set
+            if st and all(x[1] == "OPERATIONAL" for x in st):
+                return
+            if time.perf_counter() - t > timeout_s:
+                raise RuntimeError(f"falkordb: vector index not OPERATIONAL after {timeout_s} s: {st}")
+            time.sleep(0.2)
+
+    def search(self, qvec, k):
+        res = self.g.query("CALL db.idx.vector.queryNodes('Article', 'embedding', $k, vecf32($q)) "
+                           "YIELD node, score RETURN node.vid ORDER BY score", {"k": k, "q": qvec.tolist()})
+        return [int(r[0]) for r in res.result_set]
+
+    def insert_vectors(self, ids, vecs):
+        rows = [{"vid": int(v), "e": [float(x) for x in vecs[j]]} for j, v in enumerate(ids)]
+        self.g.query("UNWIND $rows AS r CREATE (:Article {vid: r.vid, embedding: vecf32(r.e)})", {"rows": rows})
+        self._await_operational()
+
+    def delete_vectors(self, ids):
+        self.g.query("MATCH (a:Article) WHERE a.vid IN $ids DELETE a", {"ids": [int(v) for v in ids]})
+        self._await_operational()
+
+    def close(self):
+        self.db.connection.close()
+
+
+class RedisDense(Base):
+    """Redis 8.10.2 served (2026-10-23, the multi-model comparator batch): the Redis Query Engine, one HASH per vector
+    (`a:<id>`, field `embedding` as little-endian float32 bytes), `FT.CREATE ... VECTOR HNSW` at the matched operating point
+    (M = COMPARATOR_M, which Redis takes as hnswlib's M with the base layer doubled; EF_CONSTRUCTION; the beam EF_RUNTIME is
+    sent with every query), L2, queried through `FT.SEARCH ... =>[KNN k @embedding $q EF_RUNTIME ef]` with NOCONTENT, so the
+    reply is the key names and the id is the key's suffix. The index is created before the load (the documented path: every HSET
+    is indexed as it arrives) and the wait for the background workers to drain is inside the build timer.
+
+    THREADS FITTED to the cpuset (FAIRNESS F6): io-threads and search-workers from runner.py, read back with CONFIG GET.
+    """
+    quantization = "fp32"
+    name = "redis_dense"
+    ID_INDEX_DDL = "key"
+    PREFIX = "a:"
+
+    def connect(self):
+        import redis
+        import importlib.metadata as _md
+        self.r = redis.Redis(host=os.environ["BENCH_SERVER_HOST"], port=int(os.environ.get("BENCH_SERVER_PORT", "6379")),
+                             socket_timeout=3600, protocol=2)
+        self.version = "redis:" + self.r.info("server")["redis_version"]
+
+        def _cfg(name):
+            v = self.r.config_get(name)
+            return v.get(name) if isinstance(v, dict) else v
+        mods = {(m.get(b"name") or m.get("name")): (m.get(b"ver") or m.get("ver")) for m in self.r.module_list()}
+        mods = {(k.decode() if isinstance(k, bytes) else k): v for k, v in mods.items()}
+        self.row_extra = {
+            "driver_version": f"redis-py:{_md.version('redis')}",
+            "redis_io_threads": _cfg("io-threads"),
+            "redis_search_workers": _cfg("search-workers"),
+            "redis_maxmemory": _cfg("maxmemory"),
+            "redis_maxmemory_policy": _cfg("maxmemory-policy"),
+            "redis_search_module": mods.get("search"),
+            "redis_protocol": 2,
+        }
+        self.durability = self._durability_readback()
+
+    def _durability_readback(self):
+        ao, fsync, save = (self.r.config_get(k).get(k) for k in ("appendonly", "appendfsync", "save"))
+        if ao == "no" and save == "3600 1 300 100 60 10000":
+            return bench_common.DURABILITY_REDIS
+        if ao == "yes" and fsync == "always":
+            return bench_common.DURABILITY_REDIS_STRICT
+        return (f"appendonly={ao}, appendfsync={fsync}, save={save!r}, which is neither class (DECISIONS #90)")
+
+    def _blob(self, v):
+        return np.asarray(v, dtype="<f4").tobytes()
+
+    def build(self, vecs):
+        self.r.execute_command(
+            "FT.CREATE", "dense", "ON", "HASH", "PREFIX", "1", self.PREFIX, "SCHEMA", "embedding", "VECTOR", "HNSW", "12",
+            "TYPE", "FLOAT32", "DIM", str(DIM), "DISTANCE_METRIC", "L2", "M", str(COMPARATOR_M),
+            "EF_CONSTRUCTION", str(EF_CONSTRUCTION), "EF_RUNTIME", str(EF_SEARCH))
+        for i in range(0, len(vecs), BATCH):
+            pipe = self.r.pipeline(transaction=False)
+            for j in range(i, min(i + BATCH, len(vecs))):
+                pipe.hset(f"{self.PREFIX}{j}", mapping={"embedding": self._blob(vecs[j])})
+            pipe.execute()
+
+    def _info(self):
+        raw = self.r.execute_command("FT.INFO", "dense")
+        raw = raw if isinstance(raw, dict) else {raw[i]: raw[i + 1] for i in range(0, len(raw), 2)}
+        return {(k.decode() if isinstance(k, bytes) else k): v for k, v in raw.items()}
+
+    def _await_indexed(self, timeout_s=36000):
+        t = time.perf_counter()
+        while True:
+            if not self._background_busy():
+                return
+            if time.perf_counter() - t > timeout_s:
+                raise RuntimeError(f"redis: index not drained after {timeout_s} s: {self._info()}")
+            time.sleep(0.2)
+
+    def _background_busy(self):
+        """The Query Engine's own counters (INFO search): a write thread still working, or an index still indexing.
+        Both read 7 and 1 right after a bulk load and 0 once the workers have drained (laptop probe, 2026-10-23)."""
+        s = self.r.info("search")
+        return (int(s.get("search_total_active_write_threads", 0) or 0) > 0
+                or int(s.get("search_number_of_active_indexes_indexing", 0) or 0) > 0
+                or float(self._info().get("percent_indexed", 1) or 1) < 1.0)
+
+    def post_build(self):
+        self._await_indexed()
+
+    def search(self, qvec, k):
+        res = self.r.execute_command(
+            "FT.SEARCH", "dense", f"*=>[KNN {k} @embedding $q EF_RUNTIME {EF_SEARCH} AS s]", "PARAMS", "2", "q", self._blob(qvec),
+            "SORTBY", "s", "ASC", "NOCONTENT", "LIMIT", "0", str(k), "DIALECT", "2")
+        return [int(x.split(b":")[1]) for x in res[1:]]
+
+    def insert_vectors(self, ids, vecs):
+        pipe = self.r.pipeline(transaction=False)
+        for j, v in enumerate(ids):
+            pipe.hset(f"{self.PREFIX}{int(v)}", mapping={"embedding": self._blob(vecs[j])})
+        pipe.execute()
+        self._await_indexed()
+
+    def delete_vectors(self, ids):
+        self.r.delete(*[f"{self.PREFIX}{int(v)}" for v in ids])
+        self._await_indexed()
+
+    def close(self):
+        self.r.close()
+
+
+def _ladybug_fit():
+    """(threads, buffer_pool_bytes) for LadybugDB in THIS cell, the graph lane's
+    fit (l2_graph._ladybug_fit, FAIRNESS F6, BUGS F160): left at 0 it sizes its
+    thread pool and its buffer pool from the host (it read 16 threads under a
+    4-CPU cpuset on the laptop, 2026-10-02). Threads from sched_getaffinity, the
+    pool at the engine's own 0.8 ratio of the cgroup's memory.max."""
+    threads = len(os.sched_getaffinity(0))
+    try:
+        with open("/sys/fs/cgroup/memory.max") as fh:
+            text = fh.read().strip()
+    except OSError:
+        text = ""
+    return threads, (int(int(text) * 0.8) if text.isdigit() else None)
+
+
+class LadybugDense(Base):
+    """LadybugDB embedded (2026-10-02, #131 item 3, CAMPAIGN section 7 row 38): a
+    node table with a FLOAT[DIM] column, loaded by COPY from an Arrow table (the
+    engine's bulk path), then the official `vector` extension's HNSW index
+    (`CREATE_VECTOR_INDEX`, metric l2), queried through `QUERY_VECTOR_INDEX`.
+    The extension is installed at connect, as DuckPGQ's is.
+
+    THE DEGREE IN LADYBUGDB'S UNITS. Its HNSW has two layers: `ml` bounds the
+    lower (base) layer's degree and `mu` the upper's, so the match to the
+    hnswlib-style engines is ml = 2 x COMPARATOR_M and mu = COMPARATOR_M, with
+    efc = EF_CONSTRUCTION and efs = EF_SEARCH. Honoured, checked by effect on
+    the laptop (20k SIFT vectors): recall 0.0390 at ml 4, 0.9985 at ml 32,
+    1.0000 at ml 128.
+
+    INGEST AND INDEX AS TWO TIMERS: COPY, then CREATE_VECTOR_INDEX over the
+    loaded rows. THREADS AND BUFFER POOL FITTED to the cell (_ladybug_fit), the
+    thread count read back onto the row.
+    """
+    quantization = "fp32"
+    name = "ladybug_dense"
+    PATH = "/tmp/l3d_ladybug"
+
+    def connect(self):
+        import ladybug
+        threads, pool = _ladybug_fit()
+        kw = {"max_num_threads": threads}
+        if pool:
+            kw["buffer_pool_size"] = pool
+        self.db = ladybug.Database(self.PATH, **kw)
+        self.cx = ladybug.Connection(self.db)
+        self.cx.execute("INSTALL vector")
+        self.cx.execute("LOAD vector")
+        self.version = f"ladybug:{lib_version(ladybug, 'ladybug')}"
+        self.row_extra = {
+            "ladybug_threads": int(self.cx.execute('CALL current_setting("threads") RETURN *').get_next()[0]),
+            "ladybug_buffer_pool_mib": (pool >> 20) if pool else None,
+            "ladybug_ml": 2 * COMPARATOR_M, "ladybug_mu": COMPARATOR_M,
+        }
+
+    def _copy(self, ids, vecs):
+        import pyarrow as pa
+        tbl = pa.table({"vid": pa.array(np.asarray(ids, dtype=np.int64)),
+                        "embedding": pa.FixedSizeListArray.from_arrays(
+                            pa.array(np.asarray(vecs, dtype=np.float32).reshape(-1), type=pa.float32()), DIM)})
+        self.cx.execute("COPY Article FROM tbl")
+
+    def build(self, vecs):
+        self.cx.execute(f"CREATE NODE TABLE Article(vid INT64, embedding FLOAT[{DIM}], PRIMARY KEY(vid))")
+        _t0 = time.perf_counter()
+        for i in range(0, len(vecs), BATCH * 10):
+            self._copy(range(i, i + len(vecs[i:i + BATCH * 10])), vecs[i:i + BATCH * 10])
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+        _t1 = time.perf_counter()
+        self.cx.execute(f"CALL CREATE_VECTOR_INDEX('Article', 'art', 'embedding', mu := {COMPARATOR_M}, "
+                        f"ml := {2 * COMPARATOR_M}, efc := {EF_CONSTRUCTION}, metric := 'l2')")
+        self.index_s = round(time.perf_counter() - _t1, 2)
+
+    def search(self, qvec, k):
+        r = self.cx.execute(f"CALL QUERY_VECTOR_INDEX('Article', 'art', $q, $k, efs := {EF_SEARCH}) "
+                            "RETURN node.vid ORDER BY distance", {"q": qvec.tolist(), "k": k})
+        out = []
+        while r.has_next():
+            out.append(int(r.get_next()[0]))
+        return out
+
+    def insert_vectors(self, ids, vecs):
+        self._copy(list(ids), vecs)
+
+    def delete_vectors(self, ids):
+        self.cx.execute("MATCH (a:Article) WHERE a.vid IN $ids DELETE a", {"ids": [int(v) for v in ids]})
+
+    def close(self):
+        self.cx.close()
+        self.db.close()
+
+
+# ---------------------------------------------------------------- PQ arms
+#
+# PRODUCT QUANTIZATION (QUANTIZATION.md, the PQ column). Registered only under
+# instrument 2026-11 AND BENCH_DENSE_PQ=1 (bench_common.dense_pq_enabled), and
+# every row says "PRODUCT" in `quantization` and "pq" on the page.
+#
+# ONE PQ SETTING FOR THE FAMILY, matched as closely as each engine allows:
+# PQ_SUBSPACES subspaces (M) of DIM / M dimensions each, PQ_CLUSTERS (256, 8 bits)
+# centroids per subspace, so a 128-d SIFT vector is 32 bytes of codes. ArcadeDB
+# takes M and K as they are (`pqSubspaces`, `pqClusters`); Qdrant takes a
+# compression ratio and fixes 256 centroids per chunk, so x16 (512 bytes to 32)
+# is M = 32; Milvus HNSW_PQ takes `m` and `nbits` (8); ArangoDB takes the FAISS
+# factory string `PQ<M>x8`. LanceDB is not an arm: its HNSW variant
+# (`IVF_HNSW_PQ`) exists, but its PQ is trained per IVF partition, not over the
+# corpus, so it would not be the same PQ setting; the fp32 and int8 arms stay
+# its comparison (QUANTIZATION.md).
+#
+# RE-RANK, where the engine has it: the PQ codes pick PQ_OVERSAMPLE candidates
+# per requested neighbour and the stored float vectors order them. Qdrant
+# (`oversampling` with `rescore`) and Milvus (`refine` FP32, `refine_k`) are
+# given PQ_OVERSAMPLE; ArcadeDB's SQL re-ranks at the engine's own default
+# (LSMVectorIndex.DEFAULT_APPROXIMATE_RERANK_OVERSAMPLE, 10, the value this
+# constant has), passed by neither side; ArangoDB's factory string has no
+# re-rank, as its int8 arm has none, and the row says so (`pq_rerank`).
+PQ_SUBSPACES = int(os.environ.get("BENCH_DENSE_PQ_SUBSPACES", "32"))
+PQ_CLUSTERS = 256
+PQ_OVERSAMPLE = 10
+# Qdrant's compression ratios for ProductQuantization (qdrant docs: x4 to x64), by bytes saved
+_QDRANT_PQ_RATIOS = (4, 8, 16, 32, 64)
+
+
+def pq_check(dim=None, subspaces=None):
+    """PQ_SUBSPACES must divide the dimension, or the engine splits the vector unevenly (or refuses late)."""
+    dim = DIM if dim is None else dim
+    m = PQ_SUBSPACES if subspaces is None else subspaces
+    if m < 1 or dim % m:
+        raise SystemExit(f"PQ: {m} subspaces do not divide {dim} dimensions "
+                         f"(BENCH_DENSE_PQ_SUBSPACES); every engine would split the vector differently")
+    return m
+
+
+# The probe that tells an engine whose SQL knows the `rerank` option from one that does not. The option is parsed
+# before the index is looked up, so on a build that has it the probe fails with some other error (no such index),
+# and on one that does not it fails with the option error.
+PQ_RERANK_PROBE_SQL = ("SELECT expand(vectorNeighbors('Article[embedding]', [0.0], 1, "
+                       "{efSearch: 1, rerank: 1}))")
+PQ_RERANK_REFUSAL = (
+    "REFUSING the ArcadeDB PQ arm: this engine build's SQL rejects the `rerank` option of "
+    "vectorNeighbors, so it does not walk a PRODUCT index on its PQ codes and a PQ-labelled row "
+    "would measure exact search. Run it on a build that carries the PRODUCT search (ArcadeData/arcadedb "
+    "#10518) and leave BENCH_DENSE_PQ unset until the measured release has it.")
+
+
+def pq_rerank_rejected(error_text):
+    """True when an engine's error text says the vectorNeighbors `rerank` option is unknown."""
+    t = str(error_text).lower()
+    return "unknown option" in t and "rerank" in t
+
+
+def require_rerank_option(run_probe):
+    """Refuse (SystemExit with PQ_RERANK_REFUSAL) when run_probe(sql) fails because `rerank` is unknown.
+
+    run_probe executes the statement and raises (or returns the engine's error text as a string, for a client that
+    does not raise). Any other outcome, an answer or another error, means the option parsed."""
+    try:
+        out = run_probe(PQ_RERANK_PROBE_SQL)
+    except Exception as e:                              # noqa: BLE001
+        out = str(e)
+    if isinstance(out, str) and pq_rerank_rejected(out):
+        raise SystemExit(PQ_RERANK_REFUSAL)
+
+
+def _pq_ddl_entries():
+    return f'"pqSubspaces": {pq_check()}, "pqClusters": {PQ_CLUSTERS}, '
+
+
+class ArcadeEmbeddedPQ(ArcadeEmbedded):
+    """ArcadeDB LSM_VECTOR `quantization: PRODUCT`, embedded: M = PQ_SUBSPACES, K = PQ_CLUSTERS, set explicitly.
+
+    Searched with the same vectorNeighbors statement as every ArcadeDB arm, so the engine's default re-rank
+    applies; connect() refuses a build whose SQL does not know the option (PQ_RERANK_REFUSAL)."""
+    name = "arcadedb_dense_embedded_pq"
+    quantization = "PRODUCT"
+
+    @property
+    def _quant_extra(self):
+        return _pq_ddl_entries()
+
+    def connect(self):
+        super().connect()
+        require_rerank_option(lambda sql: self.db.query("sql", sql).to_list())
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}),
+                          "pq_subspaces": PQ_SUBSPACES, "pq_clusters": PQ_CLUSTERS,
+                          "pq_rerank": "engine default", "pq_rerank_option_accepted": True}
+
+    def build(self, vecs):
+        prev = os.environ.get("BENCH_DENSE_QUANT")
+        os.environ["BENCH_DENSE_QUANT"] = "PRODUCT"
+        try:
+            super().build(vecs)
+        finally:
+            if prev is None:
+                os.environ.pop("BENCH_DENSE_QUANT", None)
+            else:
+                os.environ["BENCH_DENSE_QUANT"] = prev
+
+    def readbacks(self):
+        out = dict(super().readbacks())
+        # The index files the engine wrote (graph, vectors, PQ codebook), in bytes: what the PQ index costs on disk
+        # beside the cell's disk_data_mb. A miss is a reason on the row, never a blank.
+        try:
+            root = "/tmp/l3d_arcade"
+            out["pq_index_bytes"] = sum(
+                os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(root) for f in fs
+                if any(t in f for t in ("lsmvecidx", "vecgraph", "vecpq")))
+        except OSError as e:
+            out["pq_index_bytes_error"] = f"{type(e).__name__}: {e}"
+        return out
+
+
+class ArcadeServerPQ(ArcadeServer):
+    """ArcadeDB over HTTP with `quantization: PRODUCT`, the served twin of the embedded PQ arm.
+
+    Declared in the POSTed METADATA, like the INT8 arm: BENCH_DENSE_QUANT cannot reach the container."""
+    name = "arcadedb_dense_server_pq"
+    quantization = "PRODUCT"
+
+    @property
+    def _quant_ddl(self):
+        return f'"quantization": "PRODUCT", {_pq_ddl_entries()}'
+
+    def connect(self):
+        super().connect()
+
+        def probe(sql):
+            r = self.rq.post(f"{self.base}/query/bench", json={"language": "sql", "command": sql}, timeout=60)
+            return "" if r.status_code == 200 else r.text
+        require_rerank_option(probe)
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}),
+                          "pq_subspaces": PQ_SUBSPACES, "pq_clusters": PQ_CLUSTERS,
+                          "pq_rerank": "engine default", "pq_rerank_option_accepted": True}
+
+
+class QdrantPQ(Qdrant):
+    """Qdrant product quantization (PQ_SUBSPACES bytes per vector: x16 on 128-d), rescored at search.
+
+    Rescoring is asked for at search time and oversampling is PQ_OVERSAMPLE, as Qdrant's quantization docs advise
+    for PQ (its codes alone are coarse), the same reason the int8 arm asks for `rescore`. Held in RAM
+    (`always_ram`), as the int8 arm. The collection's quantization config is read back and a mismatch refuses
+    the cell (BUGS F164)."""
+    quantization = "PRODUCT"
+    name = "qdrant_dense_pq"
+
+    def _compression(self):
+        pq_check()
+        ratio = DIM * 4 // PQ_SUBSPACES
+        if ratio not in _QDRANT_PQ_RATIOS or DIM * 4 % PQ_SUBSPACES:
+            raise SystemExit(f"Qdrant PQ takes a compression ratio of {_QDRANT_PQ_RATIOS}; {PQ_SUBSPACES} subspaces "
+                             f"of {DIM} float32 dimensions is x{DIM * 4 / PQ_SUBSPACES:g}")
+        return ratio
+
+    def connect(self):
+        super().connect()
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}),
+                          "pq_subspaces": PQ_SUBSPACES, "pq_clusters": PQ_CLUSTERS,
+                          "pq_rerank": f"rescore, oversampling {PQ_OVERSAMPLE}"}
+
+    def build(self, vecs):
+        from qdrant_client import models as qm
+        ratio = self._compression()
+        self.cl.create_collection(
+            "articles",
+            vectors_config=qm.VectorParams(
+                size=DIM, distance=qm.Distance.EUCLID,
+                hnsw_config=qm.HnswConfigDiff(m=COMPARATOR_M, ef_construct=EF_CONSTRUCTION)),
+            quantization_config=qm.ProductQuantization(
+                product=qm.ProductQuantizationConfig(
+                    compression=getattr(qm.CompressionRatio, f"X{ratio}"), always_ram=True)))
+        for i in range(0, len(vecs), BATCH):
+            self.cl.upsert("articles", points=qm.Batch(
+                ids=list(range(i, i + len(vecs[i:i + BATCH]))),
+                vectors=vecs[i:i + BATCH].tolist()))
+
+    def readbacks(self):
+        q = self.cl.get_collection("articles").config.quantization_config
+        prod = getattr(q, "product", None)
+        got = str(getattr(getattr(prod, "compression", None), "value", getattr(prod, "compression", None)))
+        want = f"x{self._compression()}"
+        if got != want:
+            raise RuntimeError(f"qdrant quantization read back {got!r}, not product {want!r}: the row would "
+                               f"record PRODUCT for a different index (BUGS F164)")
+        return {"qdrant_quantization": f"product {got}"}
+
+    def search(self, qvec, k):
+        from qdrant_client import models as qm
+        res = self.cl.query_points(
+            "articles", query=qvec.tolist(), limit=k,
+            search_params=qm.SearchParams(
+                hnsw_ef=EF_SEARCH,
+                quantization=qm.QuantizationSearchParams(rescore=True, oversampling=float(PQ_OVERSAMPLE))))
+        return [int(p.id) for p in res.points]
+
+
+class MilvusPQ(Milvus):
+    """Milvus HNSW_PQ: `m` = PQ_SUBSPACES, `nbits` 8 (256 centroids), refined with the FP32 vectors at search.
+
+    HNSW_PQ takes two different `m`: `M` is the graph degree (COMPARATOR_M) and `m` the PQ subquantizer count.
+    `refine` with `refine_type` FP32 keeps the floats for the re-rank and `refine_k` (PQ_OVERSAMPLE) is the
+    candidate multiple. The index type is read back from the server."""
+    quantization = "PRODUCT"
+    name = "milvus_dense_pq"
+    INDEX_TYPE = "HNSW_PQ"
+
+    def connect(self):
+        super().connect()
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}),
+                          "pq_subspaces": PQ_SUBSPACES, "pq_clusters": PQ_CLUSTERS,
+                          "pq_rerank": f"refine FP32, refine_k {PQ_OVERSAMPLE}"}
+
+    def build(self, vecs):
+        from pymilvus import DataType
+        pq_check()
+        sch = self.cl.create_schema()
+        sch.add_field("id", DataType.INT64, is_primary=True)
+        sch.add_field("vec", DataType.FLOAT_VECTOR, dim=DIM)
+        idx = self.cl.prepare_index_params()
+        idx.add_index("vec", index_type=self.INDEX_TYPE, metric_type="L2",
+                      params={"M": COMPARATOR_M, "efConstruction": EF_CONSTRUCTION,
+                              "m": PQ_SUBSPACES, "nbits": 8,
+                              "refine": True, "refine_type": "FP32"})
+        self.cl.create_collection("articles", schema=sch, index_params=idx)
+        _t0 = time.perf_counter()
+        for i in range(0, len(vecs), BATCH):
+            self.cl.insert("articles", [
+                {"id": i + j, "vec": vecs[i + j].tolist()}
+                for j in range(min(BATCH, len(vecs) - i))])
+        self.ingest_s = round(time.perf_counter() - _t0, 2)
+
+    def readbacks(self):
+        d = self.cl.describe_index("articles", "vec")
+        got = d.get("index_type")
+        if got != self.INDEX_TYPE:
+            raise RuntimeError(f"milvus index type read back {got!r}, not {self.INDEX_TYPE!r}: the row would "
+                               f"record PRODUCT for a different index (BUGS F164)")
+        return {"milvus_index_type": got, "milvus_index_params": json.dumps(
+            {k: d.get(k) for k in ("m", "nbits", "M", "efConstruction", "refine", "refine_type")}, sort_keys=True)}
+
+    def search(self, qvec, k):
+        res = self.cl.search("articles", data=[qvec.tolist()], limit=k,
+                             search_params={"params": {"ef": EF_SEARCH, "refine_k": PQ_OVERSAMPLE}})
+        return [int(h["id"]) for h in res[0]]
+
+
+class ArangoDensePQ(ArangoDense):
+    """ArangoDB's IVF with product-quantized lists: the FAISS factory string "IVF<nLists>,PQ<M>x8".
+
+    The fp32 arm's nLists, trained the same way, nProbe calibrated to the same recall target on the same
+    held-out slice (the int8 arm's procedure). The factory has no re-rank stage, so the arm answers from the
+    codes alone and says so on the row; the training state and the read-back factory string are the evidence
+    that the server built what the row says (BUGS F164)."""
+    quantization = "PRODUCT"
+    name = "arangodb_dense_pq"
+    FACTORY = "IVF{nlists},PQ" + str(PQ_SUBSPACES) + "x8"
+
+    def connect(self):
+        super().connect()
+        pq_check()
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}),
+                          "pq_subspaces": PQ_SUBSPACES, "pq_clusters": PQ_CLUSTERS,
+                          "pq_rerank": "none (the factory string has no re-rank stage)"}
+
+
+BACKENDS = {b.name: b for b in
+            (ArcadeEmbedded, ArcadeServer, Chroma, LanceDB, SqliteVec, DuckVSS, Qdrant, Milvus,
+             PgVector, Neo4jVector, Neo4jVectorInt8, SurrealDense, SurrealDenseServer, ArangoDense,
+             MongoDense,
+             ArcadeEmbeddedInt8, QdrantInt8, MilvusInt8,
+             ArcadeServerInt8, SqliteVecInt8,
+             # #131 item 3 (2026-10-02)
+             ElasticDense, ElasticDenseInt8, MemgraphDense, FalkorDense, LadybugDense, RedisDense,
+             # the multi-model comparator batch (2026-10-23)
+             CrateDense,
+             # the quantization survey's int8 counterparts (DECISIONS #135, 2026-10-02)
+             MongoDenseInt8, MemgraphDenseInt8, LanceDBFlat, ArangoDenseInt8)}
+# The PQ arms: only under instrument 2026-11 AND BENCH_DENSE_PQ=1 (bench_common.dense_pq_enabled)
+if bench_common.dense_pq_enabled():
+    BACKENDS.update({c.name: c for c in (ArcadeEmbeddedPQ, ArcadeServerPQ, QdrantPQ, MilvusPQ, ArangoDensePQ)})
+
+# EVERY adapter that names itself must be registered here. This tuple is
+# explicit, and --backend takes `choices=list(BACKENDS)`, so a class that exists,
+# declares a name, and is wired into runner.py is STILL rejected by argparse if
+# someone forgets this line. That is not hypothetical: arcadedb_dense_server_int8
+# and sqlite_vec_dense_int8 were added, declared, given DENSE_PRECISION entries
+# and registered in runner.py on 2026-08-30, and every one of their cells died in
+# six seconds on `argparse: invalid choice` because only this tuple was missed.
+# runner.py has its OWN BACKENDS dict for topology and images; the two are
+# unrelated registries that share a name, which is what made the gap easy to miss.
+_unregistered = sorted(
+    c.name for c in Base.__subclasses__() + [s for b in Base.__subclasses__()
+                                             for s in b.__subclasses__()]
+    # The PQ arms are defined always and registered only under BENCH_DENSE_PQ=1 (bench_common.dense_pq_enabled)
+    if getattr(c, "name", None) and c.name not in BACKENDS
+    and c.name not in bench_common.DENSE_PQ_ARMS)
+if _unregistered:
+    raise SystemExit(
+        "l3d_dense.py: adapter(s) define a name but are absent from BACKENDS, so "
+        "--backend would reject them: " + ", ".join(_unregistered))
+
+
+def pct(vals):
+    s = sorted(vals)
+    n = len(s)
+    return {"p50": s[n // 2], "p95": s[int(n * .95)], "p99": s[int(n * .99)],
+            "mean": statistics.mean(s), "max": s[-1]}
+
+
+# DECISIONS #81, recorded on every row. This lane times no transactional
+# write, only an ingest, so most arms carry the ingest-only note; the engines
+# that also serve a transactional table carry the same string they carry there.
+# Every string, and the evidence for the default it names, is in bench_common.
+DURABILITY_INGEST_ONLY = "engine default; no transactional write timed on this lane"
+DURABILITY = {
+    "cratedb_dense": bench_common.DURABILITY_CRATEDB,   # read back from the table at post_build (the adapter's own answer wins)
+    "arcadedb_dense_embedded": bench_common.DURABILITY_ARCADEDB,
+    "arcadedb_dense_embedded_int8": bench_common.DURABILITY_ARCADEDB,
+    "arcadedb_dense_server": bench_common.DURABILITY_ARCADEDB,
+    "arcadedb_dense_server_int8": bench_common.DURABILITY_ARCADEDB,
+    "pgvector_dense": bench_common.DURABILITY_PG_OFF,
+    "neo4j_dense": bench_common.DURABILITY_NEO4J,
+    "duckdb_vss_dense": bench_common.DURABILITY_DUCKDB,
+    "sqlite_vec_dense": bench_common.DURABILITY_SQLITE,
+    "sqlite_vec_dense_int8": bench_common.DURABILITY_SQLITE,
+    "surrealdb_dense": bench_common.DURABILITY_SURREAL_EMBEDDED,
+    "surrealdb_dense_server": bench_common.DURABILITY_SURREAL_SERVER,
+    "arangodb_dense": arango_common.DURABILITY,
+    "mongodb_dense": mongo_common.DURABILITY,
+    # The precision arms carry their fp32 sibling's string: same server, same
+    # settings, another index representation (2026-10-02). neo4j_dense_int8 was
+    # missing here from its first commit and would have recorded the
+    # ingest-only note where its sibling records Neo4j's own.
+    "neo4j_dense_int8": bench_common.DURABILITY_NEO4J,
+    "arangodb_dense_int8": arango_common.DURABILITY,
+    "mongodb_dense_int8": mongo_common.DURABILITY,
+}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backend", required=True, choices=list(BACKENDS))
+    ap.add_argument("--workload", default="search")
+    ap.add_argument("--scale", default="micro")
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    _beat = bench_common.PhaseBeat(data_dir=os.environ.get("BENCH_DENSE_DATADIR"))
+    _beat.mark("dataset-load-start", scale=args.scale, backend=args.backend)
+    train, test, gt = load_dataset(args.scale)
+    _beat.mark("dataset-loaded", n=len(train), nq=len(test))
+    out = {"lane": "l3d", "n_docs": len(train), "dims": DIM, "k": K,
+           "n_queries": len(test), "m": M, "ef_construction": EF_CONSTRUCTION,
+           "ef_search": EF_SEARCH}
+
+    b = BACKENDS[args.backend]()
+    out["hnsw_M"] = M  # recorded so degree-matched ablation rows are self-describing
+
+    # What THIS backend actually received, and in which units. Recording one
+    # shared M was how the mismatch above stayed invisible: every row quoted
+    # the same number whether or not the backend was given it, so no artifact
+    # could contradict the claim that the lane was degree-matched. A row that
+    # names its own value and its own unit can be checked without reading the
+    # adapter.
+    out["degree_param"], out["degree_family"] = degree_stamp(args.backend)
+    # Canonical label, so one state has one name. This recorder called
+    # unquantized "none" while dense_multipass_driver.py called it "fp32", and
+    # results/ carries both (36 "fp32", 30 "none") for runs that built the
+    # identical index. Neither was wrong, they just never agreed, which is the
+    # same split that made BENCH_DENSE_QUANT=fp32 look like a legal input.
+    # Nothing consumes this field programmatically (it is provenance), so
+    # normalising costs nothing and old artifacts stay readable.
+    # THE OVERRIDE, ON THE ROW. A disclosed fairness override that only lives in
+    # a comment is not disclosed to anyone reading the artifact.
+    # THE CACHE POLICY, RECORDED. It never was: build_cache_size was assigned in
+    # connect(), and connect() runs AFTER this block, so getattr found nothing
+    # and every row carried graph_build_cache_size=None. That is how two
+    # campaigns were compared for weeks without noticing they ran different
+    # cache policies, and why an 8x server delta could not be attributed.
+    if "arcadedb" in args.backend:
+        _cfg = configured_build_cache()
+        _eff, _why = effective_build_cache(_cfg, out.get("quantization", "fp32"))
+        out["graph_build_cache_configured"] = _cfg
+        out["graph_build_cache_effective"] = _eff
+        out["graph_build_cache_policy"] = _why
+        _pct = os.environ.get("BENCH_DENSE_BUILD_CACHE_PCT", "").strip()
+        out["graph_build_cache_pct"] = int(_pct) if _pct else 25
+
+    _bc = getattr(b, "build_cache_size", None)
+    _bp = getattr(b, "build_cache_pct", None)
+    if _bp is not None:
+        out["graph_build_cache_pct"] = _bp
+    if _bc is not None:
+        out["graph_build_cache_size"] = _bc
+        out["graph_build_cache_policy"] = (
+            "engine auto (whole corpus up to 25% of heap)" if _bc == 0
+            else "bounded to the engine's pre-#3144 default")
+    # The ARM's own declaration wins over the environment. An adapter that
+    # quantizes knows it; reading an env var here samples whatever happens to be
+    # set at this instant, which for an arm that sets it later is the wrong
+    # answer and a silent one.
+    # NO ENV FALLBACK. Every arm declares what it actually built; an arm that does
+    # not is a bug, not an invitation to guess from whatever happens to be set at
+    # this instant. The old fallback is how three comparator arms came to record
+    # fp32 while building int8, and how the server arm wore a label for a knob it
+    # ignores.
+    _declared = getattr(b, "quantization", None)
+    if not _declared:
+        raise SystemExit(
+            f"{args.backend}: the arm declares no `quantization`. Add it to the class. "
+            f"Reading BENCH_DENSE_QUANT here would label the row from a knob this arm "
+            f"may not honour, which is exactly how the int8 comparator rows came to say fp32.")
+    _asked = os.environ.get("BENCH_DENSE_QUANT", "").strip()
+    # ONLY ArcadeDB arms read BENCH_DENSE_QUANT. A comparator declares what its
+    # own DDL builds and cannot honour the knob at all, so refusing it on a
+    # mismatch would kill every comparator the moment a campaign asked ArcadeDB
+    # for int8 -- and would have fired the instant lancedb_dense started
+    # declaring INT8 truthfully.
+    if ("arcadedb" in args.backend
+            and _asked
+            and canonical_quant_label(_asked) != canonical_quant_label(_declared)):
+        raise SystemExit(
+            f"{args.backend}: BENCH_DENSE_QUANT={_asked!r} but this arm builds "
+            f"{_declared!r} and cannot honour the request. Refusing rather than "
+            f"labelling the row from a knob that changed nothing.")
+    out["quantization"] = canonical_quant_label(_declared)
+    t0 = time.perf_counter()
+    with _beat.phase("connect", backend=args.backend):
+        b.connect()
+    out["connect_s"] = round(time.perf_counter() - t0, 3)
+    out["engine_version"] = b.version
+    out["engine_backend"] = bench_common.engine_backend()
+
+    t0 = time.perf_counter()
+    with _beat.phase("build", n=len(train)):
+        b.build(train)
+    with _beat.phase("post-build"):
+        b.post_build()
+    build = time.perf_counter() - t0
+    out["build_s"] = round(build, 2)
+    out["build_docs_per_s"] = round(len(train) / build, 1)
+    # INGEST AND INDEX AS TWO TIMERS, where the engine has the boundary
+    # (DECISIONS #74 item 2, #66). Additive: build_s is the same number it
+    # always was, measured around the same statements in the same order, and an
+    # arm that indexes while ingesting records neither field. The two need not
+    # sum to build_s: the schema DDL before the load and the settle step after
+    # the index sit inside build_s and outside both timers. Landed mid-chain
+    # on 2026-09-14 because it cannot move a published number; the arms that
+    # need their procedure reordered wait for October.
+    for _k in ("ingest_s", "index_s"):
+        _v = getattr(b, _k, None)
+        if _v is not None:
+            out[_k] = _v
+    # What a served or embedded engine reported about itself (pools, heap,
+    # settings it fixed), read from the engine at connect and after the build,
+    # never restated from the flags we sent (FAIRNESS F3/F6; the graph lane's
+    # row_extra, 2026-10-02 here).
+    out.update(getattr(b, "row_extra", None) or {})
+    # #291: the index each engine deleted through, or "key" where its own record key is the id
+    _idx = "key" if b.ID_INDEX_DDL == "key" else b.id_index      # None when the build failed before the index
+    if _idx:
+        out["dense_id_index"] = _idx
+    out.update(b.readbacks())          # after the build timer (CAMPAIGN section 7 row 21)
+    # F134: how long the build waited for a background-built index, and the
+    # probe latencies that showed it had caught up.
+    for _k, _v in (getattr(b, "settle", None) or {}).items():
+        out[_k] = _v
+    # AND THE RESIDUE, so the three fields PARTITION the total instead of being
+    # two named intervals inside it (BUGS F101). A reader who adds `ingest s`
+    # and `index s` and does not get `ingest+index total s` is entitled to ask
+    # where the rest went, and the answer differs per adapter: the schema DDL
+    # before the load and the settle after the index sit inside `build_s` and
+    # outside both timers. Measured at the October pin it is 0.00 s for MongoDB
+    # and Neo4j, 0.48-0.75 s for ArcadeDB's four arms, and 1.63-1.83 s for
+    # Milvus -- a third of that arm's total, which is not a rounding gap.
+    #
+    # Derived, not timed: no clock moves and no published number changes. It is
+    # arithmetic over three numbers the row already carries, which is why it
+    # can land mid-campaign at all.
+    if out.get("ingest_s") is not None and out.get("index_s") is not None:
+        out["setup_s"] = round(build - out["ingest_s"] - out["index_s"], 2)
+    # Ingest only, so the relaxed class only (DECISIONS #90); the class is on
+    # the row regardless.
+    bench_common.stamp_durability(out, getattr(b, "durability", None)
+                                  or DURABILITY.get(args.backend, DURABILITY_INGEST_ONLY))
+    out["instrument"] = bench_common.INSTRUMENT
+    # DECISIONS #89: where the split does not apply, the reason, not a blank.
+    out["cold_warm_na"] = bench_common.NA_COLD_WARM_DENSE_LANE
+    # An IVF arm chooses its probe count by effect before the warmup and the
+    # timed passes (arango_common), on a HELD-OUT slice of 200 queries the
+    # timed pass never asks (queries 1000:1200 of the fixture's 10,000), so
+    # the cold pass stays cold; the row says which slice it used.
+    if getattr(b, "calibrates", False):
+        _cq, _cg = calibration_slice(args.scale, train)
+        b.calibrate(_cq, _cg, args.scale)
+    # An IVF arm's operating point, beside the degree the HNSW arms record.
+    for _k in IVF_FIELDS:
+        if getattr(b, _k, None) is not None:
+            out[_k] = getattr(b, _k)
+    # Captured AFTER the build and again after the timed passes below, because
+    # #6858's trigger fires from the QUERY path: a build-time snapshot alone
+    # cannot show a rebuild that the searches provoked.
+    out["engine_stats_after_build"] = b.engine_stats()
+    # BUILD-ONLY MODE (post1_rows.py, runner.py --build-only): stop here, after build() and before any timed work, and write the row
+    # marked row_kind=build_only. Unset by default, so nothing below changes for any run that does not ask for it.
+    if os.environ.get("BENCH_BUILD_ONLY") == "1":
+        import post1_rows
+        post1_rows.finish_build_only(out, args.out, b)
+
+    WARM = 20
+    timed_n = len(test) - WARM
+    # HELD OUT, not the head of the timed set. This warmed on test[:20] and
+    # then timed range(len(test)), so the first 20 queries of every pass -
+    # including pass 0, the one published as COLD - had already been asked
+    # and answered. A cold pass must answer only questions the engine has
+    # never seen. sparse_multipass_driver.py already draws from a held-out
+    # slice; this is the same fix.
+    with _beat.phase("warmup", n=len(test[timed_n:])):
+        for _wi, q in enumerate(test[timed_n:]):  # warmup, untimed, held out
+            _w0 = time.perf_counter()
+            b.search(q, K)
+            if _wi == 0:
+                # THE CELL'S COLD NUMBER IS THE FIRST QUERY AFTER THE DATABASE
+                # OPENED (#89 as amended), and on this lane that is the first
+                # WARMUP query, not the first timed one: the timed pass runs
+                # against an engine the warmup has already touched. It stays
+                # untimed for the percentiles and is recorded here so the
+                # page's one cold column is a real first touch rather than the
+                # twenty-first.
+                bench_common.record_first_query(out, "search[warmup 0]",
+                                                (time.perf_counter() - _w0) * 1e3)
+    lats, recalls = [], []
+    _beat.mark("queries-start", n=timed_n)
+    t0 = time.perf_counter()
+    for qi in range(timed_n):
+        t1 = time.perf_counter()
+        ids = b.search(test[qi], K)
+        # The dropped-connection case this guard exists for happened HERE, on
+        # the served arm at ten million vectors (DECISIONS #91): the recall
+        # below is still counted, because a reconnect changes what the query
+        # cost and not what it answered.
+        surreal_common.keep(b, lats, (time.perf_counter() - t1) * 1e3)
+        recalls.append(len(set(ids[:K]) & set(gt[qi].tolist())) / K)
+    span = time.perf_counter() - t0
+    _beat.mark("queries-done", n=timed_n, t=f"{round(span, 2)}s")
+    p = pct(lats)
+    out.update({f"query_{k}_ms": round(v, 3) for k, v in p.items()})
+    out["qps"] = round(timed_n / span, 1)
+    out["n_queries_timed"] = timed_n
+    out["warmup_held_out"] = WARM
+    out["recall_at_10"] = round(statistics.mean(recalls), 4)
+    # The second snapshot: #6858's trigger is evaluated when queries run, so a
+    # rebuild it provoked exists only in the AFTER-SEARCH counters. Comparing
+    # the two is what tells a reader whether the timings above include one.
+    out["engine_stats_after_search"] = b.engine_stats()
+
+    # THE SEARCH-BEAM SWEEP (instrument 2026-11 only, dense_beam.py): the cold pass above is
+    # unchanged and keeps the cold p50/p99; the index is NOT rebuilt, and each beam value gets its
+    # own held-out warm-up and timed pass. The headline is the latency at matched recall.
+    if dense_beam.enabled():
+        with _beat.phase("beam-sweep", kind=str(b.beam_kind)):
+            _kind, _pts, _na = dense_beam.run_sweep(
+                b, test, gt, timed_n, K, WARM, surreal_common.keep, pct, statistics.mean,
+                {"recall": out["recall_at_10"], "p50": out["query_p50_ms"], "p99": out["query_p99_ms"]},
+                beat=_beat)
+        out.update(dense_beam.row_fields(_kind, _pts, _na))
+
+    # ----------------------------------------------------------------------
+    # THE TWO MUTATION OPERATIONS (DECISIONS #82d), in the order DELETE then
+    # INSERT-THE-SAME-IDS-BACK, which is what keeps the recall exact: the
+    # ground truth after deleting a set D is the original ground truth with D
+    # removed, and re-inserting exactly D restores it. Nothing is
+    # brute-force recomputed, on any arm.
+    _mut_on, _mut_why = mutation_enabled(args.scale)
+    out["mutate_ran"] = _mut_on
+    out["mutate_reason"] = _mut_why
+    _mut_reason = getattr(b, "MUTATE_UNEXPRESSIBLE", None)
+    if _mut_on and _mut_reason:
+        # DECISIONS #88: an engine that cannot do this says so, never silence.
+        out["mutate_ran"] = False
+        out["mutate_reason"] = _mut_reason
+        bench_common.record_unexpressible(out, "mutate_delete", _mut_reason)
+        bench_common.record_unexpressible(out, "mutate_insert", _mut_reason)
+    elif _mut_on:
+        _mq = min(MUTATE_QUERIES, timed_n)
+        victims = mutation_victims(gt[:timed_n], len(train), MUTATE_N)
+        vset = set(victims)
+        out["mutate_n"] = len(victims)
+        out["mutate_queries"] = _mq
+
+        def _pass(want_fn):
+            lat, rec, hits = [], [], 0
+            for qi in range(_mq):
+                t1 = time.perf_counter()
+                ids = b.search(test[qi], K)
+                surreal_common.keep(b, lat, (time.perf_counter() - t1) * 1e3)
+                want = want_fn(qi)
+                got = set(int(x) for x in ids[:K])
+                hits += len(got & vset)
+                rec.append(len(got & set(want)) / float(len(want)) if want else 1.0)
+            return lat, round(statistics.mean(rec), 4), hits
+
+        # DELETE from the built index, then search.
+        _beat.mark("mutate-delete-start", n=len(victims))
+        _t = time.perf_counter()
+        b.delete_vectors(victims)
+        out["mutate_delete_s"] = round(time.perf_counter() - _t, 3)
+        out["mutate_delete_per_op_ms"] = round(out["mutate_delete_s"] * 1000.0 / len(victims), 4)
+        _lat, _rec, _hits = _pass(lambda qi: [int(g) for g in gt[qi].tolist() if int(g) not in vset])
+        _p = pct(_lat)
+        out.update({f"mutate_delete_query_{k2}_ms": round(v, 3) for k2, v in _p.items()})
+        out["mutate_delete_recall_at_10"] = _rec
+        # MUST BE ZERO. A non-zero count is an index still returning records
+        # the engine says it deleted, which is a correctness failure and not a
+        # latency one; it is on the row rather than in a log.
+        out["mutate_deleted_hits"] = _hits
+        _beat.mark("mutate-delete-done", recall=_rec, still_returned=_hits)
+
+        # INSERT the same ids back into the built index, then search.
+        _beat.mark("mutate-insert-start", n=len(victims))
+        _t = time.perf_counter()
+        b.insert_vectors(victims, train[victims])
+        out["mutate_insert_s"] = round(time.perf_counter() - _t, 3)
+        out["mutate_insert_per_op_ms"] = round(out["mutate_insert_s"] * 1000.0 / len(victims), 4)
+        _lat, _rec, _hits = _pass(lambda qi: [int(g) for g in gt[qi].tolist()])
+        _p = pct(_lat)
+        out.update({f"mutate_insert_query_{k2}_ms": round(v, 3) for k2, v in _p.items()})
+        out["mutate_insert_recall_at_10"] = _rec
+        out["mutate_reinserted_hits"] = _hits
+        _beat.mark("mutate-insert-done", recall=_rec, returned=_hits)
+        # WHAT THE MUTATION LEFT BEHIND, which the other two snapshots cannot
+        # say. `engine_stats_after_build` and `_after_search` are both taken
+        # BEFORE this phase, so until now no row could answer the obvious
+        # question about these columns: did the 1,000 inserts and deletes land
+        # in the index, or in a buffer the engine will merge later?
+        #
+        # THAT DISTINCTION IS A FAIRNESS AXIS, NOT A CURIOSITY. Insert cost
+        # spans 330x across the dense engines (0.026 ms/vector for sqlite-vec
+        # against 8.7 for DuckDB VSS), and the cheap end is cheap partly
+        # because the work is DEFERRED. An engine that appends to a delta and
+        # rebuilds later is measured here at its buffered cost while an engine
+        # that maintains its index eagerly pays in full, and ArcadeDB's
+        # LSM_VECTOR is a deferring design -- so the silence flattered US.
+        # `deltaVectorsCount` and `graphRebuildCount` after the phase say how
+        # much was deferred and whether a rebuild ran, per engine, from the
+        # engine's own counters rather than from our assumption.
+        out["engine_stats_after_mutate"] = b.engine_stats()
+
+    # TIME THE CLOSE, do not merely perform it (#155). A clean close is when
+    # compaction, writeback and WAL truncation happen: measured on 26.8.1 it
+    # settles a roughly fixed 30-87 MB, against nothing at all for an
+    # already-settled comparator. An unrecorded close is an unpriced one, and
+    # the row cannot be told apart from a lane that never settles.
+    # BENCH_SKIP_CLOSE=1 runs the cell WITHOUT closing the database.
+    #
+    # It existed for one question -- is the fp32 deep10m failure a BUILD cost or
+    # a CLOSE cost -- and it ANSWERED it on 2026-08-20: a BUILD cost belonging to
+    # a second build nobody asked for. Keeping the flag because the question
+    # recurs, but the reasoning it was written with was wrong twice over and the
+    # correction is the useful part:
+    #
+    # NOT #5747, and the OOM was NOT inside close(). #5747 was the LOADING path
+    # ("a session that never searched pays a rebuild on close"), fixed by our own
+    # PR #5787 and never what this tier hit. The real cause is #6489: a build
+    # that leaves ANY node unreachable merges those orphans into the
+    # pending-mutation list, so graphState is MUTABLE even though the build
+    # succeeded, persisted, and has zero pending writes -- and flush() tests
+    # graphState alone. The run that settled it (qI) had close SKIPPED and still
+    # OOM'd, inside a SECOND full build.
+    #
+    # What the tier actually does on 26.8.1 at the standard 24g/36g envelope:
+    # build #1 peaks 21,851/24,576 MB and COMPLETES, then a redundant build dies
+    # at 24,554 MB. With #6490 applied: one build, peak 22,664 MB, close 0.158 s,
+    # recall 0.9506, rc=0, same envelope. The tier never needed a bigger heap.
+    #
+    # The arm RECORDS that it skipped, because a cell that silently omits a phase
+    # is not comparable with one that does not.
+    #
+    # THE CLOSE PHASE (instrument 2026-11 memory probe, 2026-10-30 audit of the 12 dense rows of the
+    # 2026-11 pass: `mem_probe_phases` was load,index_build,warmup only). memory_probe derives the
+    # `queries` and `idle` readings, and the JVM working set after GC, from the `close-start` mark, and
+    # this lane never emitted one while l1, l2, e2, l3s and l4 do. The mark comes after every timed
+    # operation (search, beam sweep, mutation) and `_t` starts INSIDE it: the probe sleeps IDLE_S and
+    # forces a GC on `close-start`, and a `_t` taken before the `with` would price that into `close_s`.
+    # Without BENCH_MEMPROBE_DIR the mark only prints a PHASE line, so a pre-2026-11 row is unchanged.
+    with _beat.phase("close"):
+        if os.environ.get("BENCH_SKIP_CLOSE") == "1":
+            out["close_s"] = None
+            out["close_skipped"] = True
+            out["close_skip_reason"] = ("diagnostic: isolating build cost from the "
+                                        "#6489 redundant graph rebuild")
+        else:
+            _t = time.perf_counter()
+            b.close()
+            out["close_s"] = round(time.perf_counter() - _t, 3)
+    # `reconnects` on every SurrealDB row, zero when nothing happened
+    # (DECISIONS #91): a dropped connection has to be visible as a number on
+    # the row, not as a traceback in a log nobody reads until a cell dies.
+    surreal_common.stamp_reconnects(out, b)
+    # 0.0 MUST MEAN "nothing to release", NEVER "we did not ask". Without this
+    # the dense table would read ArcadeDB 157.5 s against six flat zeros, four
+    # of which were simply unmeasured.
+    if getattr(b, "close_note", None):
+        out["close_note"] = b.close_note
+
+    # Stamp the conditions. runner.py wraps this script and adds cpuset, heap,
+    # mem_cap and a manifest to runs.jsonl, so a full campaign row is already
+    # provenanced -- but only when the runner is the caller. Run standalone
+    # (which is how every targeted re-measure is done, because the runner
+    # cannot select a single backend at a single envelope without also
+    # rewriting its per-scale maps) the row carried nothing. Stamping here
+    # means a standalone row is as auditable as a campaign row instead of
+    # being a second class of artifact nobody thought to check.
+    try:
+        # bench_common is imported at module scope (a local import here made the
+        # name local to main() and the PhaseBeat call above an UnboundLocalError,
+        # caught on the laptop 2026-09-14).
+        # The adapter already recorded the version of the engine actually under
+        # test (chromadb.__version__, duckdb.__version__, ...). run_conditions
+        # stamps engine_version from the arcadedb wheel, which is the right
+        # answer for the ArcadeDB rows and the WRONG one for every comparator:
+        # inside a comparator container the wheel is not installed, the lookup
+        # raises, and the adapter's correct version is overwritten with
+        # "unknown (PackageNotFoundError)". That is what happened to all 20 rows
+        # of the DEEP-10M envelope run. Keep the adapter's answer, and move the
+        # wheel's to a key that says what it is.
+        backend_version = out.get("engine_version")
+        out.update(bench_common.run_conditions(lane="l3d", scale=args.scale,
+                                               backend=args.backend))
+        out["backend_version"] = backend_version
+        # THE ADAPTER ALWAYS WINS, and the test is no longer the backend NAME.
+        # It used to be `not backend.startswith("arcadedb")`, which is true for
+        # arcadedb_dense_server -- an ArcadeDB arm that runs in dbbench:client,
+        # where the wheel is not installed. So the one arm the special case was
+        # meant to protect kept run_conditions' answer and published
+        # engine_version="unknown (PackageNotFoundError)" while its adapter had
+        # correctly read "server:26.8.1 (build ...)" from the server itself.
+        # The adapter measured the engine under test; run_conditions read the
+        # container. Keep both, and never let the second overwrite the first.
+        out["harness_arcadedb_version"] = out.pop("engine_version", None)
+        out["engine_version"] = backend_version
+    except Exception as e:                     # never lose a measured result
+        out["conditions_error"] = f"{e.__class__.__name__}: {e}"
+
+    # Again at the end: an adapter may record a setting the mutation phase
+    # needed (Memgraph's delete settle), after the copy taken at the build.
+    out.update(getattr(b, "row_extra", None) or {})
+    # #291: the index each engine deleted through, or "key" where its own record key is the id
+    _idx = "key" if b.ID_INDEX_DDL == "key" else b.id_index      # None when the build failed before the index
+    if _idx:
+        out["dense_id_index"] = _idx
+    out.update(bench_common.client_path_fields())
+    with open(args.out, "w") as f:
+        json.dump(out, f)
+    print("RESULT", json.dumps(out))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BaseException:
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)

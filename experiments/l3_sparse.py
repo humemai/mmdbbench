@@ -1,0 +1,946 @@
+#!/usr/bin/env python3
+"""L3 sparse-vector lane: build + top-K search + recall@10 vs exact GT.
+
+Backends: arcadedb_embedded / arcadedb_server (LSM_SPARSE_VECTOR, dot-product
+BlockMax-WAND), qdrant_sparse, milvus_sparse, elasticsearch_sparse. Same seeded
+SPLADE-shaped corpus (sparse_common.py); ground truth from gen_sparse_gt.py
+must exist at /data/sparse/<scale>/gt.npy (mounted read-only by the runner).
+
+Timing: build (ingest incl. transactional index maintenance) and warm query
+latency (warmups discarded). Recall resolution (id lookup) happens OUTSIDE the
+timed section. Emits one JSON metric block.
+"""
+import argparse
+import json
+import os
+import statistics
+import sys
+import time
+import bench_common
+
+# Data source: synthetic SPLADE-shaped (default) or real Big-ANN SPLADE/MS MARCO
+# (BENCH_SPARSE_SOURCE=bigann). Both expose the same surface.
+if os.environ.get("BENCH_SPARSE_SOURCE") == "bigann":
+    import bigann_sparse as _src
+else:
+    import sparse_common as _src
+DIMENSIONS, K = _src.DIMENSIONS, _src.K
+SCALE_DOCS, SCALE_QUERIES = _src.SCALE_DOCS, _src.SCALE_QUERIES
+gen_docs, gen_queries = _src.gen_docs, _src.gen_queries
+
+WARMUP = 5
+INGEST_BATCH = 500
+
+# THE UNTIMED WARM-UP (CAMPAIGN section 7 row 81, DECISIONS #177). After the build and before the timed pass every backend runs
+# `bench_common.SPARSE_WARMUP_DEFAULT` untimed searches (1,000, one full round), drawn from queries DISJOINT from the timed set
+# (disjoint_warmup_queries) so a query or result cache cannot flatter an engine, and the row records `sparse_warmup_queries` and
+# `sparse_warmup_source`. Same count and same rule for every engine, as the documents lane's warm-up uses keys apart from the timed
+# ones. `BENCH_SPARSE_WARMUP=N` (a positive integer) sets the count (PROTOCOL.md section 7); the warm-up itself cannot be turned off.
+WARMUP_ENV = "BENCH_SPARSE_WARMUP"
+WARMUP_SEED = 177
+
+
+def sparse_warmup_n():
+    """The warm-up count: `bench_common.SPARSE_WARMUP_DEFAULT`, or the positive integer in `BENCH_SPARSE_WARMUP`. A value that is
+    not a positive integer ends the run: a launcher that asked for a count and silently got another would stamp one and believe
+    the other."""
+    raw = (os.environ.get(WARMUP_ENV) or "").strip()
+    if not raw:
+        return bench_common.SPARSE_WARMUP_DEFAULT
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 0
+    if n <= 0:
+        raise SystemExit(f"{WARMUP_ENV}={raw!r}: must be a positive integer (unset it for {bench_common.SPARSE_WARMUP_DEFAULT})")
+    return n
+
+
+def disjoint_warmup_queries(n, n_timed, n_docs):
+    """The warm-up queries: `n` queries that are NOT in the timed set, so an engine with a query or result cache
+    cannot look faster for having seen them. Returns (queries, source). The source is the dataset's EXTRA queries, the ones after
+    the `n_timed` the timed pass uses ("extra_queries": the rest of the Big-ANN dev file, or the next draws of the synthetic generator,
+    whose first `n_timed` draws are the timed set); when the dataset holds fewer than `n_timed + n`, a fixed-seed sample of `n`
+    documents used as queries ("document_sample", from the first 100,000 documents). The same ones for every engine."""
+    try:
+        extra = gen_queries(n_timed + n)[n_timed:]
+    except Exception:  # noqa: BLE001 - a file shorter than asked for is the fallback's case, not an error
+        extra = []
+    if len(extra) >= n:
+        return extra[:n], "extra_queries"
+    import random
+    pool = min(n_docs, 100_000)
+    picks = set(random.Random(WARMUP_SEED).sample(range(pool), min(n, pool)))
+    return [(idx, vals) for i, idx, vals in gen_docs(pool) if i in picks], "document_sample"
+
+
+def pct(vals):
+    v = sorted(vals)
+    g = lambda q: v[min(len(v) - 1, int(q * len(v)))]
+    return {"mean_ms": round(statistics.mean(v) * 1e3, 3),
+            "p50_ms": round(g(0.50) * 1e3, 3), "p95_ms": round(g(0.95) * 1e3, 3),
+            "p99_ms": round(g(0.99) * 1e3, 3), "n": len(v)}
+
+
+def recall_at_k(result_ids, gt_row):
+    truth = set(int(x) for x in gt_row)
+    return len(truth.intersection(int(x) for x in result_ids)) / len(truth)
+
+
+# WHAT A SEARCH RETURNS (CAMPAIGN section 7 row 62, DECISIONS #153 item 1). Every comparator's timed search
+# returns the ids of its hits (Qdrant with_payload=False, Elasticsearch _source=False, Milvus no output
+# fields, pgvector SELECT id); ArcadeDB's returned each hit's WHOLE record, about 46 KB of JSON per query,
+# and mapped record ids to ordinals in an untimed pass. Both ArcadeDB adapters now project `id` (and the
+# score) inside the timed query, so the arms differ in the engine and not in what comes back, and every
+# ArcadeDB sparse row, the lane's and the multipass driver's, records `sparse_result`. The projection returns
+# the same ids in the same order as the whole-record form (50 of 50 queries, the pin and main, laptop).
+SPARSE_RESULT = "id"
+ARCADE_SPARSE_SEARCH_SQL = "SELECT id, score FROM (SELECT expand(`vector.sparseNeighbors`({a})))"
+# The settle step, one statement for every ArcadeDB arm (embedded on either package, served): engine #5144.
+COMPACT_SQL = "COMPACT INDEX `Doc[tokens,weights]`"
+
+
+class Base:
+    # VERSION IS A MEASUREMENT INPUT, not a label.
+    #
+    # Qdrant already read its server version (see #156 below); Milvus did not,
+    # so its rows reached the page as engine_version="milvus" -- the backend NAME
+    # where a version belongs. Elastic, duckdb and questdb publish blank or a
+    # bare name elsewhere for the same reason. We hold ArcadeDB to naming its
+    # build; a table comparing us against Milvus "milvus" is no more defensible.
+    #
+    # This default catches the next adapter that forgets, which is the actual
+    # failure: the gap was never a decision, it was an omission nothing flagged.
+    #
+    # "unset" rather than "?" so the difference between "nobody asked" and "the
+    # engine was asked and would not say" survives into the artifact.
+    version = "unset"
+
+    def close(self):
+        """Release the engine handle. Overridden where there is one to release.
+
+        Every adapter answers close() so a caller never has to know which
+        engines hold a handle. Absent this, l3_sparse held its ArcadeDB
+        database open for the life of the process and the lifecycle probe's
+        reopen failed outright with "Found active instance of database
+        '/tmp/l3_arcade' already in use". That was our omission, not an engine
+        limitation: l2_graph and l3d_dense have closed their databases all
+        along, and the same binding call works here.
+        """
+        pass
+
+    name = "base"
+
+    def connect(self):
+        raise NotImplementedError
+
+    def reopen(self):
+        """Open an ALREADY-BUILT database, with no DDL and no ingest.
+
+        Separate from connect() on purpose. connect() creates the database and
+        issues the schema, so calling it twice fails ("already exists") and,
+        if it did not, would time creation rather than opening. Reopening is
+        the quantity a build/query phase split would introduce and that
+        nothing in this project measures today (#154), so it gets its own
+        method rather than a flag on the published path.
+
+        Adapters that cannot reopen say so by leaving this unimplemented; the
+        probe records the reason instead of reporting a number it did not get.
+        """
+        raise NotImplementedError(f"{self.name} has no reopen path")
+
+    def build(self, n_docs):
+        """Ingest corpus (index maintained per backend's idiomatic path)."""
+        raise NotImplementedError
+
+    def search(self, idx, vals, k):
+        """Return list of doc ordinals, best first. Must be warm-callable."""
+        raise NotImplementedError
+
+    def post_build(self):
+        """Optional: wait for index readiness (counts as build time)."""
+
+    def disk_mb(self):
+        return None
+
+
+class ArcadeEmbedded(Base):
+    name = "arcadedb_sparse_embedded"
+    SPARSE_RESULT = SPARSE_RESULT      # stamped on the row; see the note above Base
+    quant = None  # None = engine default (INT8); "FP32"/"FP16" per engine #5143
+
+    def _index_metadata(self):
+        import json as _json
+        meta = {"dimensions": DIMENSIONS}
+        if self.quant:
+            meta["weightQuantization"] = self.quant
+        return _json.dumps(meta)
+
+    def connect(self):
+        import _arcadedb_import
+        arcadedb = _arcadedb_import.load()
+        heap = os.environ.get("ARCADEDB_HEAP", "4g")
+        # -Xms is left unset; heap_size sets -Xmx from the cell's memory budget (the bindings' documented practice, PROTOCOL section 7).
+        jvm_args = ""
+        # Engine knobs for an ablation arm, e.g.
+        #   ARCADEDB_JVM_EXTRA=-Darcadedb.sparseVectorScoringMaxPartitions=8
+        # Echoed rather than applied silently: an unread override would make an
+        # ablation measure the default and look like a null result.
+        extra = os.environ.get("ARCADEDB_JVM_EXTRA", "").strip()
+        if extra:
+            jvm_args = f"{jvm_args} {extra}".strip()
+            print(f"JVM-EXTRA {extra}", flush=True)
+        self.db = arcadedb.create_database(
+            "/tmp/l3_arcade",
+            jvm_kwargs={"heap_size": heap, "jvm_args": jvm_args or None})
+        self.version = _arcadedb_import.dist_version()
+        self.db.command("sql", "CREATE DOCUMENT TYPE Doc")
+        self.db.command("sql", "CREATE PROPERTY Doc.id LONG")
+        self.db.command("sql", "CREATE PROPERTY Doc.tokens ARRAY_OF_INTEGERS")
+        self.db.command("sql", "CREATE PROPERTY Doc.weights ARRAY_OF_FLOATS")
+        self.db.command("sql", "CREATE INDEX ON Doc (tokens, weights) "
+                               "LSM_SPARSE_VECTOR METADATA "
+                               + self._index_metadata())
+        self.idx_name = "Doc[tokens,weights]"
+
+    def reopen(self):
+        """Open the built database again: no create, no DDL, no ingest.
+
+        IN-PROCESS CAVEAT, and it decides how the number may be read. The JVM
+        is already running by the time this is called, so heap_size here is
+        inert and what gets timed is the engine opening its files, not a JVM
+        start. For a phase split implemented as a container restart the JVM
+        start is real and would have to be added; measuring it separately is
+        the point, since it is charged to every JVM engine and to none of the
+        others.
+        """
+        import _arcadedb_import
+        arcadedb = _arcadedb_import.load()
+        heap = os.environ.get("ARCADEDB_HEAP", "4g")
+        self.db = arcadedb.open_database(
+            "/tmp/l3_arcade",
+            jvm_kwargs={"heap_size": heap, "jvm_args": None})
+        self.idx_name = "Doc[tokens,weights]"
+
+    def build(self, n_docs):
+        # ONE PATH FOR BOTH PACKAGES (the native `arcadedb` build has no JVM, no JPype and no get_java_database(), so the
+        # old jdb.newDocument + JArray ingest could not run there). The documents go through the Python API's bulk insert,
+        # `Database.insert_many`: one batch per commit (INGEST_BATCH), the token and weight lists as the generators yield
+        # them (Python lists of int and float). The declared property types turn them into ARRAY_OF_INTEGERS and
+        # ARRAY_OF_FLOATS (the smoke reads the stored types back); the weights are stored as float32 either way, so the
+        # ingested values equal the ground truth's, as in the Java-array path this replaced.
+        self.db.insert_many(
+            "Doc",
+            ({"id": i, "tokens": idx, "weights": vals} for i, idx, vals in gen_docs(n_docs)),
+            commit_every=INGEST_BATCH)
+
+    def post_build(self):
+        # ArcadeDB's settle step (fairness parity with ES forcemerge / Milvus flush+load / Qdrant green-wait): blocking LSM
+        # segment compaction, the SQL statement the served arm already runs (engine #5144), so embedded, native and server
+        # settle the same way. Measured at 1M docs with the old Java call (idx.compact()): ~2s, query p50 9.5ms -> 7.0ms
+        # (control run: no change).
+        self.db.command("sql", COMPACT_SQL)
+
+    def search(self, idx, vals, k):
+        # Python lists, as the generators yield them: both packages convert a list to the int[] / float[] the function
+        # reads. NOT numpy arrays: the JVM build's argument conversion turns every ndarray into float[], which the
+        # indices argument refuses (measured on 26.11.1.dev0: "Array must be int[], long[], Integer[]...").
+        rows = self.db.query(
+            "sql", ARCADE_SPARSE_SEARCH_SQL.format(a="?, ?, ?, ?"),
+            self.idx_name, idx, vals, k).to_json_list()
+        return [int(r["id"]) for r in rows]   # ids, as every comparator returns them
+
+    def resolve(self, ids):
+        # THE IDENTITY, as it is for every comparator (Qdrant, pgvector, Milvus, Elasticsearch):
+        # the search returns the lane's own ids, so there is nothing to look up. Until the re-pin
+        # this mapped each hit's record id to its ordinal in the untimed recall pass (a RID list
+        # as the query TARGET, because `WHERE @rid IN [list]` is a full bucket scan, engine #5824).
+        return ids
+
+    def close(self):
+        self.db.close()
+
+class ArcadeEmbeddedFP32(ArcadeEmbedded):
+    """Quantization ablation (engine #5143): exact FP32 posting weights vs the
+    default INT8. Prices the default's recall cost on our own engine."""
+    name = "arcadedb_sparse_embedded_fp32"
+    quant = "FP32"
+
+
+class ArcadeEmbeddedNoCompact(ArcadeEmbedded):
+    """Settle-step ablation: the embedded arm without COMPACT INDEX.
+
+    The served arm now runs the same COMPACT INDEX, so embedded vs server is the
+    transport cost and embedded vs embedded_nocompact is the settle-step cost
+    (time spent compacting, and the query latency it buys).
+    """
+    name = "arcadedb_sparse_embedded_nocompact"
+
+    def post_build(self):
+        pass  # deliberately no compaction
+
+
+class ArcadeServer(ArcadeEmbedded):
+    name = "arcadedb_sparse_server"
+
+    def connect(self):
+        import lean_http
+        self.rq = lean_http.Session()
+        self.rq.auth = ("root", "dbbenchpass")
+        # WHICH HTTP CLIENT ran, read from the session (CAMPAIGN 7 row 72), on every row this arm writes
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), **lean_http.row_fields(self.rq)}
+        host = os.environ["BENCH_SERVER_HOST"]
+        port = os.environ.get("BENCH_SERVER_PORT", "2480")
+        self.base = f"http://{host}:{port}/api/v1"
+        # report the real server version, not a hardcoded guess (the image is
+        # digest-pinned in runner.py; keep the results row honest)
+        try:
+            info = self.rq.get(f"http://{host}:{port}/api/v1/server?mode=basic", timeout=30)
+            self.version = "server:" + (info.json().get("version") or "?")
+        except Exception:
+            self.version = "server:unknown"
+        for ddl in ["CREATE DOCUMENT TYPE Doc",
+                    "CREATE PROPERTY Doc.id LONG",
+                    "CREATE PROPERTY Doc.tokens ARRAY_OF_INTEGERS",
+                    "CREATE PROPERTY Doc.weights ARRAY_OF_FLOATS",
+                    'CREATE INDEX ON Doc (tokens, weights) LSM_SPARSE_VECTOR '
+                    'METADATA ' + self._index_metadata()]:
+            self._cmd("sql", ddl)
+        self.idx_name = "Doc[tokens,weights]"
+
+    def post_build(self):
+        # Settle step, now client-reachable over HTTP/SQL via COMPACT INDEX
+        # (engine #5144, in 26.8.x), the same statement the embedded adapter runs,
+        # so the deployment axis isolates transport, not the settle asymmetry.
+        # Synchronous.
+        self._cmd("sql", COMPACT_SQL)
+
+    def _cmd(self, language, command, params=None):
+        payload = {"language": language, "command": command}
+        if params:
+            payload["params"] = params
+        r = self.rq.post(f"{self.base}/command/bench", json=payload, timeout=600)
+        r.raise_for_status()
+        return r.json().get("result", [])
+
+    def _query(self, command, params=None):
+        payload = {"language": "sql", "command": command}
+        if params:
+            payload["params"] = params
+        r = self.rq.post(f"{self.base}/query/bench", json=payload, timeout=600)
+        r.raise_for_status()
+        return r.json().get("result", [])
+
+    # The served bulk path the maintainers recommend (#8337; DECISIONS #116
+    # items 2 and 4): each batch is one INSERT ... CONTENT :rows request with
+    # the rows bound as a JSON array, one transaction per request, instead of
+    # INSERT statements with every weight written into the text. The weights
+    # travel as the float32 values' exact doubles, so ingest still equals the
+    # ground truth's weights. The size is swept on mini at the re-pin.
+    #
+    # THE ROWS ARE THE GENERATOR'S LISTS, AS THEY COME (BUGS F151). Both
+    # sources already yield Python lists: bigann_sparse `.tolist()`s the CSR's
+    # float32 slices (the exact float32 values as Python floats) and
+    # sparse_common draws Python floats, which the server rounds to float32
+    # exactly as the embedded arm's float[] does. A per-element pass through
+    # np.asarray(..., float32) and back changed no value (the rows compare
+    # equal) and cost 5.3 s of this arm's 20.7 s build at 100k on the laptop.
+    load_batch = int(os.environ.get("BENCH_SERVED_LOAD_BATCH") or 2000)
+
+    def build(self, n_docs):
+        rows = []
+        for i, idx, vals in gen_docs(n_docs):
+            rows.append({"id": i, "tokens": idx, "weights": vals})
+            if len(rows) >= self.load_batch:
+                self._cmd("sql", "INSERT INTO Doc CONTENT :rows", {"rows": rows})
+                rows = []
+        if rows:
+            self._cmd("sql", "INSERT INTO Doc CONTENT :rows", {"rows": rows})
+
+    def search(self, idx, vals, k):
+        rows = self._query(
+            ARCADE_SPARSE_SEARCH_SQL.format(a=":i, :t, :w, :k"),
+            {"i": self.idx_name, "t": idx, "w": vals, "k": k})
+        return [int(r["id"]) for r in rows]
+
+    def resolve(self, ids):
+        return ids       # the identity, as for every comparator (see ArcadeEmbedded.resolve)
+
+    def close(self):
+        # Served arm: the database lives in another container. Closing here
+        # releases the HTTP session only, which is why a served arm's
+        # lifecycle equivalent is stopping that container, not this call.
+        try:
+            self.s.close()
+        except Exception:
+            pass
+
+class Qdrant(Base):
+    name = "qdrant_sparse"
+    COLL = "docs"
+    # THE WEIGHT TYPE IS SET AND READ BACK (BUGS F164, DECISIONS #135): float32
+    # here, Qdrant's default, now named in the definition; uint8 on the int8-class
+    # arm below. The applied type is read from the collection after the build
+    # and a mismatch refuses the cell.
+    DATATYPE = "float32"
+
+    def connect(self):
+        from qdrant_client import QdrantClient, models
+        self.models = models
+        host = os.environ["BENCH_SERVER_HOST"]
+        # gRPC, the vendor's documented performance path (qdrant.tech/documentation/interfaces: "We recommend using gRPC ... to optimize the
+        # performance"). A laptop A/B (repros qdrant-transport-ab) measured REST 1.3x to 1.5x slower per query at p50 on the dense, int8,
+        # sparse and composed searches, with client CPU per call at 0.6x and identical answers; the bulk loads did not move. REST was the
+        # handicap, so the comparator takes the faster transport (the knob rule; DECISIONS #169). Recorded as qdrant_transport.
+        self.cl = QdrantClient(host=host, port=6333, grpc_port=6334, prefer_grpc=True, timeout=600)
+        # THE SERVER'S version, not the string "qdrant" (#156). The paper says
+        # served comparators are pinned by image digest, which is true of
+        # runner.py's config but was unverifiable from the artifact a reader
+        # actually gets. Never lose a run over provenance: record the reason.
+        try:
+            self.version = "qdrant:" + str(self.cl.info().version)
+        except Exception as e:
+            self.version = f"qdrant:unknown ({e.__class__.__name__})"
+        self.cl.create_collection(
+            collection_name=self.COLL,
+            vectors_config={},
+            sparse_vectors_config={
+                "text": models.SparseVectorParams(
+                    index=models.SparseIndexParams(
+                        on_disk=False, datatype=models.Datatype(self.DATATYPE)))})
+
+    def build(self, n_docs):
+        m, batch, self._sent = self.models, [], 0
+        for i, idx, vals in gen_docs(n_docs):
+            batch.append(m.PointStruct(
+                id=i, vector={"text": m.SparseVector(indices=idx, values=vals)}))
+            self._sent += 1
+            if len(batch) >= INGEST_BATCH:
+                self.cl.upsert(self.COLL, batch, wait=False)
+                batch = []
+        if batch:
+            self.cl.upsert(self.COLL, batch, wait=True)
+
+    # Bound on the settle below; a collection that never holds every point sent
+    # refuses the cell instead of answering from part of the corpus.
+    SETTLE_S = float(os.environ.get("BENCH_QDRANT_SETTLE_S", "3600"))
+
+    def post_build(self):
+        # WAIT FOR EVERY POINT, NOT ONLY FOR GREEN (2026-10-02). The batches go
+        # in with wait=False and only the last with wait=True, and on the laptop
+        # neither that last ack nor a green status meant the collection held the
+        # corpus: at the Big-ANN 100k slice the lane searched a collection whose
+        # points_count read 62,384 and returned recall@10 0.936 against exact
+        # ground truth, where the same ingest with wait=True on every batch
+        # returned 1.0 (repin-prep probe, qdrant v1.19.1). So the settle polls the
+        # EXACT count until it equals what was sent, and green again after it,
+        # inside the build timer, as the Milvus and MongoDB arms wait for their
+        # index to hold what they were given. The row records what the
+        # collection held at the first green and how long the rest took.
+        deadline = time.time() + self.SETTLE_S
+        at_green = t_green = None
+        while True:
+            info = self.cl.get_collection(self.COLL)
+            green = str(info.status).lower().endswith("green")
+            held = self.cl.count(self.COLL, exact=True).count if green else None
+            if green and at_green is None:
+                at_green, t_green = held, time.perf_counter()
+            if green and held == self._sent:
+                break
+            if time.time() > deadline:
+                raise RuntimeError(f"qdrant: the collection holds {held} of {self._sent} points "
+                                   f"{self.SETTLE_S:.0f} s after the last upsert; refusing to search part of the corpus")
+            time.sleep(0.5)
+        self.settle = {"qdrant_points_at_first_green": at_green,
+                       "qdrant_settle_after_green_s": round(time.perf_counter() - t_green, 2)}
+        # The engine's own answer, never the option we sent (F164).
+        idx = info.config.params.sparse_vectors["text"].index
+        applied = getattr(getattr(idx, "datatype", None), "value", getattr(idx, "datatype", None))
+        if applied != self.DATATYPE:
+            raise RuntimeError(f"qdrant sparse index datatype read back {applied!r}, not {self.DATATYPE!r}: "
+                               f"the row would describe a different index (BUGS F164)")
+        self.row_extra = {"qdrant_sparse_datatype": applied, "qdrant_transport": "grpc", **self.settle}
+
+    def search(self, idx, vals, k):
+        m = self.models
+        hits = self.cl.query_points(
+            self.COLL,
+            query=m.SparseVector(indices=idx, values=vals),
+            using="text", limit=k, with_payload=False).points
+        return [h.id for h in hits]
+
+    def resolve(self, ids):
+        return ids
+
+
+class QdrantUint8(Qdrant):
+    """Qdrant's sparse index with uint8 weights, its int8-class arm on the
+    sparse lane (#131, the quantization survey, DECISIONS #135): the same
+    collection, ingest and query, with `datatype: uint8` on the sparse index,
+    read back like the float32 arm's type. The query is the float32 arm's,
+    unchanged."""
+    name = "qdrant_sparse_uint8"
+    DATATYPE = "uint8"
+
+
+class PgVectorSparse(Base):
+    """pgvector 0.8 sparsevec on PostgreSQL 17 (2026-09-11): one
+    sparsevec(DIMENSIONS) column, COPY ingest in pgvector's text form
+    ('{i:v,...}/dims', 1-based indices), an HNSW index with sparsevec_ip_ops at
+    pgvector's own defaults (sparse search has no matched operating point
+    across engines; see the table note), inner-product ranking. pgvector
+    indexes sparse vectors with at most 1,000 non-zero entries; SPLADE
+    documents here carry ~127 on average."""
+    name = "pgvector_sparse"
+
+    def connect(self):
+        import psycopg
+        host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+        self.cx = psycopg.connect(f"host={host} dbname=bench user=postgres password=dbbenchpass",
+                                  autocommit=True)
+        with self.cx.cursor() as c:
+            c.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            c.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+            ev = c.fetchone()[0]
+            c.execute("SELECT version()")
+            pv = c.fetchone()[0].split(" (")[0]
+            c.execute(f"CREATE TABLE docs (id INTEGER, emb sparsevec({DIMENSIONS}))")
+        self.version = f"pgvector:{ev} on {pv}"
+
+    @staticmethod
+    def _sv(idx, vals):
+        return "{" + ",".join(f"{int(i) + 1}:{float(v):.7g}" for i, v in zip(idx, vals)) + f"}}/{DIMENSIONS}"
+
+    def build(self, n_docs):
+        with self.cx.cursor() as c:
+            with c.copy("COPY docs (id, emb) FROM STDIN") as cp:
+                for i, idx, vals in gen_docs(n_docs):
+                    cp.write_row((i, self._sv(idx, vals)))
+            c.execute("CREATE INDEX ON docs USING hnsw (emb sparsevec_ip_ops)")
+
+    def search(self, idx, vals, k):
+        with self.cx.cursor() as c:
+            c.execute("SELECT id FROM docs ORDER BY emb <#> %s::sparsevec LIMIT %s",
+                      (self._sv(idx, vals), k))
+            return [int(r[0]) for r in c.fetchall()]
+
+    def resolve(self, ids):
+        return ids
+
+    def close(self):
+        self.cx.close()
+
+
+class Milvus(Base):
+    name = "milvus_sparse"
+    COLL = "docs"
+
+    def connect(self):
+        from pymilvus import DataType, MilvusClient
+        host = os.environ["BENCH_SERVER_HOST"]
+        self.cl = MilvusClient(uri=f"http://{host}:19530")
+        try:
+            import pymilvus
+            self.version = ("milvus:"
+                            + str(self.cl.get_server_version())
+                            + "/pymilvus:" + pymilvus.__version__)
+        except Exception as e:                     # noqa: BLE001
+            self.version = f"milvus:unknown ({e.__class__.__name__})"
+        # THE SERVER'S version, not the string "milvus" (#156).
+        try:
+            self.version = "milvus:" + str(self.cl.get_server_version())
+        except Exception as e:
+            self.version = f"milvus:unknown ({e.__class__.__name__})"
+        schema = self.cl.create_schema(auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("emb", DataType.SPARSE_FLOAT_VECTOR)
+        index_params = self.cl.prepare_index_params()
+        index_params.add_index(field_name="emb",
+                               index_type="SPARSE_INVERTED_INDEX",
+                               metric_type="IP")
+        self.cl.create_collection(self.COLL, schema=schema,
+                                  index_params=index_params)
+
+    def build(self, n_docs):
+        """Bulk import (Zilliz 2026-10-22): Parquet files into Milvus's MinIO through RemoteBulkWriter, one import job.
+        milvus_common documents what the timer covers."""
+        import milvus_common
+        from pymilvus import CollectionSchema, DataType, FieldSchema
+        orm = CollectionSchema([FieldSchema("id", DataType.INT64, is_primary=True),
+                                FieldSchema("emb", DataType.SPARSE_FLOAT_VECTOR)])
+        self._n = n_docs
+        self._bulk_info = milvus_common.bulk_import(
+            self.cl, os.environ["BENCH_SERVER_HOST"], self.COLL, orm,
+            ({"id": i, "emb": dict(zip(idx, vals))} for i, idx, vals in gen_docs(n_docs)))
+        self._bulk_info.pop("ingest_s")   # the lane's build timer already covers it
+
+    def post_build(self):
+        """Wait for the real index, not merely for the collection to load.
+
+        Same defect as the dense lane: `load_collection` returns while the index
+        is still building, and the pinned image serves the gap from a temporary
+        index (`interimIndex.enableIndex: true` in its own milvus.yaml). The
+        published sparse rates give it away -- a graph/inverted build is
+        superlinear, so its rate must FALL with corpus size, and ours was flat
+        across an 88x range:
+            tiny 100k    9,083 docs/s
+            small 1M     9,787 docs/s
+            medium 8.8M  8,819 docs/s
+        That is ingest, not a build. state == "Finished" alone is insufficient;
+        the probe caught Finished with pending_index_rows = 855,349.
+
+        This MOVES PUBLISHED NUMBERS: all 15 sparse Milvus rows re-run and the
+        change is disclosed.
+        """
+        import milvus_common
+        waits = milvus_common.wait_sealed_and_indexed(self.cl, self.COLL, "emb", self._n)
+        self.row_extra = {**milvus_common.SEARCH_SHAPE, **self._bulk_info, **waits}
+
+    def search(self, idx, vals, k):
+        res = self.cl.search(self.COLL, data=[dict(zip(idx, vals))],
+                             anns_field="emb", limit=k, filter="", output_fields=[],
+                             search_params={"metric_type": "IP"})
+        return [hit["id"] for hit in res[0]]
+
+    def resolve(self, ids):
+        return ids
+
+
+class Elastic(Base):
+    name = "elasticsearch_sparse"
+    IDX = "docs"
+
+    def connect(self):
+        from elasticsearch import Elasticsearch, helpers
+        self.helpers = helpers
+        host = os.environ["BENCH_SERVER_HOST"]
+        self.es = Elasticsearch(f"http://{host}:9200", request_timeout=600)
+        self.version = self.es.info()["version"]["number"]
+        # INDEX-TIME PRUNING IS OFF HERE, DELIBERATELY, AND THAT IS AN OVERRIDE.
+        #
+        # Elasticsearch 9.1 turned token pruning on by default for every new
+        # sparse_vector field ("With any new indices created, token pruning
+        # will be turned on by default"), with thresholds Elastic states were
+        # "chosen based on tests using ELSERv2" -- their own sparse model. This
+        # corpus is SPLADE-cocondenser, a different weight distribution, and
+        # the cost of applying one model's thresholds to another's vectors is
+        # measurable in our own history:
+        #
+        #     ES 9.0.0 (no such default)   recall@10  0.991 - 0.9985
+        #     ES 9.4.1 (pruning on)        recall@10  0.725 - 0.929
+        #
+        # Same corpus, same harness, same adapter. Qdrant and Milvus retrieve
+        # exactly and score ~0.99 on the same queries, so leaving this on would
+        # compare an approximate Elasticsearch against exact competitors and
+        # print 0.75 beside their 0.99 -- which reads as "Elasticsearch is bad
+        # at sparse retrieval" and is not what the number means.
+        #
+        # This is the same class of override as ES's forcemerge, Milvus's
+        # flush, Qdrant's green-wait and the matched HNSW degree: equalise the
+        # operating point, then disclose it. BENCH_ES_PRUNE=1 restores the
+        # stock default, and the choice is recorded on every row either way so
+        # no reader has to infer which one produced a given number.
+        self.prune = os.environ.get("BENCH_ES_PRUNE", "0") == "1"
+        self.es.indices.create(index=self.IDX, mappings={
+            "properties": {"emb": {"type": "sparse_vector",
+                                   "index_options": {"prune": self.prune}}}},
+            settings={"number_of_shards": 1, "number_of_replicas": 0})
+        # TWO MORE OVERRIDES, READ BACK FROM THE ENGINE (CAMPAIGN section 7
+        # row 21, override_registry.py): `xpack.security.enabled=false` on the server
+        # (harness plumbing that also takes TLS and authentication out of every
+        # latency measured here) and `number_of_replicas=0` on the index (a
+        # single-node cluster has nowhere to place a replica and would sit
+        # yellow). Each is asked of Elasticsearch itself, `_xpack` and the
+        # index settings, not copied from the environment and the call above,
+        # so the row records what the engine ran with.
+        self.row_extra = {**bench_common.es_readback(self.es, self.IDX),
+                          "es_json_serializer": bench_common.es_json_serializer(self.es)}
+
+    @staticmethod
+    def _tok(idx, vals):
+        return {f"t{d}": float(v) for d, v in zip(idx, vals)}
+
+    def build(self, n_docs):
+        def actions():
+            for i, idx, vals in gen_docs(n_docs):
+                yield {"_index": self.IDX, "_id": i,
+                       "_source": {"emb": self._tok(idx, vals)}}
+        self.helpers.bulk(self.es, actions(), chunk_size=INGEST_BATCH,
+                          request_timeout=600)
+
+    def post_build(self):
+        self.es.indices.refresh(index=self.IDX)
+        self.es.indices.forcemerge(index=self.IDX, max_num_segments=1,
+                                   request_timeout=1200)
+
+    def search(self, idx, vals, k):
+        res = self.es.search(index=self.IDX, size=k, _source=False, query={
+            "sparse_vector": {"field": "emb",
+                              "query_vector": self._tok(idx, vals)}})
+        return [int(h["_id"]) for h in res["hits"]["hits"]]
+
+    def resolve(self, ids):
+        return ids
+
+
+class ArcadeServerFP32(ArcadeServer):
+    """The fp32 ablation on the served deployment (2026-09-07). The server DDL
+    now takes the same METADATA the embedded adapter builds, so quant applies
+    to both deployments; with quant None the JSON is {"dimensions": N}, byte
+    for byte what the server arm always sent."""
+    name = "arcadedb_sparse_server_fp32"
+    quant = "FP32"
+
+
+BACKENDS = {c.name: c for c in
+            [ArcadeEmbedded, ArcadeEmbeddedFP32, ArcadeEmbeddedNoCompact, ArcadeServerFP32,
+             ArcadeServer, Qdrant, Milvus, PgVectorSparse, Elastic,
+             # the quantization survey's sparse int8-class arm (DECISIONS #135)
+             QdrantUint8]}
+
+
+# DECISIONS #81, recorded on every row. The sparse lane times an ingest and
+# searches, no transactional write; pgvector's server runs
+# synchronous_commit=off like every PostgreSQL arm.
+# Every string, and the evidence for the default it names, is in bench_common.
+DURABILITY_INGEST_ONLY = "engine default; no transactional write timed on this lane"
+DURABILITY = {
+    "arcadedb_sparse_embedded": bench_common.DURABILITY_ARCADEDB,
+    "arcadedb_sparse_embedded_fp32": bench_common.DURABILITY_ARCADEDB,
+    "arcadedb_sparse_embedded_nocompact": bench_common.DURABILITY_ARCADEDB,
+    "arcadedb_sparse_server": bench_common.DURABILITY_ARCADEDB,
+    "arcadedb_sparse_server_fp32": bench_common.DURABILITY_ARCADEDB,
+    "pgvector_sparse": bench_common.DURABILITY_PG_OFF,
+}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backend", required=True, choices=list(BACKENDS))
+    ap.add_argument("--workload", default="search")  # single suite for l3s
+    ap.add_argument("--scale", default="micro", choices=list(SCALE_DOCS))
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    # PHASE TIMERS. This lane recorded build_s and nothing else, and build is
+    # a MINORITY of the cell: at the 8.84M tier the median build is 15.6 min
+    # against cell wall-clocks of 130-190 min, so 85% of the most expensive
+    # measurement on the machine was unaccounted for. Not knowing where it
+    # goes is also why the campaign could not be honestly costed or shortened.
+    # PHASE MARKERS (2026-09-14, same pattern as l3d_dense) beside the phase
+    # TIMERS this lane already keeps: a cell that dies names the phase it was
+    # in and how long it had been there. Entered and left AROUND the timed
+    # work, never inside a timed loop.
+    _beat = bench_common.PhaseBeat()
+    _beat.mark("cell-start", backend=args.backend, scale=args.scale)
+    _p0 = time.perf_counter()
+    # COUNTED, not asserted. n_docs was SCALE_DOCS[scale], a module constant, so
+    # PAGE-SPEC rule 4's corpus fingerprint was fingerprinting a constant: point a
+    # lane at base_small.csr where base_1M.csr was meant and the row still claims
+    # the full corpus, build_docs_per_s is inflated by the same factor, and the
+    # gate that exists to catch exactly that passes. The generator is wrapped so
+    # the row records what was actually ingested, and a shortfall is a refusal
+    # rather than a smaller number nobody reads.
+    # `global` FIRST. Defining `def gen_docs` below makes the name local to this
+    # entire function, so without this the `_raw = gen_docs` line reads an
+    # unassigned local and raises UnboundLocalError -- which compile() cannot
+    # catch, being a runtime error, and which failed every l3s cell. The adapters
+    # resolve this name from module globals at call time, so rebinding the global
+    # is also what makes the count reach them.
+    global gen_docs
+    n_docs = SCALE_DOCS[args.scale]
+    _ingested = {"n": 0}
+    _gen_docs_raw = gen_docs
+
+    def _counted_gen_docs(n, *a, **kw):
+        for item in _gen_docs_raw(n, *a, **kw):
+            _ingested["n"] += 1
+            yield item
+
+    gen_docs = _counted_gen_docs
+
+    with _beat.phase("query-gen", n=SCALE_QUERIES[args.scale]):
+        queries = gen_queries(SCALE_QUERIES[args.scale])
+    _query_gen_s = time.perf_counter() - _p0
+
+    _p0 = time.perf_counter()
+    gt = None
+    if os.environ.get("BENCH_SPARSE_SOURCE") == "bigann":
+        gt = _src.load_gt(args.scale)
+    else:
+        gt_path = f"/data/sparse/{args.scale}/gt.npy"
+        if os.path.exists(gt_path):
+            import numpy as np
+            gt = np.load(gt_path)
+    _gt_load_s = time.perf_counter() - _p0
+    _beat.mark("ground-truth-loaded", present=gt is not None,
+               t=f"{round(_gt_load_s, 2)}s")
+
+    b = BACKENDS[args.backend]()
+    out = {"lane": "l3s", "n_docs": n_docs, "dims": DIMENSIONS, "k": K,
+           "n_queries": len(queries),
+           "query_gen_s": round(_query_gen_s, 2),
+           "gt_load_s": round(_gt_load_s, 2)}
+
+    t0 = time.perf_counter()
+    with _beat.phase("connect", backend=args.backend):
+        b.connect()
+    out["connect_s"] = round(time.perf_counter() - t0, 3)
+    out["engine_version"] = getattr(b, "version", "?")
+    # Ingest only, so the relaxed class only (DECISIONS #90).
+    bench_common.stamp_durability(out, getattr(b, "durability", None)
+                                  or DURABILITY.get(args.backend, DURABILITY_INGEST_ONLY))
+    out["instrument"] = bench_common.INSTRUMENT
+    # WHAT THE SEARCH RETURNS, on every ArcadeDB row (row 62).
+    if getattr(b, "SPARSE_RESULT", None):
+        out["sparse_result"] = b.SPARSE_RESULT
+    # DECISIONS #89: where the split does not apply, the reason, not a blank.
+    out["cold_warm_na"] = bench_common.NA_COLD_WARM_SPARSE_LANE
+    # Only Elasticsearch sets this. A row must say which operating point it
+    # measured; the 9.0.0-vs-9.4.1 recall gap was only diagnosable because the
+    # engine version happened to be recorded, and pruning is not visible from
+    # the version alone once it is configurable.
+    if hasattr(b, "prune"):
+        out["es_prune"] = b.prune
+
+    t0 = time.perf_counter()
+    with _beat.phase("build", n=n_docs):
+        b.build(n_docs)
+    with _beat.phase("post-build"):
+        b.post_build()
+    build = time.perf_counter() - t0
+    out["build_s"] = round(build, 2)
+    out["build_docs_per_s"] = round(n_docs / build, 1)
+    # What the engine reported about the index it built, and any settle it
+    # waited for, as the dense lane records it.
+    out.update(getattr(b, "row_extra", None) or {})
+    out.update(bench_common.client_path_fields())
+
+    # THE UNTIMED WARM-UP (row 81): queries disjoint from the timed set; the row names the source
+    _warm_n = sparse_warmup_n()
+    _w0 = time.perf_counter()
+    _beat.mark("search-warmup-start", n=_warm_n)
+    _wq, out["sparse_warmup_source"] = disjoint_warmup_queries(_warm_n, len(queries), n_docs)
+    for _idx, _vals in _wq:
+        b.search(_idx, _vals, K)
+    out["sparse_warmup_queries"] = len(_wq)
+    _beat.mark("search-warmup-done", t=f"{round(time.perf_counter() - _w0, 2)}s")
+
+    # timed warm search
+    _search_t0 = time.perf_counter()
+    lats, raw_results = [], []
+    _beat.mark("search-start", n=len(queries), warmup=WARMUP)
+    for qi, (idx, vals) in enumerate(queries):
+        t0 = time.perf_counter()
+        ids = b.search(idx, vals, K)
+        dt = time.perf_counter() - t0
+        if qi == 0:
+            # The first query after the database opened (#89 as amended). It is
+            # one of the WARMUP queries the percentiles discard, which is
+            # exactly why it is the cold one.
+            bench_common.record_first_query(out, "search[0]", dt * 1e3)
+        if qi >= WARMUP:
+            lats.append(dt)
+        raw_results.append(ids)
+    out.update({f"query_{k2}": v for k2, v in pct(lats).items()})
+    out["qps"] = round(len(lats) / sum(lats), 1)
+    out["search_wall_s"] = round(time.perf_counter() - _search_t0, 2)
+    _beat.mark("search-done", n=len(lats), t=f"{out['search_wall_s']}s")
+
+    # recall: was untimed and is NOT free at scale, since it resolves every
+    # returned hit back to a doc ordinal. Untimed does not mean zero, and an
+    # unaccounted phase is exactly what made this lane's cost unexplainable.
+    _recall_t0 = time.perf_counter()
+    _beat.mark("recall-start", n=len(raw_results))
+    if gt is not None:
+        recalls = []
+        for qi, ids in enumerate(raw_results):
+            ordinals = b.resolve(ids)
+            recalls.append(recall_at_k(ordinals, gt[qi]))
+        out["recall_at_10"] = round(statistics.mean(recalls), 4)
+    else:
+        out["recall_at_10"] = None
+        out["gt_missing"] = True
+    out["recall_calc_s"] = round(time.perf_counter() - _recall_t0, 2)
+    _beat.mark("recall-done", recall=out.get("recall_at_10"))
+    # WHAT THIS CELL COULD NOT ACCOUNT FOR. Sum of the phases we now time,
+    # against the wall clock the runner sees. A large residual means there is
+    # still a phase nobody is measuring, and it says so in the row rather than
+    # leaving the next person to rediscover it from a campaign log.
+    out["phases_accounted_s"] = round(
+        out.get("connect_s", 0) + out.get("query_gen_s", 0)
+        + out.get("gt_load_s", 0) + out.get("build_s", 0)
+        + out.get("search_wall_s", 0) + out.get("recall_calc_s", 0), 2)
+
+    # Read the cpuset, heap and memory cap out of this container's own cgroup.
+    # Without them a cell cannot be reproduced or extended from its own
+    # artifacts, which is why T4's 8.84M row is permanently stuck at N=3: reps
+    # added later under guessed conditions would be worse than an honest N=3.
+    # run_conditions() reads rather than accepts assertions, since a driver
+    # told its own version is how one overlay stamped dev22 onto a dev20 run.
+    #
+    # Careful with engine_version: this lane already set it above to the
+    # BACKEND's version, which for a Qdrant or Elasticsearch row is that
+    # engine's version and not ours. run_conditions() reports the installed
+    # arcadedb-embedded wheel, so letting it merge freely would relabel every
+    # CLOSE, AND TIME IT (#155). This lane hard-exited without ever shutting an
+    # engine down, so deferred shutdown work was never paid by anyone and the
+    # on-disk state it left was a crash state. A clean close is when
+    # compaction, writeback and WAL truncation happen: measured on 26.8.1 it
+    # settles a roughly fixed 30-87 MB, against nothing at all for an
+    # already-settled comparator. After all measurement, so nothing above moves.
+    _t = time.perf_counter()
+    with _beat.phase("close"):
+        b.close()
+    out["close_s"] = round(time.perf_counter() - _t, 3)
+
+    # comparator row with ArcadeDB's version. Keep the system-under-test's
+    # version under engine_version and file the wheel separately.
+    try:
+        from bench_common import run_conditions
+        cond = run_conditions(lane="l3s", backend=args.backend,
+                              scale=args.scale)
+        cond["wheel_version"] = cond.pop("engine_version", None)
+        out.update(cond)
+    except Exception as e:  # never lose a completed run over provenance
+        out["conditions_error"] = f"{e.__class__.__name__}: {e}"
+
+    # Recorded at the END, when the generator has actually run. A shortfall is a
+
+    # refusal: a row claiming the full corpus while a fraction was ingested is
+
+    # what rule 4's fingerprint cannot catch on its own, and every per-second
+
+    # figure in the row is inflated by the same factor.
+
+    out["n_docs_ingested"] = _ingested["n"]
+
+    if _ingested["n"] and _ingested["n"] < n_docs:
+
+        raise SystemExit(
+
+            f"ingested {_ingested['n']:,} docs against a declared {n_docs:,} for "
+
+            f"scale {args.scale}: the corpus is short, so build_docs_per_s is "
+
+            f"inflated by {n_docs/_ingested['n']:.2f}x.")
+
+
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    json.dump(out, open(args.out, "w"), indent=1)
+    print(f"RESULT {json.dumps(out)[:400]}")
+
+
+if __name__ == "__main__":
+    # Fail fast. JPype's JVM keeps non-daemon threads (AsyncFlush,
+    # TransactionManager) alive after a Python exception, so a crashed cell
+    # would otherwise sit until the runner's multi-hour watchdog. os._exit
+    # skips interpreter cleanup and takes the JVM down with it.
+    try:
+        main()
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)

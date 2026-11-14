@@ -23,12 +23,12 @@ def test_runner_reps_default_is_three():
     assert _default_of_reps_flag(HERE / "runner.py") == "3"
 
 
-def test_the_bindings_benchmark_reps_default_is_three():
-    assert _default_of_reps_flag(HERE.parent / "python-bindings" / "run.py") == "3"
+# The origin also changed benchmarks/python-bindings/run.py to default to 3 reps. That directory is the frozen artifact of the SciPy 2026 paper
+# (benchmarks/README.md) and is never edited in this repository, so its default stays 5 and the two checks of it are not made here.
 
 
 def test_no_usage_line_tells_a_reader_to_run_five_reps():
-    for path in (HERE / "runner.py", HERE.parent / "python-bindings" / "run.py"):
+    for path in (HERE / "runner.py",):
         bad = [l for l in path.read_text(encoding="utf-8").splitlines() if re.match(r"^(Paper|Official run)[^\n]*--reps 5\b", l.strip())]
         assert not bad, (path.name, bad)
 

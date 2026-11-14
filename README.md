@@ -53,4 +53,4 @@ If a setting we use for your engine differs from what you recommend, open an iss
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE).

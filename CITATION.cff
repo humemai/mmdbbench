@@ -14,7 +14,7 @@ abstract: >-
   An open benchmark of multi-model databases: one storage engine serving tables, time series, documents, graphs, key-values and vectors,
   measured against specialist databases as per-model baselines. The same tasks run on the same machine with published settings, and every
   result is tied to the exact engine version. Tasks are written in SQL, Cypher and native query languages, on x86 Linux, and the raw result rows are open.
-license: MIT
+license: Apache-2.0
 identifiers:
   - type: doi
     value: 10.5281/zenodo.23481288

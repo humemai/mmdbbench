@@ -6314,6 +6314,21 @@ def _row_label_for(table_id, r):
     return label
 
 
+def _strict_rows_set_aside(rows):
+    """The strict-class rows that no table but the durability table prints (BUGS F52).
+
+    The instrument runs every timed write at both durability settings and the frozen set holds both. Every other table reports the
+    relaxed class, so a strict row is set aside whenever a relaxed row of the same cell (lane, workload, backend, scale) exists; an
+    engine with no setting has strict rows only and keeps them. Shared by main(), which drops these rows from the tables, and by the
+    sentences that read `_FROZEN_ROWS` (that list is set BEFORE the strict rows are set aside), so a sentence counts the reps its
+    table prints and nothing else.
+    """
+    has_relaxed = {(r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale")))
+                   for r in rows if str(r.get("durability_class")) == "relaxed"}
+    return [r for r in rows if str(r.get("durability_class")) == "strict"
+            and (r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale"))) in has_relaxed]
+
+
 def _query_budget_notes(table_id):
     spec = _QUERY_BUDGET_TABLES.get(table_id)
     if not spec:
@@ -6332,7 +6347,13 @@ def _query_budget_notes(table_id):
     # (label, scale, query) -> [(iters, elapsed_s, budget_s)] across reps
     hits = collections.defaultdict(list)
     scales = _table_scales(table_id)
+    # THE REPS THE TABLE PRINTS. The medians under this sentence are the relaxed-class reps (a cell keeps its strict reps only when it has
+    # no relaxed ones), so the spans and the count come from those reps too. Reading every rep of the lane let a strict rep that hit the
+    # budget widen a span ("7 to 13 starts" where the printed reps gave "10 to 13") or declare a cell no printed rep hit at all.
+    _not_printed = {id(r) for r in _strict_rows_set_aside(_FROZEN_ROWS)}
     for r in _FROZEN_ROWS:
+        if id(r) in _not_printed:
+            continue
         if r.get("lane") != lane or (wl and r.get("workload") != wl):
             continue
         if scales and str(r.get("scale")) not in scales:
@@ -7442,10 +7463,7 @@ def main() -> int:
     # the same cell exists (BUGS F52). An engine with no setting has strict rows
     # only and keeps them.
     _all_rows = list(rows)
-    _has_relaxed = {(r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale")))
-                    for r in rows if str(r.get("durability_class")) == "relaxed"}
-    _dropped = [r for r in rows if str(r.get("durability_class")) == "strict"
-                and (r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale"))) in _has_relaxed]
+    _dropped = _strict_rows_set_aside(rows)
     if _dropped:
         print(f"  one setting per table: {len(_dropped)} strict rows set aside for the durability table only")
         rows = [r for r in rows if r not in _dropped]

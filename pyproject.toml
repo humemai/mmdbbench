@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "An open benchmark of multi-model databases (documentation scaffold; the benchmark code moves here after its first paper)."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 dependencies = []
 
 [dependency-groups]

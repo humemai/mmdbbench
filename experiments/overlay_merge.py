@@ -44,28 +44,33 @@ def client_of(path):
 
 
 def merge(sources, out, exclude_arms=()):
-    """Merge `sources` [(label, directory)], in order, into directory `out`; returns the manifest lines. Refuses on a name collision."""
+    """Merge `sources` [(label, directory)], in order, into directory `out`; returns the manifest lines. Refuses on a name collision.
+
+    The decision is made ONCE per file name, over every candidate, so it does not depend on the order of the sources (humemai/mmdbbench#87): identical
+    bytes are fine; with one lean candidate and every other candidate naming the vendor driver or the PostgreSQL wire the lean file is chosen; anything else
+    that differs refuses and names all candidates."""
     out = Path(out)
-    chosen, problems, replaced = {}, [], []
+    cands = {}
     for label, d in sources:
         for fp in sorted(Path(d).glob("mp_*_b*.json")):
             if arm_of(fp.name) in set(exclude_arms):
                 continue
-            sha = hashlib.sha256(fp.read_bytes()).hexdigest()
-            client = client_of(fp)
-            cur = chosen.get(fp.name)
-            if cur is None:
-                chosen[fp.name] = (label, fp, client, sha)
-            elif cur[3] == sha:
-                continue
-            elif cur[2] in (OFFICIAL, PGWIRE) and client == LEAN:
-                replaced.append(f"{fp.name}: {cur[0]} ({cur[2]}) replaced by {label} (lean)")
-                chosen[fp.name] = (label, fp, client, sha)
-            else:
-                problems.append(f"{fp.name}: {cur[0]} ({cur[2] or 'no client stamp'}) differs from {label} ({client or 'no client stamp'})")
+            cands.setdefault(fp.name, []).append((label, fp, client_of(fp), hashlib.sha256(fp.read_bytes()).hexdigest()))
+    chosen, problems, replaced = {}, [], []
+    for name, cs in sorted(cands.items()):
+        if len({c[3] for c in cs}) == 1:
+            chosen[name] = cs[0]
+            continue
+        lean = [c for c in cs if c[2] == LEAN]
+        others = [c for c in cs if c[2] != LEAN]
+        if lean and len({c[3] for c in lean}) == 1 and all(c[2] in (OFFICIAL, PGWIRE) for c in others):
+            chosen[name] = lean[-1]
+            replaced.append(f"{name}: " + ", ".join(f"{c[0]} ({c[2]})" for c in others) + f" replaced by {lean[-1][0]} (lean)")
+        else:
+            problems.append(f"{name}: " + "; ".join(f"{c[0]} ({c[2] or 'no client stamp'}, {c[3][:8]})" for c in cs))
     if problems:
-        raise SystemExit("REFUSING to merge the overlay directories: one file name, two different contents, and neither is a lean file "
-                         "replacing a vendor-driver or PostgreSQL-wire file:\n  " + "\n  ".join(problems))
+        raise SystemExit("REFUSING to merge the overlay directories: one file name, different contents, and not (one lean file beside vendor-driver or "
+                         "PostgreSQL-wire files):\n  " + "\n  ".join(problems))
     out.mkdir(parents=True, exist_ok=True)
     lines = []
     for name, (label, fp, client, sha) in sorted(chosen.items()):

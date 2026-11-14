@@ -63,12 +63,9 @@ def test_a_lean_file_replaces_a_driver_or_wire_file_and_never_the_reverse():
     OM.merge([("live", a), ("lean-rerun", b)], out)
     assert OM.client_of(out / "mp_arcsrv_b1.json") == OM.LEAN and OM.client_of(out / "mp_arcsrv_b2.json") == OM.LEAN
     assert "replaced" in (out / "MANIFEST.txt").read_text()
-    try:
-        OM.merge([("lean-rerun", b), ("live", a)], _dir() / "o2")
-    except SystemExit as e:
-        assert "mp_arcsrv_b1.json" in str(e)
-    else:
-        raise AssertionError("a driver file must not replace a lean file")
+    out2 = _dir() / "o2"
+    OM.merge([("lean-rerun", b), ("live", a)], out2)            # the order of the sources does not matter: the lean file stays
+    assert OM.client_of(out2 / "mp_arcsrv_b1.json") == OM.LEAN
 
 
 def test_excluding_an_arm_drops_its_jvm_and_native_files_and_no_other_arm():
@@ -122,3 +119,40 @@ def test_post_rows_come_from_the_named_file_and_a_missing_file_never_falls_back_
         raise AssertionError("expected a refusal")
     L.pull_post_rows("", "a3a5d1245", "post2", dest, scp=lambda *a, **k: calls.append(a))
     assert len(calls) == 1
+
+
+# humemai/mmdbbench#87: the decision is made once per file name, over all candidates, so it does not depend on the order of the sources
+def test_a_lean_file_decides_over_a_driver_file_and_a_wire_file_whatever_the_order():
+    live, catchup, lean = _dir(), _dir(), _dir()
+    _put(live, "mp_arcsrv_b1.json", mark="live", arcadedb_http_client=DRIVER_C, arcadedb_http_client_role="headline")
+    _put(catchup, "mp_arcsrv_b1.json", mark="wire", arcadedb_http_client="psycopg", arcadedb_client_wire="pgwire")
+    _put(lean, "mp_arcsrv_b1.json", mark="lean", arcadedb_http_client=LEAN_C)
+    for order in (("live", "catchup", "lean"), ("lean", "live", "catchup"), ("catchup", "lean", "live")):
+        srcs = {"live": live, "catchup": catchup, "lean": lean}
+        out = _dir() / "o"
+        OM.merge([(n, srcs[n]) for n in order], out)
+        assert OM.client_of(out / "mp_arcsrv_b1.json") == OM.LEAN, order
+        assert "replaced" in (out / "MANIFEST.txt").read_text()
+
+
+def test_a_driver_file_and_a_wire_file_with_no_lean_file_still_refuse_and_name_both():
+    live, catchup, out = _dir(), _dir(), _dir() / "o"
+    _put(live, "mp_arcsrv_b1.json", mark="live", arcadedb_http_client=DRIVER_C, arcadedb_http_client_role="headline")
+    _put(catchup, "mp_arcsrv_b1.json", mark="wire", arcadedb_http_client="psycopg", arcadedb_client_wire="pgwire")
+    try:
+        OM.merge([("live", live), ("catchup", catchup)], out)
+    except SystemExit as e:
+        assert "live" in str(e) and "catchup" in str(e) and "mp_arcsrv_b1.json" in str(e)
+    else:
+        raise AssertionError("expected a refusal")
+
+
+def test_two_different_lean_files_refuse():
+    a, b, out = _dir(), _dir(), _dir() / "o"
+    _put(a, "mp_arcsrv_b1.json", mark="one", arcadedb_http_client=LEAN_C); _put(b, "mp_arcsrv_b1.json", mark="two", arcadedb_http_client=LEAN_C)
+    try:
+        OM.merge([("a", a), ("b", b)], out)
+    except SystemExit as e:
+        assert "mp_arcsrv_b1.json" in str(e)
+    else:
+        raise AssertionError("expected a refusal")

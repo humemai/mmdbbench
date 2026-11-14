@@ -745,13 +745,13 @@ def check_schema_homogeneity(rows):
                      # A family split on these is a split in
                      # instrumentation history, not in what was measured.
                      "graph_build_cache", "graph_build_access", "driver_",
-                     # PROVENANCE, not a measurement: the harness that wrote the row counted a stacked device once (#555),
-                     # so a cell whose reps straddle the fix legitimately splits on it.
-                     "io_stat_dedup",
                      # PHASE PROBES added after the first comparator pass: the io, process and JVM memory samplers of the idle and
                      # queries phases. No table or exporter source reads them, so a cell whose first rep predates them is a split in
                      # instrumentation history, not in what was measured (the dense landing, 12 cells; humemai/mmdbbench#57).
-                     "io_idle_", "io_queries_", "proc_idle_", "proc_queries_", "jvm_idle_", "jvm_queries_")
+                     "io_idle_", "io_queries_", "proc_idle_", "proc_queries_", "jvm_idle_", "jvm_queries_",
+                     # PROVENANCE, not a measurement: the harness that wrote the row counted a stacked device once (#555),
+                     # so a cell whose reps straddle the fix legitimately splits on it.
+                     "io_stat_dedup")
     def measured(r):
         return {_stem(k) for k, v in r.items()
                 if isinstance(v, (int, float))

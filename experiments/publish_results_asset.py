@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -102,7 +103,8 @@ def main() -> int:
               f"measured rows only.", file=sys.stderr)
         return 1
     with open(frozen, newline="", encoding="utf-8") as fh:
-        refuse_other_instruments(list(csv.DictReader(fh)), str(frozen))
+        frozen_rows = list(csv.DictReader(fh))
+        refuse_other_instruments(frozen_rows, str(frozen))
     found = private_findings(rows_path)
     if found:
         print(f"REFUSING: {rows_path} holds private content ({', '.join(f'{k}: {v}' for k, v in sorted(found.items()))}); nothing was written. "
@@ -114,7 +116,7 @@ def main() -> int:
         "engine": doc.get("arcadedb_engines"),
         "arcadedb_commits": doc.get("arcadedb_commits"),
         "tables": [t["id"] for t in doc.get("tables", [])],
-        "rows_in_frozen_csv": sum(1 for _ in open(frozen)) - 1,
+        "rows_in_frozen_csv": len(frozen_rows),      # csv rows, not lines: a cell may hold a newline (a declared reason does)
         "files": {p.name: {"bytes": p.stat().st_size, "sha256": _sha256(p)}
                   for p in (payload, frozen, rows_path)},
         "rows_in_raw_rows": len(raw),
@@ -146,7 +148,7 @@ def main() -> int:
     if not args.publish:
         print("dry run: pass --publish to run:")
         for c in cmds:
-            print("  " + " ".join(c))
+            print("  " + shlex.join(c))
         return 0
     have = subprocess.run(["gh", "release", "view", args.tag, "--repo", REPO_SLUG],
                           capture_output=True, text=True).returncode == 0

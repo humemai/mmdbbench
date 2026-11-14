@@ -77,6 +77,14 @@ def test_the_dry_run_prints_the_exact_release_commands_and_publishes_nothing():
     assert "--notes-file" in cmds[0] and "/x/notes.md" in cmds[0] and cmds[0][-1] == "/x/bundle.tar.gz"
 
 
+def test_the_manifest_counts_csv_rows_not_lines():
+    """A frozen cell may hold a newline (the declared reason of an engine does): the manifest said 2781 rows for a table of 621."""
+    d = stage(CLEAN)
+    (d / "runs_paper.csv").write_text('instrument,why\n2026-11,"first line\nsecond line\nthird"\n2026-11,plain\n')
+    assert build(d) == 0
+    assert json.loads((d / "out" / "results_manifest.json").read_text())["rows_in_frozen_csv"] == 2
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

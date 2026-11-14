@@ -188,13 +188,16 @@ def _check_dense_10m(payload):
     """Page's 10M cells vs the paper's, at the precision the paper prints."""
     import claims_check as C
 
+    # A page of two builds names the in-process ArcadeDB arms with their build ("ArcadeDB (embedded, fp32, JVM build)") and the paper table prints
+    # them as "ArcadeDB (emb, fp32) [jvm]": rows are keyed by (label without the build, build) (humemai/mmdbbench#68).
     rows = {}
     for table in payload.get("tables", []):
         if table["id"] != "l3d":
             continue
         for e in table["entries"]:
             if e.get("scale") == "deep10m":
-                rows[e["backend"]] = e["metrics"]
+                _b = e.get("build") if _AI.build_in_label(e["backend"]) else None
+                rows[(_AI.strip_build(e["backend"]), _b)] = e["metrics"]
     if not rows:
         # WITHHELD AGAIN versus NOT YET MEASURED. "Withheld" is the real
         # case: the lane ran and its ten-million tier did not reach the page.
@@ -208,12 +211,24 @@ def _check_dense_10m(payload):
         print("  no deep10m rows on the page; the tier is withheld again")
         return 0, 1
     checked = bad = 0
+    # THE ARMS THIS LANDING HOLDS (BENCH_MP_ARMS, humemai/mmdbbench#27): the n=3 campaign ran fewer than the eight labels below, and a label whose
+    # arm the overlay does not hold is not owed a page row. The default landing holds all of them, so it owes all eight as before.
+    import export_web as _EW
+    import make_paper_tables as _MPT
+    _held = set(_MPT.mp_arms_present(small=False))
+    _owed = {_lab for _arm, _bk, _lab, _ours in _EW.DENSE_10M_ARMS if _arm in _held}
+    _cells = []
     for label, (trow, ccol, wcol, rcol) in sorted(DENSE_10M.items()):
-        m = rows.get(label)
-        if m is None:
+        if label not in _owed:
+            continue
+        _builds = sorted((b for (l, b) in rows if l == label), key=str)
+        if not _builds:
             print(f"  ABSENT {label:28s} no such page row")
             bad += 1
             continue
+        for _b in _builds:
+            _cells.append((label + (f" [{_b}]" if _b else ""), trow + (f" [{_b}]" if _b else ""), ccol, wcol, rcol, rows[(label, _b)]))
+    for label, trow, ccol, wcol, rcol, m in _cells:
         for name, col, key in (("cold", ccol, "cold p50 ms"),
                                ("warm", wcol, "warm p50 ms"),
                                ("recall", rcol, "recall@10")):

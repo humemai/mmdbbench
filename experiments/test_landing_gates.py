@@ -5,6 +5,7 @@ Round 2 lost the 18 GAV-on rows of l2 olap (#77) and nothing said so. Light: syn
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -136,6 +137,29 @@ def test_the_committed_pending_list_names_staged_cells_and_carries_a_reason_a_re
     cells = {f"{c['lane']}/{c['scale']}/{c['workload']}/{c['backend']}/{c['cls']}" + (f"/{c['arm']}" if c["arm"] else "") for c in G.load_roster()["cells"]}
     assert {p["cell"] for p in pending} == {"l2/sf10/oltp/pgage_graph/relaxed", "l2/sf10/oltp/pgage_graph/strict"}
     assert all(p["cell"] in cells and p["reason"] and p["ref"] and p["since"] for p in pending)
+
+
+def _merge(store, incoming):
+    import subprocess
+    d = Path(tempfile.mkdtemp(prefix="gate-merge-"))
+    (d / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in store))
+    (d / "in.jsonl").write_text("".join(json.dumps(r) + "\n" for r in incoming))
+    env = dict(os.environ, BENCH_RESULTS_DIR=str(d))
+    done = subprocess.run([sys.executable, str(HERE / "merge_campaign.py"), "--from-file", str(d / "in.jsonl"), "--apply"], cwd=HERE, env=env, capture_output=True, text=True, timeout=300)
+    return done, d
+
+
+def test_the_store_merge_skips_an_exact_duplicate_keeps_a_client_twin_and_refuses_an_identity_drop():
+    """merge_campaign skipped a row as 'already present' on (canonical key, ts_utc). The twin rows of one cell on the two HTTP clients share the key and, in a generated fixture, the
+    time (the CI failure of the first version of this gate: 93 rows). Now a row is already here only with the same run_id, and a skip that differs in an identity field is refused."""
+    a = row(1, gav=False)
+    done, d = _merge([a], [a, dict(a, run_id=a["run_id"] + "_clientlean", arcadedb_http_client="lean")])
+    assert done.returncode == 0, done.stdout[-400:] + done.stderr[-400:]
+    assert "already present : 1 of 2 incoming rows, skipped" in done.stdout, done.stdout
+    assert len((d / "runs.jsonl").read_text().splitlines()) == 2                            # the exact duplicate was skipped, the client twin was appended
+    assert len((d / "dropped_rows.jsonl").read_text().splitlines()) == 1
+    done, _ = _merge([a], [dict(a, durability_class="strict")])                              # same key, time and run_id, another class: not a retry
+    assert done.returncode != 0 and "REFUSING" in (done.stdout + done.stderr), done.stdout[-300:] + done.stderr[-300:]
 
 
 def _w(d, name, rows):

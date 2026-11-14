@@ -92,6 +92,13 @@ def test_the_page_gate_finds_a_staged_arm_the_freeze_holds_and_the_page_does_not
     assert len(G.page_problems(one, rows, ROSTER)) == 1
 
 
+def test_an_arm_that_export_web_keeps_off_the_page_is_not_owed_by_the_page_gate():
+    assert "postgres_tuned" in G.off_page_arms()
+    rows = [dict(row(i), lane="l1tpc", backend="postgres_tuned", workload="oltp", scale="tpch1", run_id=f"x{i}") for i in (1, 2, 3)]
+    roster = {"cells": [dict(lane="l1tpc", scale="tpch1", workload="oltp", backend="postgres_tuned", cls="relaxed", arm="")]}
+    assert G.page_problems({"tables": [{"id": "docs_oltp", "entries": []}]}, rows, roster) == []
+
+
 def _w(d, name, rows):
     p = Path(d) / name
     p.write_text("".join(json.dumps(r) + "\n" for r in rows))

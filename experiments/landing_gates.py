@@ -144,13 +144,22 @@ def load_roster(path=ROSTER):
     return doc
 
 
+def off_page_arms():
+    """The backend keys export_web.OFF_PAGE_ARMS keeps off the result tables (an ablation that stays in the rows), read from its source without importing it."""
+    import ast
+    tree = ast.parse((HERE / "export_web.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "OFF_PAGE_ARMS" for t in node.targets) and isinstance(node.value, ast.Dict):
+            return {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+    return set()
+
+
 def declared_by_page(payload, c):
     """True when the page says why this staged cell has no row: a declared absence of its arm on its table (censored, withheld, not expressible, not measured) or the arm is
     off the page by name (page_check.OFF_PAGE_ARMS, an ablation that stays in the rows)."""
     import export_web as EW
-    import page_check as PC
     label = EW.display_name(c["backend"])
-    if c["backend"] in getattr(PC, "OFF_PAGE_ARMS", {}) or label in getattr(PC, "OFF_PAGE_ARMS", {}):
+    if c["backend"] in off_page_arms():
         return True
     tid = TABLE_OF.get((c["lane"], c["workload"]))
     for t in payload.get("tables", []):
@@ -207,7 +216,7 @@ def page_problems(payload, rows, roster, lanes=None):
             for r in rows if _clean(r)}
     for c in roster["cells"]:
         tid = TABLE_OF.get((c["lane"], c["workload"]))
-        if not tid or c["lane"] not in lanes or tid not in tables or c["cls"] != "relaxed":
+        if not tid or c["lane"] not in lanes or tid not in tables or c["cls"] != "relaxed" or c["backend"] in off_page_arms():
             continue
         if (c["lane"], c["scale"], c["workload"], c["backend"], c["arm"], "relaxed") not in held:
             continue

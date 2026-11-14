@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Merge a campaign's rows from the bench host into the canonical store.
+
+WHY THIS IS A SCRIPT AND NOT A SCP. Twice on 2026-08-04 a campaign finished and
+its data then sat unused while the paper kept printing superseded numbers: q8's
+30 sparse cells were complete for 90 minutes before anything read them, and
+T5's dense block was hand-built from files that had never left the bench host.
+Measuring is not the last step; being READ is. This closes that gap in a way
+that can be re-run at every re-pin instead of remembered.
+
+WHY APPEND, NEVER REPLACE. runner.py opens runs.jsonl in append mode, so the
+bench host accumulates only the rows from the current campaign. The canonical
+store on the workstation holds the full history, including every comparator
+(Qdrant, Milvus, Elasticsearch, Neo4j, Ladybug, DuckDB, Postgres) that this
+campaign did not re-run. Replacing would delete all of them. Appending is also
+sufficient: the canonical-row rule is newest ts_utc per
+(lane, backend, scale, workload, rep), so a fresh 26.8.1 row supersedes its
+dev-era predecessor automatically. "Remove the dev runs" therefore needs no
+deletion at all, which is the only version of that instruction that cannot
+lose data.
+
+SAFETY: refuses to write if the merge would reduce the canonical row count, and
+always writes a timestamped backup first.
+"""
+import argparse
+import glob
+import inspect
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from publish_instrument import results_dir  # noqa: E402
+
+# The store moves with BENCH_RESULTS_DIR like every other reader of results/ (the freeze, the exporter, the gates), so a test
+# merges into a fixture directory and never into the working store. A publish never sets it.
+CANON = os.path.join(str(results_dir()), "runs.jsonl")
+
+
+def load(path):
+    rows = []
+    if not os.path.exists(path):
+        return rows
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                pass
+    return rows
+
+
+def key(r):
+    """The canonical cell key, and it must MATCH make_paper_tables.
+
+    n_docs is load-bearing and was missing here. make_paper_tables uses
+    (lane, scale, n_docs, workload, backend, gav is not False, rep); this used
+    (lane, backend, scale, workload, rep) while its docstring claimed to be
+    "the rule the tables already apply".
+
+    The consequence was not cosmetic. Two sparse corpora share the scale name
+    "medium" (a retired synthetic 10M and the real Big-ANN 8.84M). Under the
+    tables' key they are two cells and both survive; under this one they
+    COLLIDE and the newer silently replaces the older. So the guard below,
+    which refuses a merge that reduces the canonical cell count, was counting
+    cells under a rule the tables do not use, and would have reported no loss
+    while discarding a corpus.
+
+    Kept as a local literal rather than imported, because merge_campaign runs
+    against raw campaign files before anything is loadable, but it is checked
+    against the real one below.
+    """
+    return (r.get("lane"), r.get("scale"), r.get("n_docs"), r.get("workload"),
+            r.get("backend"), r.get("gav") is not False, r.get("rep"))
+
+
+def _assert_key_matches_tables():
+    """Fail loudly if the tables' key and this one drift apart again.
+
+    A duplicated rule that nothing compares is a rule that will diverge; this
+    one already did, and the docstring asserting it had not is what made the
+    divergence invisible.
+    """
+    try:
+        import make_paper_tables as _M
+    except Exception:
+        return          # raw-file mode, nothing to compare against
+    probe = {"lane": "l3s", "scale": "medium", "n_docs": 8841823,
+             "workload": "search", "backend": "qdrant_sparse", "gav": None,
+             "rep": 1}
+    src = inspect.getsource(_M.load_canonical)
+    for field in ("n_docs", "scale", "workload", "backend", "rep"):
+        if field not in src:
+            raise SystemExit(
+                f"merge_campaign.key() includes {field!r} but "
+                f"make_paper_tables.load_canonical() no longer mentions it. "
+                f"The two keys have drifted; fix both before merging.")
+    _ = key(probe)
+
+
+def canonicalise(rows):
+    """Newest ts_utc wins per cell, under make_paper_tables' key."""
+    _assert_key_matches_tables()
+    best = {}
+    for r in rows:
+        k = key(r)
+        if k not in best or str(r.get("ts_utc")) > str(best[k].get("ts_utc")):
+            best[k] = r
+    return best
+
+
+def version_of(r):
+    return str(r.get("engine_version") or r.get("wheel_version") or "?")
+
+
+# The (lane, scale) pairs the paper actually prints. Everything else is an
+# exploration tier whose version nobody reads, and reporting it alongside makes
+# a clean re-pin look dirty: l2 keeps dev-era rows at micro/tiny/small/medium
+# forever, because T3 prints sf1 and sf10 and those tiers are never re-run.
+PUBLISHED = {("l1", "medium"), ("l1tpc", "tpch1"), ("l1tpc", "tpch10"),
+             ("l2", "sf1"), ("l2", "sf10"), ("e2", "e2")}
+
+# l3s and l3d are deliberately absent. Their released measurements live in
+# results/sparse_2681/ and results/dense_mp_2681/, which make_paper_tables reads
+# directly and which never enter runs.jsonl. Their rows here are dead weight,
+# and reporting them as "still on dev" would be true and misleading at once.
+OUT_OF_STORE = {"l3s", "l3d"}
+
+
+def report(before, after):
+    lanes = sorted({k[0] for k in after if k[0]})
+    print("  %-7s %-30s %s" % ("lane", "arcadedb version BEFORE", "AFTER"))
+    for lane in lanes:
+        if lane in OUT_OF_STORE:
+            print("  %-7s %s" % (lane, "(not in this store; reads "
+                                       "results/{sparse,dense_mp}_2681)"))
+            continue
+        def vers(d):
+            return sorted({version_of(r) for k, r in d.items()
+                           if k[0] == lane and (k[0], k[2]) in PUBLISHED
+                           and "arcade" in str(k[1]).lower()})
+        b, a = vers(before), vers(after)
+        if not b and not a:
+            continue
+        mark = "" if b == a else "   <-- moved"
+        print("  %-7s %-30s %s%s" % (lane, ", ".join(b)[:30] or "-",
+                                     ", ".join(a)[:36] or "-", mark))
+    print("  (published tiers only: %s)" % ", ".join(
+        sorted(f"{l}/{s}" for l, s in PUBLISHED)))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--host", default="mini")
+    ap.add_argument("--remote", default="~/repos/humemai/arcadedb-embedded-python/"
+                                        "benchmarks/experiments/results/runs.jsonl")
+    ap.add_argument("--from-file", help="skip scp, merge this local file instead")
+    ap.add_argument("--apply", action="store_true",
+                    help="write the merge; default is a dry run")
+    a = ap.parse_args()
+
+    if a.from_file:
+        incoming_path = a.from_file
+    else:
+        incoming_path = "/tmp/incoming_runs.jsonl"
+        rc = subprocess.run(["scp", "-q", f"{a.host}:{a.remote}", incoming_path])
+        if rc.returncode != 0:
+            sys.exit(f"scp from {a.host} failed")
+
+    incoming = load(incoming_path)
+    existing = load(CANON)
+    if not incoming:
+        sys.exit("nothing to merge: incoming file is empty")
+    # SKIP ROWS THE STORE ALREADY HOLDS. The bench host's campaign file is
+    # append-only and gets pulled more than once while a campaign runs, and
+    # every earlier merge appended the WHOLE file again: on 2026-09-06 one
+    # campaign file went in three times and every E2 row existed thrice
+    # (BUGS-20260830 F12). Idempotent on the canonical key was never enough;
+    # it has to be idempotent on the row. A row is "already here" when a
+    # stored row has the same canonical key and the same ts_utc.
+    _have = {(key(r), str(r.get("ts_utc"))) for r in existing}
+    _n = len(incoming)
+    incoming = [r for r in incoming if (key(r), str(r.get("ts_utc"))) not in _have]
+    print(f"already present : {_n - len(incoming)} of {_n} incoming rows, skipped")
+    if not incoming:
+        print("nothing new to merge.")
+        return
+
+    before = canonicalise(existing)
+    after = canonicalise(existing + incoming)
+
+    print(f"canonical store : {len(existing)} raw rows, {len(before)} cells")
+    print(f"incoming        : {len(incoming)} raw rows")
+    print(f"after merge     : {len(existing) + len(incoming)} raw rows, "
+          f"{len(after)} cells")
+    superseded = sum(1 for k in after
+                     if k in before and after[k] is not before[k])
+    print(f"cells superseded: {superseded}   new cells: {len(after) - len(before)}")
+    print()
+    report(before, after)
+
+    if len(after) < len(before):
+        sys.exit("\nREFUSING: the merge would reduce the canonical cell count. "
+                 "That can only mean the incoming file is not what it claims.")
+
+    if not a.apply:
+        print("\ndry run. re-run with --apply to write.")
+        return
+
+    stamp = max((str(r.get("ts_utc")) for r in incoming if r.get("ts_utc")),
+                default="unknown")[:19].replace(":", "").replace("-", "")
+    backup = f"{CANON}.before-merge-{stamp}"
+    # THE FIRST 2026-11 LANDING MEETS NO STORE. The October store was retired with its instrument and the freeze refuses its
+    # rows, so the first landing starts from nothing, and shutil.copy2 of a file that does not exist ended it with a
+    # traceback AFTER the pull and the filter. No store means nothing to roll back to: create it and say so.
+    if not os.path.exists(CANON):
+        os.makedirs(os.path.dirname(CANON), exist_ok=True)
+        print(f"no store at {CANON}: creating it (nothing to back up)")
+        backup = None
+    else:
+        shutil.copy2(CANON, backup)
+    # One rollback step, not a museum. These are 6-7 MB each and every one is a
+    # prefix of the next, so eleven of them had accumulated to 73 MB by
+    # 2026-09-19, all fully contained in the canonical file. Keep the newest,
+    # which is the only one that can undo the merge just made, and drop the
+    # rest (delete-superseded-artifacts: the script that makes an artifact
+    # removes what that artifact replaces).
+    # Prune by mtime and exclude the one just written: the stamp comes from the
+    # incoming rows' newest ts_utc, so merging an older campaign file produces a
+    # backup whose NAME sorts early, and a name-sorted prune would delete the
+    # only backup that can undo this merge.
+    _old = [] if backup is None else [f for f in glob.glob(f"{CANON}.before-merge-*")
+                                      if os.path.abspath(f) != os.path.abspath(backup)]
+    _old.sort(key=os.path.getmtime)
+    for _stale in _old:
+        os.remove(_stale)
+    if _old:
+        print(f"pruned {len(_old)} superseded backup(s)")
+    with open(CANON, "a") as f:
+        for r in incoming:
+            f.write(json.dumps(r) + "\n")
+    print(f"\nappended {len(incoming)} rows. " + (f"backup at {os.path.basename(backup)}" if backup else "no backup (new store)"))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Unit tests for queue_lint's wait graph and its container-path rule.
+
+RUN BY THE GATE, not by hand: queue_lint.py calls main() before it lints a
+single script, on the same reasoning as test_result_digest.py -- a test that
+only runs when someone remembers is a comment.
+
+Why this file exists. Twice the lint reported a queue it could
+not actually see:
+
+  * a stage waiting on the previous stage's ALL-DONE MARKER read as waiting on
+    NOTHING, because the graph only knew the `pgrep` form. A marker-chained
+    queue therefore passed the lint while being invisible to its cycle and
+    orphan checks.
+  * inserting `qOA2` broke it again: the pattern was `q[A-Z]+`, so a stage id
+    carrying a digit did not match, and the stage AFTER it read as free to
+    start beside a running one -- which is the two-runners-on-one-host failure
+    the lint exists to prevent.
+
+Both times the scripts were correct and only the lint was blind, which is the
+worst shape: it reports success about a thing it is not looking at. So the
+wait graph gets pinned by fixtures rather than by another pattern fix.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+
+import queue_lint
+
+FAILURES = []
+
+
+def _check(name, got, want):
+    if got != want:
+        FAILURES.append(name)
+        print(f"  FAIL {name}\n       got  {got!r}\n       want {want!r}")
+    else:
+        print(f"  ok   {name}")
+
+
+def _graph(scripts):
+    """Run the wait-graph extraction over a dict of {name: body}."""
+    with tempfile.TemporaryDirectory() as d:
+        paths = []
+        for n, body in scripts.items():
+            p = os.path.join(d, f"{n}.sh")
+            with open(p, "w") as fh:
+                fh.write(body)
+            paths.append(p)
+        edges, _cycles = queue_lint.check_cycles(queue_lint.read_scripts(paths))
+        return edges
+
+
+HEAD = "#!/bin/bash\nset -u\nS=$HOME/STATUS.txt\n"
+
+
+def test_marker_wait():
+    """The current form, including an id with a digit."""
+    g = _graph({
+        "qOA": HEAD,
+        "qOA2": HEAD + 'while ! grep -qx "qOA ALL-DONE" "$S"; do sleep 300; done\n',
+        "qOB": HEAD + 'while ! grep -qx "qOA2 ALL-DONE" "$S"; do sleep 300; done\n',
+    })
+    _check("marker wait, plain id", g.get("qOA2"), {"qOA"})
+    _check("marker wait, id with a digit", g.get("qOB"), {"qOA2"})
+    _check("no wait reads as none", g.get("qOA"), set())
+
+
+def test_pgrep_wait():
+    """The older form: still a wait EDGE (so a cycle through it is seen)."""
+    g = _graph({
+        "qEA": HEAD,
+        "qEB": HEAD + 'while pgrep -x -f "/bin/bash /home/tk/qEA.sh" > /dev/null; do sleep 300; done\n',
+    })
+    _check("pgrep wait", g.get("qEB"), {"qEA"})
+
+
+def test_pgrep_wait_is_flagged():
+    """...but refused as a wait: it holds only for one exact launch line (BUGS F59)."""
+    old = HEAD + 'while pgrep -x -f "/bin/bash /home/tk/qEA.sh" > /dev/null; do sleep 300; done\n'
+    new = HEAD + 'while ! grep -qx "qEA ALL-DONE" "$S"; do sleep 300; done\n'
+    flag = lambda b: [p for p in queue_lint.check_paths_and_python("qEB", b) if "BUGS F59" in p[1]]
+    _check("process-name wait is flagged", len(flag(old)), 1)
+    _check("marker wait is not flagged", flag(new), [])
+
+
+def test_marker_wait_must_be_exact():
+    """`grep -q` finds the marker inside a prose note too; only the whole-line form waits (qA00)."""
+    loose = HEAD + 'while ! grep -q "qEA ALL-DONE" "$S"; do sleep 300; done\n'
+    exact = HEAD + 'while ! grep -qx "qEA ALL-DONE" "$S"; do sleep 300; done\n'
+    flag = lambda b: [p for p in queue_lint.check_paths_and_python("qEB", b) if "without -x" in p[1]]
+    _check("substring marker wait is flagged", len(flag(loose)), 1)
+    _check("whole-line marker wait is not flagged", flag(exact), [])
+    _check("both forms are wait edges", (_graph({"qEB": loose}).get("qEB"), _graph({"qEB": exact}).get("qEB")), ({"qEA"}, {"qEA"}))
+
+
+def test_cycle_is_visible():
+    """A cycle can only be found if both edges are seen."""
+    g = _graph({
+        "qXA": HEAD + 'while ! grep -qx "qXB ALL-DONE" "$S"; do sleep 300; done\n',
+        "qXB": HEAD + 'while ! grep -qx "qXA ALL-DONE" "$S"; do sleep 300; done\n',
+    })
+    _check("cycle edge A->B", g.get("qXA"), {"qXB"})
+    _check("cycle edge B->A", g.get("qXB"), {"qXA"})
+
+
+def test_container_path_through_a_helper():
+    """A helper that wraps a cell runner is cell-bound; one that does not is not.
+
+    The brace-DEPTH scan matters here: `say()` closes on its own line, and a
+    non-greedy regex to the next column-zero brace swallowed the function
+    after it, hiding run_cell and marking say as cell-bound.
+    """
+    good = HEAD + (
+        'say() { echo "$*" >> "$S"; }\n'
+        'run_cell() {\n  python3 runner.py --lanes l2 --scale "$1"\n}\n'
+        'run_cell small "BENCH_DENSE_DATA=/data/dense"\n')
+    bad = HEAD + (
+        'say() { echo "$*" >> "$S"; }\n'
+        'helper() {\n  echo not a cell\n}\n'
+        'helper "BENCH_DENSE_DATA=/data/deep10m"\n')
+    with tempfile.TemporaryDirectory() as d:
+        for n, body in (("qGA", good), ("qGB", bad)):
+            with open(os.path.join(d, f"{n}.sh"), "w") as fh:
+                fh.write(body)
+        probs = {n: [p for p in queue_lint.check_paths_and_python(n, b)
+                     if "container path" in p[1]]
+                 for n, b in (("qGA", good), ("qGB", bad))}
+    _check("container path via a cell-runner helper is fine", probs["qGA"], [])
+    _check("container path via a plain helper is flagged",
+           len(probs["qGB"]) > 0, True)
+
+
+def test_allow_dev_follows_the_baked_wheel():
+    """BENCH_ALLOW_DEV is judged against the wheel the script bakes, as build_images.sh judges it.
+
+    The generator writes 0 for a stable release and 1 for a pre-release. The
+    lint used to demand 1 everywhere, so the first stable-wheel chain (26.10.1)
+    failed fourteen lines on a correct script; and a pre-release stage that
+    lost its 1 must still fail, because that is the qDJ abort the rule exists for.
+    """
+    stable = 'W=dist/arcadedb_embedded-26.10.1-cp312-cp312-manylinux_2_34_x86_64.whl\n'
+    dev = 'W=dist/arcadedb_embedded-26.10.1.dev0-cp312-cp312-manylinux_2_34_x86_64.whl\n'
+
+    def probs(head, line):
+        return [p for p in queue_lint.check_paths_and_python("qZ", HEAD + head + line + "\n")
+                if "build_images.sh" in p[1]]
+
+    _check("stable wheel with BENCH_ALLOW_DEV=0 holds", probs(stable, "BENCH_ALLOW_DEV=0 ./build_images.sh client"), [])
+    _check("stable wheel with BENCH_ALLOW_DEV=1 holds", probs(stable, "BENCH_ALLOW_DEV=1 ./build_images.sh client"), [])
+    _check("stable wheel with no assignment is flagged",
+           len(probs(stable, "./build_images.sh client")), 1)
+    _check("pre-release wheel with BENCH_ALLOW_DEV=1 holds", probs(dev, "BENCH_ALLOW_DEV=1 ./build_images.sh client"), [])
+    _check("pre-release wheel with BENCH_ALLOW_DEV=0 is flagged",
+           len(probs(dev, "BENCH_ALLOW_DEV=0 ./build_images.sh client")), 1)
+    _check("pre-release wheel with no assignment is flagged", len(probs(dev, "./build_images.sh client")), 1)
+    _check("no wheel named: only 1 holds",
+           (len(probs("", "BENCH_ALLOW_DEV=0 ./build_images.sh client")),
+            len(probs("", "BENCH_ALLOW_DEV=1 ./build_images.sh client"))), (1, 0))
+
+
+def main():
+    for t in (test_marker_wait, test_pgrep_wait, test_pgrep_wait_is_flagged, test_marker_wait_must_be_exact, test_cycle_is_visible,
+              test_container_path_through_a_helper, test_allow_dev_follows_the_baked_wheel):
+        print(f"\n== {t.__name__}")
+        t()
+    if FAILURES:
+        print(f"\n{len(FAILURES)} queue_lint test(s) failed: {FAILURES}")
+        return 1
+    print("\nqueue_lint: all tests pass")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

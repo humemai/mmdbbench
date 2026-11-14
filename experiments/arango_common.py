@@ -1,0 +1,286 @@
+"""ArangoDB 3.12 through python-arango, served only.
+
+python-arango is an HTTP client; the engine has no in-process mode, so
+ArangoDB gets one row per table, like MongoDB (2026-09-13, DECISIONS #78).
+Every lane connects through here so the database is fresh, the version is
+the server's own, and the vector index gets the same operating point.
+
+The vector index is FAISS IVF (inverted lists over trained centroids), not
+HNSW: it has no graph degree to match, so l3d_dense.degree_stamp names it
+ivf_flat_no_degree and the row records its operating point instead.
+
+MATCHED BY EFFECT, not by parameter (FAIRNESS F7, 2026-09-13). nLists follows
+FAISS's own guideline for 1M to 10M vectors, "between 4*sqrt(n) and
+16*sqrt(n)" (faiss wiki, "Guidelines to choose an index"), at the low end:
+round(4*sqrt(n)). nProbe is not typed: after the index is built and before
+any timed pass, calibrate_nprobe() binary-searches the smallest nProbe whose
+recall@10 on a held-out slice of 200 queries (fixture queries 1000:1200, never
+the timed 1,000; l3d_dense.calibration_slice) reaches the target, and the target is the
+frozen recall@10 of ArcadeDB's own embedded fp32 arm at the same scale
+(results/runs_paper.csv, the tracked file the container sees at /work).
+Matching our own arm is the neutral choice: a higher target slows them and
+flatters us, a lower one speeds them and flatters them. Everything chosen is
+recorded on the row: ivf_nlists, ivf_nprobe, ivf_recall_target,
+ivf_calibration_recall, ivf_calibration_queries, ivf_calibration_slice.
+
+trainingIterations stays at 25, FAISS's k-means default (niter=25); at
+4*sqrt(n) lists the training set is the whole collection, and the
+calibration recall is the check that the centroids converged well enough.
+"""
+from __future__ import annotations
+
+import math
+import os
+import time
+
+PASSWORD = "dbbenchpass"
+DB = "bench"
+# The starting probe fraction, used only where nothing calibrates (the
+# cross-model lane, which measures no recall) and as the search's first guess.
+NPROBE_FRAC = float(os.environ.get("BENCH_ARANGO_NPROBE_FRAC", "0.125"))
+TRAINING_ITERATIONS = 25
+CALIBRATION_QUERIES = 200
+# Only when the frozen CSV has no ArcadeDB fp32 row at the scale: the DEEP-10M
+# reading at the September pin, the lower of the two published scales.
+FALLBACK_RECALL_TARGET = 0.95
+FROZEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", "runs_paper.csv")
+
+
+# DECISIONS #81. Read from the pinned 3.12.11 server on 2026-09-14, not
+# assumed: /_admin/options answers database.wait-for-sync false,
+# rocksdb.use-fsync false, rocksdb.sync-interval 100, and a freshly created
+# collection reads back waitForSync false. Nothing is set by us; the row
+# records the default. Full evidence block in bench_common.
+# Re-exported from bench_common so at_class() can map it to the strict string
+# like every other engine's, and so one edit changes both (DECISIONS #90).
+import bench_common as _bc
+DURABILITY = _bc.DURABILITY_ARANGO
+
+
+def durability_readback(db, collection):
+    """ASK THE COLLECTION whether waitForSync is on, do not assert it.
+
+    `create_collection(sync=...)` is a request; `properties()["sync"]` is the
+    server's answer, and #81's standard is the answer.
+    """
+    try:
+        on = bool(db.collection(collection).properties().get("sync"))
+    except Exception as e:  # noqa: BLE001
+        return _bc.at_class(DURABILITY) + f" (asserted: read-back failed, {e.__class__.__name__})"
+    return _bc.DURABILITY_ARANGO_STRICT if on else DURABILITY
+
+
+def sync_flag(cls=None):
+    """waitForSync for a collection at this durability class (DECISIONS #90).
+
+    ArangoDB's setting is per collection, so the strict class creates every
+    collection with waitForSync true and the commit then waits for the WAL
+    sync. Nothing is set at the relaxed class: false is the server's own
+    default, read back from /_admin/options and from a freshly created
+    collection (#81's evidence block).
+    """
+    import bench_common
+    return bench_common.journal_ack(cls)
+
+
+def connect(fresh: bool = True, wait_s: int = 120):
+    """(client, bench db, "arangodb:<server version>"), waiting for the server."""
+    from arango import ArangoClient
+    host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+    port = os.environ.get("BENCH_SERVER_PORT", "8529")
+    # request_timeout=None: a 10M vector-index build and an SF10 analytics
+    # query are single HTTP calls that outlive the client's 60 s default.
+    cl = ArangoClient(hosts=f"http://{host}:{port}", request_timeout=None)
+    last = None
+    for _ in range(wait_s * 2):
+        try:
+            sysdb = cl.db("_system", username="root", password=PASSWORD, verify=True)
+            ver = sysdb.version()
+            break
+        except Exception as e:  # noqa: BLE001
+            last = e
+            time.sleep(0.5)
+    else:
+        raise RuntimeError(f"arangodb: no server at {host}:{port} after {wait_s}s: {last}")
+    if fresh and sysdb.has_database(DB):
+        sysdb.delete_database(DB)
+    if not sysdb.has_database(DB):
+        sysdb.create_database(DB)
+    return cl, cl.db(DB, username="root", password=PASSWORD), f"arangodb:{ver}"
+
+
+def ivf_params(n: int) -> tuple[int, int]:
+    nlists = max(4, int(round(4 * math.sqrt(n))))
+    nprobe = max(1, int(math.ceil(nlists * NPROBE_FRAC)))
+    return nlists, nprobe
+
+
+def recall_target(scale: str) -> tuple[float, str]:
+    """(target, where it came from): the median frozen recall@10 of
+    arcadedb_dense_embedded fp32 at this scale, else the fallback."""
+    import csv
+    import statistics
+    env = os.environ.get("BENCH_ARANGO_RECALL_TARGET")
+    if env:
+        return float(env), "env BENCH_ARANGO_RECALL_TARGET"
+    try:
+        with open(FROZEN, newline="") as fh:
+            vals = [float(r["recall_at_10"]) for r in csv.DictReader(fh)
+                    if r.get("lane") == "l3d" and r.get("backend") == "arcadedb_dense_embedded"
+                    and r.get("scale") == scale and r.get("recall_at_10")
+                    and str(r.get("quantization", "fp32")).lower() in ("fp32", "none", "")]
+    except OSError:
+        vals = []
+    if vals:
+        return round(statistics.median(vals), 4), f"runs_paper.csv arcadedb_dense_embedded fp32 {scale} median of {len(vals)}"
+    return FALLBACK_RECALL_TARGET, "fallback constant (no frozen row at this scale)"
+
+
+# THE EXHAUSTIVE-PROBE CHECK (CAMPAIGN section 7 row 66, DECISIONS #156, BUGS F175). On ArangoDB
+# 3.12.11, once an IVF index had 10,000 or more lists every multithreaded query probed ONE list,
+# so a probe of all lists answered at recall 0.0. The calibration escalated to nProbe = nLists,
+# the row finished "ok", and each repetition probed every list for 1.5 h to record nothing.
+# Recall at nProbe = nLists is the one number an index that answers at all must clear, so it is
+# read FIRST, on a few held-out queries, before the search and before any timed pass.
+#
+# The floor is FIXED at 0.5, not the calibration target: a healthy exhaustive probe reads 0.995
+# against a 0.9886 target (one miss of margin; the shipped ground truth has ties), so a floor at
+# the target would stop a sound index. 0.5 is far below any working IVF and far above the 0.0
+# of the defect. The check reads 20 queries because a probe of every list is the slow call.
+EXHAUSTIVE_RECALL_FLOOR = 0.5
+EXHAUSTIVE_CHECK_QUERIES = 20
+
+
+class IndexNotAnswering(RuntimeError):
+    """The vector index answers below the floor even when every list is probed."""
+
+
+def calibrate_nprobe(search_fn, queries, gt, target: float, nlists: int, k: int = 10):
+    """Smallest nProbe in [1, nlists] whose recall@k on `queries` reaches
+    `target`, by binary search (recall is monotone in nProbe for IVF). Returns
+    (nprobe, recall at it). If even nlists misses the target, returns nlists
+    and its recall, and the row shows the shortfall.
+
+    Raises IndexNotAnswering, before the search, when recall at nProbe = nlists
+    on the first EXHAUSTIVE_CHECK_QUERIES queries is below EXHAUSTIVE_RECALL_FLOOR:
+    that is an index that does not answer, and no nProbe repairs it."""
+    def recall(np_, qs=queries, gs=gt):
+        hit = 0
+        for q, g in zip(qs, gs):
+            ids = search_fn(q, k, np_)
+            hit += len(set(ids[:k]) & set(int(x) for x in g[:k]))
+        return hit / (k * len(qs))
+    probe_q = list(queries)[:EXHAUSTIVE_CHECK_QUERIES]
+    probe_g = list(gt)[:EXHAUSTIVE_CHECK_QUERIES]
+    if probe_q:
+        r_all = recall(nlists, probe_q, probe_g)
+        if r_all < EXHAUSTIVE_RECALL_FLOOR:
+            raise IndexNotAnswering(
+                f"arangodb: recall@{k} is {r_all:.4f} at nProbe = nLists = {nlists} on "
+                f"{len(probe_q)} held-out queries, below the floor {EXHAUSTIVE_RECALL_FLOOR}: the index "
+                f"does not answer (3.12.11 probed one list per query from 10,000 lists), so the cell "
+                f"stops here instead of probing every list for each timed query")
+    lo, hi = 1, nlists
+    best = (nlists, None)
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        r = recall(mid)
+        if r >= target:
+            best = (mid, r)
+            hi = mid - 1
+        else:
+            lo = mid + 1
+    if best[1] is None:
+        best = (nlists, recall(nlists))
+    return best
+
+
+def vector_index(col, field: str, dim: int, n: int, metric: str = "l2",
+                 factory: str | None = None) -> tuple[int, int]:
+    """Create the IVF index after the load (it trains on what is there) and
+    return (nLists, nProbe) for the row.
+
+    `factory`, when given, is a FAISS index factory string formatted with
+    `nlists` (the int8 arm's "IVF{nlists},SQ8"): the same IVF partitioning,
+    with the inverted lists holding 8-bit scalar-quantized codes instead of the
+    floats. Accepted, trained and answering on 3.12.11 (laptop probe
+    2026-10-02, 20,000 SIFT vectors at nLists 566: plain IVF recall@10 0.9985
+    at nProbe 64, SQ8 0.9905); the server keeps the string in the index's
+    params, which index_readback returns."""
+    nlists, nprobe = ivf_params(n)
+    params = {"metric": metric, "dimension": dim, "nLists": nlists,
+              "defaultNProbe": nprobe, "trainingIterations": TRAINING_ITERATIONS}
+    if factory:
+        params["factory"] = factory.format(nlists=nlists)
+    col.add_index({"type": "vector", "fields": [field], "params": params})
+    return nlists, nprobe
+
+
+def imported(result, sent: int) -> int:
+    """The number of documents a bulk import CREATED, or a RuntimeError.
+
+    import_bulk answers with counters (created, errors, empty, updated,
+    ignored) and python-arango raises only on a failed request, so a batch
+    the server accepted and partly rejected used to pass in silence, and the
+    row's n_docs (len(train), never a count) could not show it (BUGS F55: the
+    deep10m rows carried n_docs 9,990,000 on the adapter's word alone).
+    """
+    if not isinstance(result, dict):
+        return sent
+    created = int(result.get("created", 0))
+    if created != sent or result.get("errors") or result.get("error"):
+        raise RuntimeError(f"arangodb import_bulk: sent {sent}, created {created}, "
+                           f"errors {result.get('errors')}, details {str(result.get('details'))[:500]}")
+    return created
+
+
+def index_readback(dbname: str, col_name: str) -> dict:
+    """The vector index as the SERVER reports it, hidden fields included:
+    trainingState, errorMessage, resolvedNLists, figures.memory.
+
+    From 3.12.10 the create call succeeds even when training fails and the
+    index stays "unusable" (docs: vector-indexes.md, inBackground), and an
+    index that is not "ready" answers by a linear scan. python-arango's
+    indexes() does not pass withHidden, so this goes to /_api/index directly
+    with the campaign's root credentials.
+    """
+    import requests
+    host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+    port = os.environ.get("BENCH_SERVER_PORT", "8529")
+    r = requests.get(f"http://{host}:{port}/_db/{dbname}/_api/index",
+                     params={"collection": col_name, "withHidden": "true", "withStats": "true"},
+                     auth=("root", PASSWORD), timeout=600)
+    r.raise_for_status()
+    vec = [ix for ix in r.json().get("indexes", []) if ix.get("type") == "vector"]
+    if not vec:
+        return {"trainingState": "absent"}
+    ix = vec[0]
+    shard = next(iter(ix.get("shards", {}).values()), {})
+    return {"trainingState": ix.get("trainingState") or shard.get("trainingState"),
+            "errorMessage": ix.get("errorMessage") or shard.get("error") or "",
+            "resolvedNLists": ix.get("resolvedNLists") or shard.get("resolvedNLists"),
+            "memory": (ix.get("figures") or {}).get("memory"),
+            "params": ix.get("params", {})}
+
+
+# The server's own error number for a query it stopped: ERROR_QUERY_KILLED, 1500, "query killed".
+# It is what an explicit kill and the maxRuntime query option both raise (HTTP 410).
+ERROR_QUERY_KILLED = 1500
+# The stamp a row carries when the analytics queries ran under the server-side limit (DECISIONS #179).
+OLAP_SERVER_LIMIT = "AQL option maxRuntime = the query's budget_s, on the cold pass and every timed iteration"
+
+
+def is_query_killed(exc) -> bool:
+    """True when `exc` is the server saying it killed the query (error number 1500).
+
+    Duck-typed on `error_code`, which python-arango's ArangoServerError carries from the
+    server's `errorNum`, so this module needs no `arango` import and a fake can raise it.
+    """
+    return getattr(exc, "error_code", None) == ERROR_QUERY_KILLED
+
+
+def close(cl):
+    try:
+        cl.close()
+    except Exception:  # noqa: BLE001
+        pass

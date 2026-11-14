@@ -1,0 +1,764 @@
+#!/usr/bin/env python3
+"""L1 tabular lane: OLTP + OLAP suites over a synthetic orders/customers schema.
+
+Backends: arcadedb_embedded, arcadedb_server (HTTP), duckdb (embedded),
+postgres (server). Same seeded dataset per scale; suites per PROTOCOL.md
+(separate OLTP and OLAP, idiomatic config per engine, indexed by default).
+
+Runs INSIDE the bench container; runner.py orchestrates and does resource caps
+and cgroup accounting. Emits one JSON file with the metric block.
+"""
+import argparse
+import json
+import os
+import random
+import statistics
+import sys
+import time
+
+SCALE_ROWS = {"tiny": 50_000, "small": 2_000_000, "medium": 20_000_000,
+              "large": 100_000_000}
+N_CUSTOMERS_FRAC = 0.05
+REGIONS = ["na", "eu", "apac", "latam", "mea"]
+STATUSES = ["placed", "paid", "shipped", "delivered", "returned"]
+OLTP_OPS = 5_000
+OLTP_MIX = (0.6, 0.2, 0.2)  # point read / insert / update
+OLAP_RUNS = 100   # was 7; a p99 needs the samples (2026-09-10, BUGS F29)
+WARMUP_OLTP = 200
+WARMUP_OLAP = 1
+
+
+def gen_rows(n, seed=1234):
+    """Deterministic row stream: (id, customer_id, region, status, amount,
+    quantity, ts_epoch, note)."""
+    rng = random.Random(seed)
+    n_cust = max(1, int(n * N_CUSTOMERS_FRAC))
+    t0 = 1_600_000_000
+    for i in range(n):
+        yield (i, rng.randrange(n_cust), rng.choice(REGIONS), rng.choice(STATUSES),
+               round(rng.uniform(1, 999), 2), rng.randrange(1, 9),
+               t0 + rng.randrange(0, 150_000_000), f"note-{i % 997}")
+
+
+def pct(vals):
+    if not vals:
+        return {}
+    v = sorted(vals)
+    k = lambda q: v[min(len(v) - 1, int(q * len(v)))]
+    return {"mean_ms": round(statistics.mean(v) * 1e3, 4),
+            "p50_ms": round(k(0.50) * 1e3, 4), "p95_ms": round(k(0.95) * 1e3, 4),
+            "p99_ms": round(k(0.99) * 1e3, 4), "n": len(v)}
+
+
+OLAP_SQL = [
+    ("agg_by_region",
+     "SELECT region, count(*) AS c, sum(amount) AS s FROM orders GROUP BY region"),
+    ("top_customers",
+     "SELECT customer_id, sum(amount) AS s FROM orders WHERE status = 'delivered' "
+     "GROUP BY customer_id ORDER BY s DESC LIMIT 10"),
+    ("filtered_avg",
+     "SELECT avg(amount) AS a, avg(quantity) AS q FROM orders "
+     "WHERE region = 'eu' AND quantity >= 4"),
+    ("status_histogram",
+     "SELECT status, count(*) AS c FROM orders GROUP BY status ORDER BY c DESC"),
+    ("range_agg",
+     "SELECT count(*) AS c, sum(amount) AS s FROM orders "
+     "WHERE ts_epoch BETWEEN 1650000000 AND 1700000000"),
+]
+
+
+COLS_SQL = "(id, customer_id, region, status, amount, quantity, ts_epoch, note)"
+
+
+class Base:
+    name = "base"
+    placeholder = "?"
+    # ArcadeDB SQL requires the explicit column list in INSERT; empty for
+    # engines that accept the bare positional form.
+    insert_cols = ""
+
+    def connect(self):
+        raise NotImplementedError
+
+    def close(self):
+        """Release the engine handle. Overridden where there is one to release.
+
+        This lane hard-exits via os._exit(), so before this existed no adapter
+        here was ever shut down and deferred shutdown work was never paid by
+        anyone (#155). Measured on 26.8.1 in the sibling lanes: a clean close
+        settles a roughly fixed 30-87 MB, which is most of a toy database and
+        2.0% of a 1.5 GB one, while an already-settled comparator releases
+        nothing. So any disk figure taken before a close compares our
+        unsettled state against their settled one.
+
+        Every adapter answers close() so a caller never has to know which
+        engines hold a handle.
+        """
+
+    def reopen(self):
+        """Open an ALREADY-BUILT database, with no DDL and no ingest.
+
+        Separate from connect(), which creates the database and issues the
+        schema: calling that twice fails, and if it did not it would time
+        creation rather than opening. This is the quantity a build/query phase
+        split introduces (#154). Adapters with no reopen path leave this alone
+        and the probe records the reason rather than a number it did not get.
+        """
+        raise NotImplementedError(f"{self.name} has no reopen path")
+
+    def exec(self, sql, params=None):
+        raise NotImplementedError
+
+    def query_all(self, sql, params=None):
+        raise NotImplementedError
+
+    def begin_batch(self):
+        pass
+
+    def commit_batch(self):
+        pass
+
+    def schema(self):
+        for s in [
+            "CREATE TABLE orders (id BIGINT, customer_id BIGINT, region VARCHAR(8), "
+            "status VARCHAR(12), amount DOUBLE PRECISION, quantity INT, "
+            "ts_epoch BIGINT, note VARCHAR(32))",
+            "CREATE INDEX idx_orders_id ON orders (id)",
+            "CREATE INDEX idx_orders_customer ON orders (customer_id)",
+        ]:
+            self.exec(s)
+
+    def ingest(self, n, batch=5_000):
+        ph = ",".join([self.placeholder] * 8)
+        sql = f"INSERT INTO orders {self.insert_cols} VALUES ({ph})"
+        buf = []
+        for row in gen_rows(n):
+            buf.append(row)
+            if len(buf) >= batch:
+                self.begin_batch()
+                for r in buf:
+                    self.exec(sql, r)
+                self.commit_batch()
+                buf = []
+        if buf:
+            self.begin_batch()
+            for r in buf:
+                self.exec(sql, r)
+            self.commit_batch()
+
+    # THE THREE OLTP OPERATIONS AND ONE OLAP QUERY ARE HOOKS (2026-09-11), so
+    # an engine without SQL (MongoDB) can join this lane by overriding four
+    # methods while the loops, the mix, the counts and the statistics stay
+    # exactly what the SQL engines run. The defaults reproduce the SQL path.
+    def op_read(self, rid):
+        self.query_all(f"SELECT * FROM orders WHERE id = {self.placeholder}", (rid,))
+
+    def op_insert(self, row):
+        ph = self.placeholder
+        self.begin_batch()
+        self.exec(f"INSERT INTO orders {self.insert_cols} VALUES ({','.join([ph]*8)})", row)
+        self.commit_batch()
+
+    def op_update(self, rid):
+        self.begin_batch()
+        self.exec(f"UPDATE orders SET status = 'paid' WHERE id = {self.placeholder}", (rid,))
+        self.commit_batch()
+
+    def olap_run(self, name, sql):
+        self.query_all(sql)
+
+    def oltp(self, n_rows):
+        rng = random.Random(99)
+        lat = {"read": [], "insert": [], "update": []}
+        next_id = n_rows
+        for i in range(OLTP_OPS + WARMUP_OLTP):
+            r = rng.random()
+            t0 = time.perf_counter()
+            if r < OLTP_MIX[0]:
+                self.op_read(rng.randrange(n_rows))
+                kind = "read"
+            elif r < OLTP_MIX[0] + OLTP_MIX[1]:
+                row = next(gen_rows(1, seed=next_id))
+                self.op_insert((next_id,) + row[1:])
+                next_id += 1
+                kind = "insert"
+            else:
+                self.op_update(rng.randrange(n_rows))
+                kind = "update"
+            if i >= WARMUP_OLTP:
+                lat[kind].append(time.perf_counter() - t0)
+        out = {f"{k}_{m}": v for k, lats in lat.items() for m, v in pct(lats).items()}
+        total = sum(len(v) for v in lat.values())
+        span = sum(sum(v) for v in lat.values())
+        out["oltp_ops_per_s"] = round(total / span, 1) if span else None
+        return out
+
+    def olap(self):
+        out = {}
+        for name, sql in OLAP_SQL:
+            runs = []
+            cold = None
+            for i in range(OLAP_RUNS + WARMUP_OLAP):
+                t0 = time.perf_counter()
+                self.olap_run(name, sql)
+                dt = time.perf_counter() - t0
+                # THE COLD NUMBER WAS ALREADY BEING MEASURED AND THROWN AWAY.
+                # Iteration 0 is the first touch of this query against a cache
+                # that has not seen it, which is exactly the quantity the dense
+                # lane found worth 9x for ArcadeDB, and every lane outside the
+                # two vector ones reported a single figure without saying which
+                # side of that it was. Keeping it costs nothing: no extra query
+                # runs, the timer was already around this call.
+                if i == 0:
+                    cold = dt
+                if i >= WARMUP_OLAP:
+                    runs.append(dt)
+            out[f"olap_{name}_ms"] = round(statistics.mean(runs) * 1e3, 3)
+            out[f"cold_olap_{name}_ms"] = round(cold * 1e3, 3)
+            # p50 and p99 beside the mean the field has always carried; the
+            # page prints these, the mean stays for the rows that predate them.
+            _s = sorted(runs)
+            out[f"olap_{name}_p50_ms"] = round(statistics.median(_s) * 1e3, 3)
+            out[f"olap_{name}_p99_ms"] = round(_s[max(0, int(0.99 * (len(_s) - 1)))] * 1e3, 3)
+        out["olap_total_ms"] = round(sum(v for k, v in out.items()
+                                         if k.startswith("olap_") and k.endswith("_ms")
+                                         and k != "olap_total_ms"
+                                         and not k.endswith(("_p50_ms", "_p99_ms"))), 3)
+        out["olap_total_p50_ms"] = round(sum(v for k, v in out.items()
+                                             if k.startswith("olap_") and k.endswith("_p50_ms")), 3)
+        out["cold_olap_total_ms"] = round(sum(v for k, v in out.items()
+                                              if k.startswith("cold_olap_")
+                                              and k.endswith("_ms")
+                                              and k != "cold_olap_total_ms"), 3)
+        return out
+
+
+class DuckDB(Base):
+    name = "duckdb"
+
+    def connect(self):
+        import duckdb
+        self.con = duckdb.connect("/tmp/l1.duckdb")
+        self.version = duckdb.__version__
+        # Fit the pool to the cpuset, which is the first of the four enumerated
+        # fairness overrides (resource fitting), the same one that sets JVM heap
+        # per tier. DuckDB's default IGNORES the affinity mask and sizes from the
+        # host core count: verified with taskset -c 0-11 on a 16-CPU box, where
+        # affinity reads 12 and DuckDB still defaults to 16. On mini that is 20
+        # threads inside a 12-CPU cpuset, ~1.7x oversubscribed, which costs
+        # DuckDB context switching rather than giving it an advantage. Reading
+        # os.cpu_count() here would reproduce the bug: it returns the host count
+        # too. sched_getaffinity is the only call that sees the cpuset.
+        # BENCH_DUCKDB_THREADS exists only to measure what the default cost:
+        # it reproduces the pre-F6 behaviour (the host count) so the two arms
+        # differ in exactly one variable. Not for use in a published cell.
+        self.threads = int(os.environ.get("BENCH_DUCKDB_THREADS",
+                                          len(os.sched_getaffinity(0))))
+        self.con.execute(f"PRAGMA threads={self.threads}")
+
+    def close(self):
+        self.con.close()
+
+    def reopen(self):
+        import duckdb
+        self.con = duckdb.connect("/tmp/l1.duckdb")
+        # The thread pool is a connection property, so it has to be set again
+        # or the reopened arm silently runs at DuckDB's host-derived default
+        # (20 on mini) inside a 12-CPU cpuset. Same override, same reason as
+        # connect(); F6 fairness applies to a reopened engine too.
+        self.con.execute(f"PRAGMA threads={self.threads}")
+
+    def exec(self, sql, params=None):
+        self.con.execute(sql, params or [])
+
+    def query_all(self, sql, params=None):
+        return self.con.execute(sql, params or []).fetchall()
+
+    def ingest(self, n, batch=5_000):  # idiomatic bulk path
+        import pandas as pd
+        cols = ["id", "customer_id", "region", "status", "amount", "quantity",
+                "ts_epoch", "note"]
+        self.exec("DROP INDEX IF EXISTS idx_orders_id")
+        self.exec("DROP INDEX IF EXISTS idx_orders_customer")
+        chunk = []
+        for row in gen_rows(n):
+            chunk.append(row)
+            if len(chunk) >= 500_000:
+                df = pd.DataFrame(chunk, columns=cols)  # noqa: F841
+                self.con.execute("INSERT INTO orders SELECT * FROM df")
+                chunk = []
+        if chunk:
+            df = pd.DataFrame(chunk, columns=cols)  # noqa: F841
+            self.con.execute("INSERT INTO orders SELECT * FROM df")
+        self.exec("CREATE INDEX idx_orders_id ON orders (id)")
+        self.exec("CREATE INDEX idx_orders_customer ON orders (customer_id)")
+
+
+def sqlite_pragmas(con):
+    """The SQLite settings the user chose (DECISIONS #70), on every SQLite
+    arm: foreign keys enforced (no schema here declares one, so it costs
+    nothing and is stated for completeness), WAL journal, synchronous=NORMAL."""
+    con.execute("PRAGMA foreign_keys=ON")
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous=NORMAL")
+
+
+class SQLite(Base):
+    """SQLite through the standard library, in WAL mode with synchronous=NORMAL
+    (DECISIONS #70): the rollback-journal default fsyncs twice per commit and
+    is the configuration nobody ships; WAL+NORMAL is the common production
+    setting and still durable across process crashes. Disclosed on the page
+    beside ArcadeDB's txWalFlush=0. The comparator an embedded user expects
+    on this table (2026-09-11)."""
+    name = "sqlite"
+
+    def connect(self):
+        import sqlite3
+        self._sqlite3 = sqlite3
+        self.con = sqlite3.connect("/tmp/l1.sqlite")
+        sqlite_pragmas(self.con)
+        self.version = f"sqlite {sqlite3.sqlite_version}"
+
+    def close(self):
+        self.con.close()
+
+    def reopen(self):
+        self.con = self._sqlite3.connect("/tmp/l1.sqlite")
+        sqlite_pragmas(self.con)
+
+    def exec(self, sql, params=None):
+        self.con.execute(sql, params or ())
+
+    def query_all(self, sql, params=None):
+        return self.con.execute(sql, params or ()).fetchall()
+
+    def begin_batch(self):
+        pass                      # sqlite3 opens the transaction on the first write
+
+    def commit_batch(self):
+        self.con.commit()
+
+    def ingest(self, n, batch=5_000):  # idiomatic bulk path: executemany per transaction
+        self.exec("DROP INDEX IF EXISTS idx_orders_id")
+        self.exec("DROP INDEX IF EXISTS idx_orders_customer")
+        sql = f"INSERT INTO orders {COLS_SQL} VALUES (?,?,?,?,?,?,?,?)"
+        chunk = []
+        for row in gen_rows(n):
+            chunk.append(row)
+            if len(chunk) >= 50_000:
+                self.con.executemany(sql, chunk)
+                self.con.commit()
+                chunk = []
+        if chunk:
+            self.con.executemany(sql, chunk)
+            self.con.commit()
+        self.exec("CREATE INDEX idx_orders_id ON orders (id)")
+        self.exec("CREATE INDEX idx_orders_customer ON orders (customer_id)")
+        self.con.commit()
+
+
+class MongoDB(Base):
+    """MongoDB 8.2 over pymongo, one document per order, on a single-node
+    replica set (the server is started with --replSet; connect() initiates it).
+    Indexes on id (unique) and customer_id, like the SQL engines. The OLAP
+    queries are the five aggregation pipelines below, the same questions as
+    OLAP_SQL (2026-09-11)."""
+    name = "mongodb"
+    FIELDS = ["id", "customer_id", "region", "status", "amount", "quantity", "ts_epoch", "note"]
+
+    def connect(self):
+        import pymongo
+        host = os.environ.get("BENCH_SERVER_HOST", "localhost")
+        self._pymongo = pymongo
+        self.cl = pymongo.MongoClient(f"mongodb://{host}:27017/?directConnection=true",
+                                      serverSelectionTimeoutMS=60000)
+        try:
+            self.cl.admin.command("replSetInitiate", {"_id": "rs0", "members": [{"_id": 0, "host": f"{host}:27017"}]})
+        except pymongo.errors.OperationFailure:
+            pass                      # already initiated
+        for _ in range(120):
+            try:
+                if self.cl.admin.command("hello").get("isWritablePrimary"):
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.5)
+        # Reconnect once the node is primary (2026-09-12, laptop runner smoke):
+        # the first client's topology snapshot was taken while the node was
+        # still starting and carried no logicalSessionTimeoutMinutes, so the
+        # first transaction raised "Sessions are not supported by this
+        # MongoDB deployment" before the next heartbeat refreshed it. A fresh
+        # client discovers the primary as such; wait until it reports session
+        # support before handing the connection to the workload.
+        self.cl.close()
+        self.cl = pymongo.MongoClient(f"mongodb://{host}:27017/?directConnection=true",
+                                      serverSelectionTimeoutMS=60000)
+        for _ in range(120):
+            try:
+                self.cl.admin.command("ping")
+                if self.cl.topology_description.logical_session_timeout_minutes is not None:
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.5)
+        self.version = f"mongodb {self.cl.server_info()['version']}"
+        self.db = self.cl["bench"]
+        self.col = self.db["orders"]
+
+    def close(self):
+        self.cl.close()
+
+    def reopen(self):
+        self.connect()
+
+    def schema(self):
+        self.col.drop()
+        self.col.create_index("id", unique=True)
+        self.col.create_index("customer_id")
+
+    def _doc(self, row):
+        return dict(zip(self.FIELDS, row))
+
+    def ingest(self, n, batch=5_000):  # idiomatic bulk path: insert_many, unordered
+        self.col.drop_indexes()
+        buf = []
+        for row in gen_rows(n):
+            buf.append(self._doc(row))
+            if len(buf) >= 50_000:
+                self.col.insert_many(buf, ordered=False)
+                buf = []
+        if buf:
+            self.col.insert_many(buf, ordered=False)
+        self.col.create_index("id", unique=True)
+        self.col.create_index("customer_id")
+
+    def op_read(self, rid):
+        self.col.find_one({"id": rid})
+
+    def op_insert(self, row):
+        self.col.insert_one(self._doc(row))
+
+    def op_update(self, rid):
+        self.col.update_one({"id": rid}, {"$set": {"status": "paid"}})
+
+    PIPELINES = {
+        "agg_by_region": [{"$group": {"_id": "$region", "c": {"$sum": 1}, "s": {"$sum": "$amount"}}}],
+        "top_customers": [{"$match": {"status": "delivered"}},
+                          {"$group": {"_id": "$customer_id", "s": {"$sum": "$amount"}}},
+                          {"$sort": {"s": -1}}, {"$limit": 10}],
+        "filtered_avg": [{"$match": {"region": "eu", "quantity": {"$gte": 4}}},
+                         {"$group": {"_id": None, "a": {"$avg": "$amount"}, "q": {"$avg": "$quantity"}}}],
+        "status_histogram": [{"$group": {"_id": "$status", "c": {"$sum": 1}}}, {"$sort": {"c": -1}}],
+        "range_agg": [{"$match": {"ts_epoch": {"$gte": 1650000000, "$lte": 1700000000}}},
+                      {"$group": {"_id": None, "c": {"$sum": 1}, "s": {"$sum": "$amount"}}}],
+    }
+
+    def olap_run(self, name, sql):
+        list(self.col.aggregate(self.PIPELINES[name], allowDiskUse=True))
+
+
+class Postgres(Base):
+    name = "postgres"
+    placeholder = "%s"
+
+    def connect(self):
+        import time as _time
+        import psycopg
+        host = os.environ["BENCH_SERVER_HOST"]
+        port = os.environ.get("BENCH_SERVER_PORT", "5432")
+        dsn = (f"host={host} port={port} dbname=bench "
+               "user=postgres password=dbbenchpass")
+        # retry across the initdb restart window (belt to the runner's
+        # ready_regex suspenders); untimed — connect_s covers it
+        deadline = _time.time() + 60
+        while True:
+            try:
+                self.con = psycopg.connect(dsn, autocommit=True)
+                break
+            except psycopg.OperationalError:
+                if _time.time() > deadline:
+                    raise
+                _time.sleep(1)
+        self.version = self.con.execute("SHOW server_version").fetchone()[0]
+
+    def exec(self, sql, params=None):
+        self.con.execute(sql, params or None)
+
+    def query_all(self, sql, params=None):
+        return self.con.execute(sql, params or None).fetchall()
+
+    def ingest(self, n, batch=5_000):  # idiomatic COPY
+        with self.con.cursor() as cur:
+            with cur.copy("COPY orders FROM STDIN") as cp:
+                for row in gen_rows(n):
+                    cp.write_row(row)
+
+
+class ArcadeEmbedded(Base):
+    name = "arcadedb_embedded"
+    insert_cols = COLS_SQL
+
+    def index_readback(self):
+        import bench_common      # this retired lane imports nothing else from it
+        return bench_common.arcadedb_index_readback(
+            lambda: self.db.query("sql", "SELECT FROM schema:indexes").to_list())
+
+    def connect(self):
+        import arcadedb_embedded as arcadedb
+        import bench_common      # this retired lane imports nothing else from it
+        heap = os.environ.get("ARCADEDB_HEAP", "4g")
+        # -Xms is left unset; heap_size sets -Xmx from the cell's memory budget (the bindings' documented practice, PROTOCOL section 7).
+        # queryMaxHeapElementsAllowedPerOp: raised from the 500k default so a
+        # high-cardinality top-N-by-aggregate (top_customers, >1.24M groups at
+        # medium) completes instead of aborting. Documented fairness override
+        # (postgres/duckdb have no such cap); the 26.8.1 release auto-scales
+        # this by heap, so it disappears at the final release re-pin. See
+        # ArcadeData/arcadedb#5215.
+        self.db = arcadedb.create_database(
+            "/tmp/l1_arcade",
+            jvm_kwargs={"heap_size": heap,
+                        "jvm_args": "-Darcadedb.queryMaxHeapElementsAllowedPerOp=5000000"})
+        self.version = arcadedb.__version__
+        self._tx = False
+
+    def close(self):
+        self.db.close()
+
+    def reopen(self):
+        """Open the built database again: no create, no DDL, no ingest.
+
+        IN-PROCESS CAVEAT that decides how the number may be read: the JVM is
+        already up, so heap_size is inert here and what is timed is the engine
+        opening its files, not a JVM start. A phase split done as a container
+        restart pays the JVM start too, and that lands on every JVM engine and
+        on none of the others.
+
+        The heap override goes back on for the same reason DuckDB's thread
+        pragma does: it is a documented fairness override (#5215), and an arm
+        that reopened without it would be a different operating point wearing
+        the same label.
+        """
+        import arcadedb_embedded as arcadedb
+        import bench_common      # this retired lane imports nothing else from it
+        heap = os.environ.get("ARCADEDB_HEAP", "4g")
+        self.db = arcadedb.open_database(
+            "/tmp/l1_arcade",
+            jvm_kwargs={"heap_size": heap,
+                        "jvm_args": "-Darcadedb.queryMaxHeapElementsAllowedPerOp=5000000"})
+        self._tx = False
+
+    def schema(self):
+        self.db.command("sql", "CREATE DOCUMENT TYPE orders")
+        for prop, typ in [("id", "LONG"), ("customer_id", "LONG"),
+                          ("region", "STRING"), ("status", "STRING"),
+                          ("amount", "DOUBLE"), ("quantity", "INTEGER"),
+                          ("ts_epoch", "LONG"), ("note", "STRING")]:
+            self.db.command("sql", f"CREATE PROPERTY orders.{prop} {typ}")
+        # The id is only read and updated by equality here, so a hash index
+        # (CAMPAIGN 7 row 68); customer_id is grouped and stays sorted.
+        self.db.command("sql", "CREATE INDEX ON orders (id) UNIQUE_HASH")
+        self.db.command("sql", "CREATE INDEX ON orders (customer_id) NOTUNIQUE")
+
+    def begin_batch(self):
+        self.db.begin()
+        self._tx = True
+
+    def commit_batch(self):
+        self.db.commit()
+        self._tx = False
+
+    def exec(self, sql, params=None):
+        self.db.command("sql", sql, *(params or ()))
+
+    def query_all(self, sql, params=None):
+        return self.db.query("sql", sql, *(params or ())).to_json_list()
+
+    def ingest(self, n, batch=500):
+        # sqlscript batching: one SQL parse + one boundary crossing per batch
+        # (the per-row command() path is the documented anti-pattern)
+        buf = []
+        for row in gen_rows(n):
+            vals = (f"({row[0]},{row[1]},'{row[2]}','{row[3]}',{row[4]},{row[5]},"
+                    f"{row[6]},'{row[7]}')")
+            buf.append(f"INSERT INTO orders (id, customer_id, region, status, "
+                       f"amount, quantity, ts_epoch, note) VALUES {vals}")
+            if len(buf) >= batch:
+                with self.db.transaction():
+                    self.db.command("sqlscript", ";".join(buf))
+                buf = []
+        if buf:
+            with self.db.transaction():
+                self.db.command("sqlscript", ";".join(buf))
+
+
+class ArcadeServer(Base):
+    """ArcadeDB over HTTP (client-server topology)."""
+    name = "arcadedb_server"
+    insert_cols = COLS_SQL
+
+    def connect(self):
+        import lean_http
+        self.rq = lean_http.Session()
+        self.rq.auth = ("root", "dbbenchpass")
+        # WHICH HTTP CLIENT ran, read from the session (CAMPAIGN 7 row 72), on every row this arm writes
+        self.row_extra = {**(getattr(self, "row_extra", None) or {}), **lean_http.row_fields(self.rq)}
+        host = os.environ["BENCH_SERVER_HOST"]
+        port = os.environ.get("BENCH_SERVER_PORT", "2480")
+        self.base = f"http://{host}:{port}/api/v1"
+        # Ask the server what it is. The literal "server:latest" this replaced
+        # was not a version at all: runner.py pins the image by digest, so the
+        # row named a tag nobody had used while the container really ran the
+        # pinned release. F5 checks compare these strings, so a constant here
+        # makes every version check on this lane vacuous, and f8 silently
+        # divided a 26.8.1 embedded row by a "latest" server row for weeks.
+        try:
+            info = self.rq.get(f"http://{host}:{port}/api/v1/server?mode=basic", timeout=30)
+            self.version = "server:" + (info.json().get("version") or "?")
+        except Exception:
+            self.version = "server:unknown"
+
+    def _post(self, kind, sql, params=None):
+        payload = {"language": "sql", "command": sql}
+        if params:
+            payload["params"] = {f"p{i}": p for i, p in enumerate(params)}
+        r = self.rq.post(f"{self.base}/{kind}/bench", json=payload, timeout=300)
+        r.raise_for_status()
+        return r.json().get("result", [])
+
+    def exec(self, sql, params=None):
+        if params:  # positional -> named for the HTTP API
+            for i in range(len(params)):
+                sql = sql.replace("?", f":p{i}", 1)
+        self._post("command", sql, params)
+
+    def query_all(self, sql, params=None):
+        if params:
+            for i in range(len(params)):
+                sql = sql.replace("?", f":p{i}", 1)
+        return self._post("query", sql, params)
+
+    def index_readback(self):
+        import bench_common
+        return bench_common.arcadedb_index_readback(lambda: self.query_all("SELECT FROM schema:indexes"))
+
+    def schema(self):
+        self.exec("CREATE DOCUMENT TYPE orders")
+        for prop, typ in [("id", "LONG"), ("customer_id", "LONG"),
+                          ("region", "STRING"), ("status", "STRING"),
+                          ("amount", "DOUBLE"), ("quantity", "INTEGER"),
+                          ("ts_epoch", "LONG"), ("note", "STRING")]:
+            self.exec(f"CREATE PROPERTY orders.{prop} {typ}")
+        self.exec("CREATE INDEX ON orders (id) UNIQUE_HASH")   # as the embedded arm
+        self.exec("CREATE INDEX ON orders (customer_id) NOTUNIQUE")
+
+    def ingest(self, n, batch=500):
+        # sqlscript batches: many INSERTs per HTTP round-trip
+        buf = []
+        for row in gen_rows(n):
+            vals = (f"({row[0]},{row[1]},'{row[2]}','{row[3]}',{row[4]},{row[5]},"
+                    f"{row[6]},'{row[7]}')")
+            buf.append(f"INSERT INTO orders (id, customer_id, region, status, "
+                       f"amount, quantity, ts_epoch, note) VALUES {vals}")
+            if len(buf) >= batch:
+                self._script(";".join(buf))
+                buf = []
+        if buf:
+            self._script(";".join(buf))
+
+    def _script(self, script):
+        r = self.rq.post(f"{self.base}/command/bench",
+                         json={"language": "sqlscript", "command": script},
+                         timeout=600)
+        r.raise_for_status()
+
+
+# The buffer-pool ablation reuses this adapter unchanged. Only the SERVER
+# container differs (shared_buffers and friends sized from its memory cap
+# instead of left at the image's start-anywhere defaults), and that is set by
+# runner.py's server_cmd, not by anything on this side of the wire. Making it
+# a subclass rather than a second entry pointing at the same class keeps
+# argparse's --backend choices honest: the runner passes the arm's name down,
+# and a name the lane script does not know must fail loudly, which is how this
+# ablation's first smoke run failed in 19 seconds instead of eight hours.
+class PostgresTuned(Postgres):
+    name = "postgres_tuned"
+
+
+BACKENDS = {c.name: c for c in [DuckDB, SQLite, MongoDB, Postgres, PostgresTuned,
+                                ArcadeEmbedded, ArcadeServer]}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backend", required=True, choices=list(BACKENDS))
+    ap.add_argument("--workload", required=True, choices=["oltp", "olap"])
+    ap.add_argument("--scale", default="tiny", choices=list(SCALE_ROWS))
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    n = SCALE_ROWS[args.scale]
+    b = BACKENDS[args.backend]()
+    out = {"lane": "l1", "n_rows": n}
+
+    t0 = time.perf_counter()
+    b.connect()
+    out["connect_s"] = round(time.perf_counter() - t0, 3)
+    out["engine_version"] = getattr(b, "version", "?")
+    out.update(getattr(b, "row_extra", None) or {})
+    # F6 provenance: what the engine's pool was actually sized to, and what the
+    # cpuset allowed. A cell where these differ is oversubscribed; recording it
+    # means a later reader does not have to reconstruct it from the run script.
+    if getattr(b, "threads", None) is not None:
+        out["engine_threads"] = b.threads
+    out["cpuset_cpus"] = len(os.sched_getaffinity(0))
+
+    t0 = time.perf_counter()
+    b.schema()
+    out["schema_s"] = round(time.perf_counter() - t0, 3)
+    # The index kinds the engine built (an ArcadeDB arm; CAMPAIGN 7 row 68), after the schema
+    # exists and before the timed ingest.
+    if hasattr(b, "index_readback"):
+        out.update(b.index_readback())
+
+    t0 = time.perf_counter()
+    b.ingest(n)
+    ing = time.perf_counter() - t0
+    out["ingest_s"] = round(ing, 2)
+    out["ingest_rows_per_s"] = round(n / ing, 1)
+
+    if args.workload == "oltp":
+        out.update(b.oltp(n))
+    else:
+        out.update(b.olap())
+
+    # CLOSE, AND TIME IT (#155). This lane hard-exited without ever shutting an
+    # engine down, so deferred shutdown work was never paid by anyone and the
+    # on-disk state it left was a crash state. A clean close is when
+    # compaction, writeback and WAL truncation happen: measured on 26.8.1 it
+    # settles a roughly fixed 30-87 MB, against nothing at all for an
+    # already-settled comparator. After all measurement, so nothing above moves.
+    _t = time.perf_counter()
+    b.close()
+    out["close_s"] = round(time.perf_counter() - _t, 3)
+
+    # THE JPYPE THIS PROCESS RAN (CAMPAIGN 7 row 73): empty when the arm never imported it.
+    from bench_common import jpype_fields as _jpype_fields
+    out.update(_jpype_fields())
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    json.dump(out, open(args.out, "w"), indent=1)
+    print(f"RESULT {json.dumps(out)[:400]}")
+
+
+if __name__ == "__main__":
+    # Fail fast. JPype's JVM keeps non-daemon threads (AsyncFlush,
+    # TransactionManager) alive after a Python exception, so a crashed cell
+    # would otherwise sit until the runner's multi-hour watchdog. os._exit
+    # skips interpreter cleanup and takes the JVM down with it.
+    try:
+        main()
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)

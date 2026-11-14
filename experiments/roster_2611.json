@@ -1570,14 +1570,6 @@
   },
   {
    "arm": "",
-   "backend": "arangodb_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "arcadedb_dense_embedded",
    "cls": "relaxed",
    "lane": "l3d",
@@ -1586,23 +1578,7 @@
   },
   {
    "arm": "",
-   "backend": "arcadedb_dense_embedded_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "arcadedb_dense_server",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_dense_server_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "deep10m",
@@ -1634,47 +1610,7 @@
   },
   {
    "arm": "",
-   "backend": "memgraph_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "memgraph_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "mongodb_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "mongodb_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_dense_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "deep10m",
@@ -1698,14 +1634,6 @@
   },
   {
    "arm": "",
-   "backend": "qdrant_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "redis_dense",
    "cls": "relaxed",
    "lane": "l3d",
@@ -1715,14 +1643,6 @@
   {
    "arm": "",
    "backend": "sqlite_vec_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "sqlite_vec_dense_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "deep10m",
@@ -1754,14 +1674,6 @@
   },
   {
    "arm": "",
-   "backend": "arangodb_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "arcadedb_dense_embedded",
    "cls": "relaxed",
    "lane": "l3d",
@@ -1770,23 +1682,7 @@
   },
   {
    "arm": "",
-   "backend": "arcadedb_dense_embedded_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "arcadedb_dense_server",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_dense_server_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "small",
@@ -1818,47 +1714,7 @@
   },
   {
    "arm": "",
-   "backend": "memgraph_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "memgraph_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "mongodb_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "mongodb_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_dense_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "small",
@@ -1882,14 +1738,6 @@
   },
   {
    "arm": "",
-   "backend": "qdrant_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "redis_dense",
    "cls": "relaxed",
    "lane": "l3d",
@@ -1899,14 +1747,6 @@
   {
    "arm": "",
    "backend": "sqlite_vec_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "sqlite_vec_dense_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "small",
@@ -1927,1194 +1767,10 @@
    "lane": "l3d",
    "scale": "small",
    "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded_fp32",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded_nocompact",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_server",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_server_fp32",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "pgvector_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "qdrant_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "qdrant_sparse_uint8",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded_fp32",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded_nocompact",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_server",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_server_fp32",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "pgvector_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "qdrant_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "qdrant_sparse_uint8",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded_fp32",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_embedded_nocompact",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_server",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_sparse_server_fp32",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "pgvector_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "qdrant_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "qdrant_sparse_uint8",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "arangodb_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_doc",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_doc_server",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_native",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_native_server",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "cratedb_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "duckdb",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "mongodb",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "postgres_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "redis_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "sqlite",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_ts_server",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "timescaledb",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arangodb_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_doc",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_doc_server",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_native",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_ts_native_server",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "cratedb_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "duckdb",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "mongodb",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "postgres_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "redis_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "sqlite",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_ts_server",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "timescaledb",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc100k",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10k",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc10m",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "doc"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "doc_idx10"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "empty"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "graph"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "graph_gav"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "sparse"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "ts"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_embedded",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "arcadedb_server",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "vector"
-  },
-  {
-   "arm": "",
-   "backend": "surrealdb_lifecycle",
-   "cls": "relaxed",
-   "lane": "lifecycle",
-   "scale": "lc1m",
-   "workload": "vector"
   }
  ],
- "cells_sha256": "8380ad4a5b8b01f9b6e0ed5618f8450bb62938e13ffb9a8aa46a236edc8ca2df",
- "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells)",
+ "cells_sha256": "18fa25478cc884b8b4c21058bd827e0311c8bfccd30c935f907a89d181af1040",
+ "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells, drop_reason)",
  "outside": {
   "prefixes": [
    "neo4j_e2",
@@ -3409,5 +2065,1536 @@
    "scale": "ts1000",
    "workload": "ingest"
   }
- ]
+ ],
+ "profile_dropped": {
+  "cells": [
+   {
+    "arm": "",
+    "backend": "arangodb_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_dense_embedded_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_dense_server_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "memgraph_dense",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "memgraph_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "mongodb_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "neo4j_dense",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "neo4j_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "sqlite_vec_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "deep10m",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arangodb_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_dense_embedded_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_dense_server_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "memgraph_dense",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "memgraph_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "mongodb_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "neo4j_dense",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "neo4j_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "neo4j-memgraph-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "sqlite_vec_dense_int8",
+    "cls": "relaxed",
+    "lane": "l3d",
+    "reason": "quantized-dense",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded_fp32",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded_nocompact",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_server",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_server_fp32",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "pgvector_sparse",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_sparse",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_sparse_uint8",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "medium",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded_fp32",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded_nocompact",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_server",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_server_fp32",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "pgvector_sparse",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_sparse",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_sparse_uint8",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "small",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded_fp32",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_embedded_nocompact",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_server",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_sparse_server_fp32",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "pgvector_sparse",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_sparse",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "qdrant_sparse_uint8",
+    "cls": "relaxed",
+    "lane": "l3s",
+    "reason": "second-list",
+    "scale": "tiny",
+    "workload": "search"
+   },
+   {
+    "arm": "",
+    "backend": "arangodb_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_doc",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_doc_server",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_native",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_native_server",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "cratedb_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "duckdb",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "mongodb",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "postgres_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "redis_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "sqlite",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_ts_server",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "timescaledb",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts100",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arangodb_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_doc",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_doc_server",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_native",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_ts_native_server",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "cratedb_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "duckdb",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "mongodb",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "postgres_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "redis_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "sqlite",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_ts",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_ts_server",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "timescaledb",
+    "cls": "relaxed",
+    "lane": "l4",
+    "reason": "second-list",
+    "scale": "ts1000",
+    "workload": "ingest"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc100k",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10k",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc10m",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "doc"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "doc_idx10"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "empty"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "graph"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "graph_gav"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "sparse"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "ts"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_embedded",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "arcadedb_server",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "vector"
+   },
+   {
+    "arm": "",
+    "backend": "surrealdb_lifecycle",
+    "cls": "relaxed",
+    "lane": "lifecycle",
+    "reason": "second-list",
+    "scale": "lc1m",
+    "workload": "vector"
+   }
+  ],
+  "profile": "paper-2611",
+  "rules": {
+   "neo4j-memgraph-dense": {
+    "source": "experiments/make_2611_stages.py:454",
+    "why": "Neo4j and Memgraph stay in the graph lane (and cross-model where they are); their dense-lane cells are out"
+   },
+   "quantized-dense": {
+    "source": "experiments/make_2611_stages.py:454",
+    "why": "the dense lane is fp32 only: quantized arms are not like-for-like across engines, and quantization is out of the paper's scope (ArcadeDB's own INT8 and BINARY are out by the owner's rule; jvector PQ, BQ and NVQ are studied after the paper)"
+   },
+   "second-list": {
+    "source": "experiments/make_2611_stages.py:454",
+    "why": "sparse, time series and lifecycle are out of scope for the paper (the comparators and the ArcadeDB chain alike)"
+   }
+  }
+ }
 }

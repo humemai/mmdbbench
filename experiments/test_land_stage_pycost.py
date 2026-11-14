@@ -60,4 +60,4 @@ def test_the_landing_commits_what_it_pulled_and_the_path_is_where_export_web_rea
     assert "_pycost = pull_pycost(args.pin," in src
     ew = (HERE / "export_web.py").read_text()
     assert 'OVERHEAD.with_name(f"mini_results_{os.environ[\'BENCH_ENGINE_COMMIT\'].strip()}.csv")' in ew
-    assert L.PYCOST_DIR == HERE.parent / "python-bindings" / "jpype_overhead" / "results"
+    assert L.PYCOST_DIR == HERE.parent / "benchmarks" / "python-bindings" / "jpype_overhead" / "results"

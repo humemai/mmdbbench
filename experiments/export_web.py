@@ -3722,7 +3722,8 @@ def _l4_table(all_rows, twin_rows=()):
 # using this from Python costs, so it belongs on the page. It must NOT be read
 # as continuous with the engine lanes, which is why both tables carry their own
 # conditions saying so.
-PYB = HERE.parent / "python-bindings"
+# the python-bindings artifact stays in the repository this harness came from; its path from the repository root is kept
+PYB = HERE.parent / "benchmarks" / "python-bindings"
 OVERHEAD = PYB / "jpype_overhead" / "results" / "mini_results.csv"
 # A re-measure at a pin lands beside the tracked file, named by the commit,
 # so the bench host's tree stays clean (a modified tracked file aborts every

@@ -9,6 +9,7 @@ Run with `python -m pytest test_moved_paths.py -q` from this directory.
 """
 import ast
 import importlib
+import os
 import re
 import subprocess
 import sys
@@ -29,18 +30,37 @@ HARNESS_NAMES = {p.stem for p in HERE.glob("*.py")}
 # Named in the code and absent from a clean checkout on purpose: raw output and corpora (generated or downloaded), the staged wheels, the
 # runbook of the benchmark host (not copied), the private notes repository, the engine bindings, the sibling site checkout, caches.
 ABSENT_OK = ("results", "data", "docker-wheels", "log", "CAMPAIGN.md", ".notes", "bindings", "humem.ai", "__pycache__", ".venv", ".git")
+# The python-bindings artifact stays in the repository the harness came from. The code keeps naming it by its path from the repository
+# root (benchmarks/python-bindings), so a copy of it put there later is found; nothing else may start with benchmarks/.
+ABSENT_PREFIX = ("benchmarks", "python-bindings")
+
+
+@pytest.fixture
+def isolated_imports():
+    """Importing a module runs its top level: sparse_cliff_probe sets BENCH_SPARSE_SOURCE=bigann, which would reach every later test that
+    starts a subprocess. Put the environment, sys.path and the harness modules this test loaded back as they were."""
+    env, path, before = dict(os.environ), list(sys.path), set(sys.modules)
+    yield
+    os.environ.clear()
+    os.environ.update(env)
+    sys.path[:] = path
+    for loaded in set(sys.modules) - before:
+        if loaded in HARNESS_NAMES:
+            del sys.modules[loaded]
 
 
 def _chain(node):
-    """`HERE / "a" / "b"` gives ("HERE", ["a", "b"]); anything else gives None."""
+    """`HERE / "a" / "b"` gives ("HERE", ["a", "b"]); `HERE.parent / "a"` is the repository root; anything else gives None."""
     parts = []
     while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         if not (isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)):
             return None
         parts.append(node.right.value)
         node = node.left
-    if isinstance(node, ast.Name) and node.id in ("HERE", "REPO") and parts:
+    if parts and isinstance(node, ast.Name) and node.id in ("HERE", "REPO"):
         return node.id, parts[::-1]
+    if parts and isinstance(node, ast.Attribute) and node.attr == "parent" and isinstance(node.value, ast.Name) and node.value.id == "HERE":
+        return "REPO", parts[::-1]
     return None
 
 
@@ -57,7 +77,7 @@ def test_the_copy_is_not_empty():
 
 
 @pytest.mark.parametrize("name", MODULES)
-def test_the_module_imports_and_its_root_constants_point_here(name):
+def test_the_module_imports_and_its_root_constants_point_here(name, isolated_imports):
     try:
         mod = importlib.import_module(name)
     except ModuleNotFoundError as e:
@@ -81,6 +101,8 @@ def test_every_file_a_module_names_exists(name):
             continue
         root_name, parts = c
         if parts[0] in ABSENT_OK or parts[0].startswith(("/", "~")) or any(ch in p for p in parts for ch in "*?{}<>$["):
+            continue
+        if tuple(parts[:2]) == ABSENT_PREFIX or (root_name == "REPO" and parts == ["benchmarks"]):
             continue
         checked += 1
         target = base[root_name].joinpath(*parts)

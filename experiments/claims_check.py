@@ -700,7 +700,8 @@ def _sparse_build(rows, backend, n_docs=8841823):
 # that answers a different question. Swapping P-raw-call for P-SQL moves the
 # published vector ratio from 1.28 to 1.71 while every gate stays green. That
 # is the mistake these claims are here to fail on.
-_PYB = os.path.join(os.path.dirname(M.RESULTS), "..", "python-bindings")
+# the python-bindings artifact stays in the repository this harness came from; its path from the repository root is kept
+_PYB = os.path.join(os.path.dirname(M.RESULTS), "..", "benchmarks", "python-bindings")
 
 
 def _overhead_median(workload, arm):

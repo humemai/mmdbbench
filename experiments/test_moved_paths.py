@@ -24,7 +24,8 @@ sys.path.insert(0, str(HERE))
 THIS = Path(__file__).name
 MODULES = sorted(p.stem for p in HERE.glob("*.py") if not p.name.startswith("test_") and p.name != "conftest.py")
 TESTS = sorted(p.stem for p in HERE.glob("test_*.py") if p.name != THIS)
-SCRIPTS = sorted(HERE.glob("*.sh"))
+TOOL_SOURCES = sorted(f"tools/{p.stem}" for p in (HERE / "tools").glob("*.py"))     # the audit tools and their tests, read by name only
+SCRIPTS = sorted(HERE.glob("*.sh")) + sorted((HERE / "tools").glob("*.sh"))
 HARNESS_NAMES = {p.stem for p in HERE.glob("*.py")}
 
 # Named in the code and absent from a clean checkout on purpose: raw output and corpora (generated or downloaded), the staged wheels, the
@@ -73,7 +74,7 @@ def test_the_harness_sits_one_level_below_the_repository_root():
 
 def test_the_copy_is_not_empty():
     # a layout test that finds nothing passes for the wrong reason
-    assert len(MODULES) > 50 and len(TESTS) > 50 and len(SCRIPTS) >= 5
+    assert len(MODULES) > 50 and len(TESTS) > 50 and len(SCRIPTS) >= 5 and len(TOOL_SOURCES) == 5
 
 
 @pytest.mark.parametrize("name", MODULES)
@@ -94,7 +95,7 @@ def test_the_module_imports_and_its_root_constants_point_here(name, isolated_imp
             assert got.resolve() == want, f"{name}.{attr} is {got}, expected {want}"
 
 
-@pytest.mark.parametrize("name", MODULES + TESTS)
+@pytest.mark.parametrize("name", MODULES + TESTS + TOOL_SOURCES)
 def test_every_file_a_module_names_exists(name):
     tree = ast.parse((HERE / f"{name}.py").read_text(encoding="utf-8"))
     base = {"HERE": HERE, "REPO": ROOT}
@@ -115,7 +116,7 @@ def test_every_file_a_module_names_exists(name):
     assert not missing, f"{name} names files that are not in the repository: {sorted(set(missing))}"
 
 
-@pytest.mark.parametrize("name", MODULES + TESTS)
+@pytest.mark.parametrize("name", MODULES + TESTS + TOOL_SOURCES)
 def test_no_lookup_is_left_at_the_old_depth(name):
     """In the old layout the root was parents[1] and a sibling checkout parents[2]; here they are parent and parents[1]."""
     src = (HERE / f"{name}.py").read_text(encoding="utf-8")

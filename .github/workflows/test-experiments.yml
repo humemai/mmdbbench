@@ -7,12 +7,14 @@ on:
   pull_request:
     paths:
       - 'experiments/**'
+      - 'benchmarks/**'
       - '.github/workflows/test-experiments.yml'
   push:
     branches:
       - main
     paths:
       - 'experiments/**'
+      - 'benchmarks/**'
       - '.github/workflows/test-experiments.yml'
   workflow_dispatch:
 

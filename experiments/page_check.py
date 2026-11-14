@@ -191,11 +191,15 @@ def _check_dense_10m(payload):
     # A page of two builds names the in-process ArcadeDB arms with their build ("ArcadeDB (embedded, fp32, JVM build)") and the paper table prints
     # them as "ArcadeDB (emb, fp32) [jvm]": rows are keyed by (label without the build, build) (humemai/mmdbbench#68).
     rows = {}
+    _outcome = set()      # labels whose page row is an OUTCOME row (a cell that failed or was censored): a declaration, nothing to compare (#89)
     for table in payload.get("tables", []):
         if table["id"] != "l3d":
             continue
         for e in table["entries"]:
             if e.get("scale") == "deep10m":
+                if e.get("outcome"):
+                    _outcome.add(_AI.strip_build(e["backend"]))
+                    continue
                 _b = e.get("build") if _AI.build_in_label(e["backend"]) else None
                 rows[(_AI.strip_build(e["backend"]), _b)] = e["metrics"]
     if not rows:
@@ -223,6 +227,9 @@ def _check_dense_10m(payload):
             continue
         _builds = sorted((b for (l, b) in rows if l == label), key=str)
         if not _builds:
+            if label in _outcome:
+                print(f"  declared {label:26s} the page row is an outcome row (failed or censored): nothing to compare")
+                continue
             print(f"  ABSENT {label:28s} no such page row")
             bad += 1
             continue
@@ -1461,9 +1468,13 @@ def _check_build_pair(payload, rows):
         return 0
     for t in payload.get("tables", []):
         arms = collections.defaultdict(dict)
+        outcome_builds = collections.defaultdict(set)    # (bare label, size) -> builds that have an OUTCOME row (failed or censored), a declaration (#89)
         absent = {str(a.get("backend")) for a in (t.get("declared_absences") or []) if not a.get("column")}
         for e in t.get("entries", []):
             if not (e.get("is_arcadedb") and _AI.built({"backend": e.get("backend_key") or ""})):
+                continue
+            if e.get("outcome"):
+                outcome_builds[(_AI.strip_build(str(e["backend"])), str(e.get("scale")))].add(e.get("build"))
                 continue
             b = e.get("build")
             if b not in _AI.BUILDS:
@@ -1482,6 +1493,9 @@ def _check_build_pair(payload, rows):
             (have,) = got
             miss = [b for b in _AI.BUILDS if b != have][0]
             mlabel = _AI.build_label(bare, miss)
+            if miss in outcome_builds.get((bare, size), ()):
+                print(f"  declared {mlabel} on {t['id']} at {size}: an outcome row (failed or censored)")
+                continue
             if mlabel in absent or bare in absent or EW_family(bare) in absent:
                 print(f"  declared {mlabel} on {t['id']} at {size}: not measured")
                 continue

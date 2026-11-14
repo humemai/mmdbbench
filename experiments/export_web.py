@@ -5734,7 +5734,8 @@ def _censored_entries(table):
         # "SurrealDB (embedded)" twice, one for documents with ten indexes and
         # one for the graph, and a reader could not tell which was which.
         _lc = lane == "lifecycle"
-        out.append({"backend": _with_build(_lifecycle_row_label(backend, w) if _lc else display_name(backend), build),
+        out.append({"backend": _with_build(_lifecycle_row_label(backend, w) if _lc
+                                           else ((_dense_arm_label(backend) if lane == "l3d" else None) or display_name(backend)), build),
                     "build": build or None,
                     **({"engine": _lifecycle_engine(backend)} if _lc else {}),
                     "backend_key": backend,
@@ -5747,6 +5748,15 @@ def _censored_entries(table):
                     "outcome": kind,
                     "metrics": {c: {"text": mark} for c in cols}})
     return out, marks
+
+
+def _dense_arm_label(backend):
+    """The label the dense table prints for an arm, with its precision (DENSE_10M_ARMS: "ArcadeDB (server, fp32)"), or None. An outcome row (a cell
+    that failed or was censored) takes it, so the cell and its overlay twin are ONE arm to the page and to the build-pair check (humemai/mmdbbench#89)."""
+    for _arm, _bk, _label, _ours in DENSE_10M_ARMS:
+        if _bk == backend:
+            return _label
+    return None
 
 
 def _override_backend_keys(table):
@@ -6299,7 +6309,8 @@ def _censored_notes(table_id):
                     f"inside its budget and was not retried, so there is no row. What it reported: "
                     f"{secs}")
             pins = [scale_label(lane, scale), str(secs)]
-        merged.setdefault((kind, tail, tuple(pins)), []).append(_with_build(display_name(backend), _build))
+        merged.setdefault((kind, tail, tuple(pins)), []).append(
+            _with_build((_dense_arm_label(backend) if lane == "l3d" else None) or display_name(backend), _build))   # the label of the outcome row (#89)
 
     # ONE SENTENCE FOR THE ENGINES THAT HAVE THE SAME THING TO SAY. Three
     # engines were censored at TPC-H SF10 and the page printed three sentences

@@ -94,3 +94,20 @@ def test_the_default_landing_still_owes_all_eight_labels():
     _paper("Qdrant (fp32)")
     checked, bad, text = _run([_entry("Qdrant (fp32)")])
     assert bad == 7 and text.count("ABSENT") == 7, text
+
+
+@_isolated
+def test_an_outcome_row_of_a_failed_build_is_a_declaration_and_not_a_missing_cell():
+    """humemai/mmdbbench#89: `ArcadeDB (server, fp32, native build)` failed; its outcome row has text cells, so there is nothing to compare."""
+    _paper("ArcadeDB (srv, fp32) [jvm]")
+    failed = dict(_entry("ArcadeDB (server, fp32, native build)", "native"), outcome="failed", metrics={"cold p50 ms": {"text": "failed"}})
+    checked, bad, text = _run([_entry("ArcadeDB (server, fp32, JVM build)", "jvm"), failed], arms="arcsrv")
+    assert bad == 0 and "ABSENT" not in text, text
+
+
+@_isolated
+def test_an_arm_with_only_an_outcome_row_is_declared_on_the_page_and_not_absent():
+    _paper("Qdrant (fp32)")
+    only = dict(_entry("ArcadeDB (server, fp32, native build)", "native"), outcome="failed", metrics={"cold p50 ms": {"text": "failed"}})
+    checked, bad, text = _run([_entry("Qdrant (fp32)"), only], arms="arcsrv,qdrant")
+    assert bad == 0 and "ABSENT ArcadeDB (server, fp32)" not in text, text

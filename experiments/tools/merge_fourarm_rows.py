@@ -46,7 +46,8 @@ def local_name(i, base):
     return f"{i}-{os.path.basename(base)}.jsonl"
 
 
-def merge(paths):
+def merge(paths, dropped=None):
+    """(rows, seen). `dropped` (a list) receives (dropped_row, kept_row, reason) for every row the merge discards: G2 of landing_gates.py refuses a drop whose two rows differ in an identity field."""
     first, best, order, seen = {}, {}, [], {}
     for path in paths:
         n = 0
@@ -70,7 +71,11 @@ def merge(paths):
             clean = not r.get("error")
             cur = best.get(rid)
             if cur is None or clean or not cur[0]:   # a clean row always replaces; an error row replaces only another error row
+                if cur is not None and dropped is not None:
+                    dropped.append((cur[1], r, "a row superseded by a later clean row of the same key" if clean else "an error row superseded by a later error row"))
                 best[rid] = (clean, r)
+            elif dropped is not None:
+                dropped.append((r, cur[1], "an error row dropped: a clean row of the same key exists"))
         seen[path] = n
     rows = [best[rid][1] for rid in order]
     return rows, seen
@@ -99,7 +104,15 @@ def main():
                 srcs.append(dst)
         if not srcs:
             sys.exit("no source")
-        rows, seen = merge(srcs)
+        pairs = []
+        rows, seen = merge(srcs, dropped=pairs)
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        import landing_gates as G              # G2 (humemai/mmdbbench#78): every drop is reported and written beside the output; a drop that is not a retry is refused
+        bad = G.drop_problems(pairs)
+        if bad:
+            sys.exit("REFUSING: the merge would drop " + str(len(bad)) + " row(s) that are not a retry of one row:\n  " + "\n  ".join(bad[:10]))
+        sha = G.write_dropped(a.out + ".dropped_rows.jsonl", [G.drop_record(d, k, why) for d, k, why in pairs])
+        print(f"dropped rows: {len(pairs)} listed in {a.out}.dropped_rows.jsonl, sha256 {sha}", file=sys.stderr)
         with open(a.out, "w") as f:
             for r in rows:
                 f.write(json.dumps(r) + "\n")

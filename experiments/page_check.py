@@ -1151,7 +1151,7 @@ NOT_PRINTED = [
     (r"^arangodb_ivf_",
      "how ArangoDB's IVF vector index was calibrated before the timed cell (the probe count it chose, the recall it reached, the queries and the time it "
      "took): the settings of that arm, recorded with the row and not a result column"),
-    (r"^(cratedb_(heap_max_mib|processors|refresh_interval_ms|replicas|shards|translog_sync_interval_ms)|redis_(index_docs|io_threads|json_module|"
+    (r"^(cratedb_(heap_max_mib|processors|refresh_interval_ms|replicas|shards|translog_sync_interval_ms|crud_refresh_interval_ms|crud_shards)|redis_(index_docs|io_threads|json_module|"
      r"maxmemory|protocol|search_module|search_workers)|server_(cpus|max_heap_bytes))$",
      "the settings an engine or its server ran with, read back from the engine and recorded on each row (PROTOCOL.md section 7): conditions of the "
      "run, not results; the tables' sentences name the overrides"),

@@ -25,7 +25,7 @@ This directory is filled in steps, so that each step is one pull request that a 
 The harness has its own unit tests. They need no Docker, no data and no benchmark host: they fake docker and read the fixtures in this directory. From this directory:
 
 ```
-uv run --no-project --with pytest --with numpy --with pandas --with pyarrow --with requests python -m pytest -q -p no:cacheprovider .
+uv run --no-project --with pytest --with numpy --with pandas --with pyarrow --with requests python -m pytest -q -rs -p no:cacheprovider .
 ```
 
 `.github/workflows/test-experiments.yml` runs the same command on every change under `experiments/`. `test_moved_paths.py` checks that every module imports and that every file the code names exists in this layout.

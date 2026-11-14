@@ -4,8 +4,8 @@ MMDBBench is an open benchmark of multi-model databases: databases that serve ta
 that produced it, and keeps the history, so a number can always be traced and a change can always be seen.
 
 !!! note "Status"
-    The protocol version is `2026-11`, in development until its first release; the first published results will be measured with it. The benchmark code is still developed in
-    [humemai/arcadedb-embedded-python](https://github.com/humemai/arcadedb-embedded-python) (`benchmarks/`) and moves into this repository after its first paper. The live results are on
+    The protocol version is `2026-11`, in development until its first release; the results on the project page are measured with it. The benchmark code is in [`experiments/`](https://github.com/humemai/mmdbbench/tree/main/experiments) of this repository, copied in steps from
+    [humemai/arcadedb-embedded-python](https://github.com/humemai/arcadedb-embedded-python), which is retiring; new work goes here. The live results are on
     the [project page](https://humem.ai/research/mmdbbench); these documents describe how they are produced.
 
 ## Lanes

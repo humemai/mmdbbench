@@ -1106,6 +1106,10 @@ DENSE_10M_ARMS = [
     ("arango_int8", "arangodb_dense_int8", "ArangoDB (int8)", False),
     ("falkordb", "falkordb_dense", "FalkorDB (fp32)", False),
     ("ladybug", "ladybug_dense", "LadybugDB (fp32)", False),
+    # The n=3 landing: both are on the lane roster and in runner.MP_LABELS; Redis has overlay files at both sizes, CrateDB timed out at the small tier
+    # (test_dense_arms_roster.py reads the three lists, so an arm that is on one and not on the other is a test failure).
+    ("redis", "redis_dense", "Redis (fp32)", False),
+    ("cratedb", "cratedb_dense", "CrateDB (fp32)", False),
 ]
 
 

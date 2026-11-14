@@ -592,7 +592,11 @@ def load_canonical(apply_corpus=True):
               + ", ".join(f"{b} {n}" for b, n in sorted(OFFICIAL_CLIENT_SET_ASIDE.items(), key=str)))
     # BOTH BUILDS BY DEFAULT: the freeze keeps the native and the JVM rows (the key above carries the build, so neither replaces the
     # other) and the exporter shows them as two arms. BENCH_ENGINE_BACKEND=native|jvm freezes one build on purpose.
-    return _AI.select_build(list(best.values()))
+    # A `.postN` WHEEL IS ITS RELEASE IN THE FREEZE (humemai/mmdbbench#53, DECISIONS #327). The key above does not carry the version, so a rerun row
+    # of a post wheel replaces the 26.11.1 row of its cell and repetition on ts_utc. The page and the paper never name the rerun, so the frozen copy
+    # of such a row names the release (arm_identity.name_post_wheels: only an in-process ArcadeDB row, only while the release's rows name one engine
+    # commit); the raw runs.jsonl keeps engine_version as the harness wrote it, and the wheel columns stay on the frozen row.
+    return _AI.select_build(_AI.name_post_wheels(list(best.values())))
 
 
 def cells(rows, key):

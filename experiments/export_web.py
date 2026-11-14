@@ -46,6 +46,8 @@ RESULTS = _PI.results_dir()
 
 from runner import BACKENDS, MEM_BY_SCALE, HEAP_BY_SCALE  # noqa: E402  (path set above)
 import bench_common  # noqa: E402
+import arm_identity as _AI  # noqa: E402
+import engine_pin as _EP  # noqa: E402
 
 # THE PQ ARMS CAN HAVE ROWS EVEN WHEN THEY ARE NOT MEASURING. runner registers them only under BENCH_DENSE_PQ=1 (a stage
 # must not start a PQ cell by accident), but a freeze that holds their rows is read here without that variable, and their
@@ -281,6 +283,7 @@ def _one_version(rs, where):
     is indistinguishable from a correct row to every other gate -- the payload
     carries one string either way, so version_consistency_check sees nothing.
     """
+    _AI.refuse_pooled_builds(rs, where)   # (engine_version, build) is the arm: native and jvm rows of one release are two arms
     seen = {str(r.get("engine_version")) for r in rs if r.get("engine_version")}
     if len(seen) > 1:
         raise SystemExit(
@@ -1094,6 +1097,24 @@ DENSE_10M_ARMS = [
 ]
 
 
+def _overlay_files_by_build(root, stem, tail, backend_key):
+    """[(build, files)] for one overlay arm: "" for a comparator or a served arm and for a page that names no build, else "native" and
+    "jvm" read from the first pass of each file (arm_identity.build_of; an unstamped ArcadeDB file is the JVM build). The native
+    files carry `_native` after the stem; a glob on the plain stem never matches them."""
+    names = sorted(root.glob(f"{stem}{tail}")) + sorted(root.glob(f"{stem}_native{tail}"))
+    if not (_SPLIT and _AI.built({"backend": backend_key})):
+        return [("", sorted(root.glob(f"{stem}{tail}")))] if names else []
+    got = {}
+    for fp in names:
+        try:
+            passes = json.loads(fp.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        if passes:
+            got.setdefault(_AI.build_of(dict(passes[0], backend=backend_key)), []).append(fp)
+    return [(b, got[b]) for b in ("native", "jvm") if b in got]
+
+
 def _dense_overlay_entries(scale="deep10m"):
     """The DEEP-10M tier, every engine, both passes.
 
@@ -1131,10 +1152,14 @@ def _dense_overlay_entries(scale="deep10m"):
     if not root.is_dir():
         return []
     out = []
+    # THE OVERLAY BELONGS TO THE BUILD THAT PRODUCED IT. The driver stamps engine_backend on every pass it writes (run_conditions); a
+    # native run's files are mp_<arm>_native_b<k>.json beside the JVM build's mp_<arm>_b<k>.json, and the build is read from the
+    # file's own content. A file without the field is the JVM build, like an old row (arm_identity.build_of).
+    _units = []
     for arm, backend_key, label, ours in arms:
-        hits = sorted(root.glob(f"mp_{arm}_b*.json"))
-        if not hits:
-            continue
+        for _ob, hits in _overlay_files_by_build(root, f"mp_{arm}", "_b*.json", backend_key):
+            _units.append((arm, backend_key, _with_build(label, _ob), ours, hits, _ob))
+    for arm, backend_key, label, ours, hits, _ob in _units:
         cold, warm, recall, build, peak, ver = [], [], [], [], [], set()
         for h in hits:
             passes = json.loads(h.read_text(encoding="utf-8"))
@@ -1207,10 +1232,10 @@ def _dense_overlay_entries(scale="deep10m"):
         # served arm's multipass file sees only the client container (3.6 GiB
         # against the pair's 28), and no file carries disk. Same build, same
         # envelope; the overlay's own peak is the fallback.
-        _pk = _campaign_stat(_cb, scale, MEM_PEAK_FIELD) or _agg(peak, MEM_PEAK_FIELD)
+        _pk = _campaign_stat(_cb, scale, MEM_PEAK_FIELD, build=_ob) or _agg(peak, MEM_PEAK_FIELD)
         if _pk is not None:
             metrics["peak memory GiB"] = _pk
-        _dk = _campaign_stat(_cb, scale, "disk_data_mb")
+        _dk = _campaign_stat(_cb, scale, "disk_data_mb", build=_ob)
         if _dk is not None:
             metrics["disk GiB"] = _dk
         # Only OUR arms carry a version string; the comparator containers do
@@ -1224,6 +1249,7 @@ def _dense_overlay_entries(scale="deep10m"):
             v = _campaign_engine_string(_cb)
         out.append({
             "backend": label,
+            "build": _ob or None,
             "backend_key": _cb,
             "is_arcadedb": ours,
             # NOT `arm == "int8"`. arm is a FILENAME token, and only ArcadeDB's
@@ -1276,7 +1302,7 @@ def _peak_mem(r):
     return v if v is not None else _num(r.get(MEM_PEAK_FALLBACK))
 
 
-def _campaign_stat(backend, scale, field, lanes=("l3d", "l3s")):
+def _campaign_stat(backend, scale, field, lanes=("l3d", "l3s"), build=""):
     """_agg of one field over the newest campaign row per rep for (backend,
     scale): the overlay files (multipass) carry no disk reading, but the
     campaign cell of the same arm in the same envelope does, and the on-disk
@@ -1290,6 +1316,8 @@ def _campaign_stat(backend, scale, field, lanes=("l3d", "l3s")):
                 except Exception:
                     continue
                 if r.get("backend") != backend or r.get("scale") != scale or r.get("error"):
+                    continue
+                if build and _arm_build(r) != build:      # one build's cell, never the other's
                     continue
                 # PAGE-SPEC 4a rule 3: settled=False blocks publication of
                 # the DISK reading. This path feeds the dense and sparse disk
@@ -1416,6 +1444,24 @@ def _agg(rows, field, across_scales=False):
 #
 # The headline query is the FIRST one in each list, so the p99 belongs to the query the section leads with.
 _FROZEN_ROWS = []   # set by main() once the CSV is read; the column switches read it
+# TWO BUILDS, TWO ARMS (26.11.1). True when some in-process ArcadeDB row ran on the native build: every such arm then names its build and
+# the two builds sit side by side (arm_identity.splits_page). False for a freeze of old rows, which render as they always did.
+_SPLIT = False
+
+
+def _arm_build(r):
+    """"native" or "jvm" for an in-process ArcadeDB row of a split page, else "" (served arms, comparators, an unsplit page)."""
+    return (_AI.build_of(r) or "") if (_SPLIT and _AI.built(r)) else ""
+
+
+def _with_build(label, build):
+    """The arm label with its build ("ArcadeDB (embedded, native build)"), or the label as it is when the arm has no build."""
+    return _AI.build_label(label, build) if build else label
+
+
+def _strip_build(label):
+    """The label without its build suffix: the key the lane's own tables (order lists, deployments) are written in."""
+    return _AI.strip_build(label)
 OCT_TABLE_METRICS = {
     # Both document tables come from this one lane spec and are split by
     # _restructure_tables; the union of their columns lives here.
@@ -1799,6 +1845,65 @@ def _declare_absence(table_id, backend, column, kind, why):
         _DECLARED_ABSENCES[table_id].append(rec)
 
 
+def _declare_missing_builds(tables):
+    """A build with no row where the other build has one is printed as not measured, never left out.
+
+    On a split page (arm_identity.splits_page) every in-process ArcadeDB arm should stand twice, once per build. Where one build has
+    entries at a size and the other has none, the missing arm is declared (kind "not measured", whole row) and one sentence per table
+    and build names the arms and sizes. A deliberate one-build freeze (BENCH_ENGINE_BACKEND) declares nothing: the other build was
+    left out on purpose, and the arm labels still say which build the page is.
+    """
+    if not _SPLIT or _AI.wanted_build():
+        return
+    for t in tables:
+        have = collections.defaultdict(set)      # (label without build, size) -> builds present
+        for e in t.get("entries", []):
+            if e.get("build") in _AI.BUILDS:
+                have[(_strip_build(str(e["backend"])), str(e.get("scale_label") or e.get("scale")))].add(e["build"])
+        missing = collections.defaultdict(lambda: collections.defaultdict(list))   # build -> arm -> sizes
+        for (label, size), builds in sorted(have.items()):
+            for b in _AI.BUILDS:
+                if b not in builds:
+                    missing[b][label].append(size)
+        for b in _AI.BUILDS:
+            arms = missing.get(b)
+            if not arms:
+                continue
+            parts, vals = [], []
+            for label, sizes in sorted(arms.items()):
+                arm = _with_build(label, b)
+                _declare_absence(t["id"], arm, None, "not measured",
+                                 f"{arm} was not measured at {_join_and(sizes)}.")
+                parts.append(f"{arm} at {_join_and(sizes)}")
+                vals += [arm, *sizes]
+            t.setdefault("conditions", [])
+            note = _gen(f"The {_AI.BUILD_NAMES[b]} was not measured for {_join_and(parts)}, so those rows are absent.", *vals)
+            if note not in t["conditions"]:
+                t["conditions"].append(note)
+
+
+def _disclose_server_builds(tables):
+    """Under every table that holds a native-build server arm: both server arms are upstream's official images (the JVM server image and the
+    native-image server), run with the same server settings that each server reports back at start, and the one disclosed difference is the
+    CPU baseline each artifact was compiled for (read from the rows' `cpu_baseline`, never typed here)."""
+    if not _SPLIT or _AI.wanted_build():
+        return
+    nat = next((r.get("cpu_baseline") for r in _FROZEN_ROWS if _AI.served(r) and _AI.build_of(r) == "native" and r.get("cpu_baseline")), None)
+    wheel = next((r.get("cpu_baseline") for r in _FROZEN_ROWS if _AI.in_process(r) and _AI.build_of(r) == "native" and r.get("cpu_baseline")), None)
+    if not nat:
+        return
+    wheel_part = f" and the native wheel (the embedded arm) as {wheel}" if wheel else ""
+    for t in tables:
+        if not any(e.get("build") == "native" and "server" in str(e.get("backend")) for e in t.get("entries", [])):
+            continue
+        note = _gen(f"Both server arms are the official ArcadeDB server images, one built for the JVM and one compiled to a native executable, "
+                    f"started with the same server settings, which each server reports back when it starts. The CPU baselines differ: "
+                    f"the native server image is {nat}{wheel_part}, and the JVM server compiles for the CPU it runs on.", nat, *([wheel] if wheel else []))
+        t.setdefault("conditions", [])
+        if note not in t["conditions"]:
+            t["conditions"].append(note)
+
+
 def _withhold_cells(tables):
     """Take out the cells whose answer was wrong, and say so on the table."""
     notes = collections.defaultdict(list)
@@ -1827,7 +1932,7 @@ def _withhold_cells(tables):
 # stale list. A tier with no message half covers Person and KNOWS only and is not concerned.
 _GAV_TYPES_FIELD = "gav_types"
 _GAV_SUPERTYPE = "Message"
-_GAV_SUPERTYPE_LISTED_FROM = (26, 11, 1)
+_GAV_SUPERTYPE_LISTED_FROM = bench_common.GAV_SUPERTYPE_LISTED_FROM   # one release for the lane that builds the view and this refusal
 
 
 def _gav_message_rows(rows):
@@ -2345,11 +2450,46 @@ def _cpu_idle_note(rows):
     return text
 
 
+def _native_server_equiv_note(tables, rows=None):
+    """The sentences that disclose the native server image's engine commit (one per release pair a row used), [] when no row used it.
+
+    The release has two engine commits (DECISIONS #256): the JVM image, the jars and both wheels are built at the pin, and the official native
+    server image is built one commit later, which changes version strings only. A served native row stamps `server_engine_commit_equiv` (the
+    commit the server reported) only when the runner accepted that pair, so the sentence is written when a row printed in some table carries the
+    field, and from engine_commit_equiv.json (the registry the runner, arm_identity and provenance_check also read) for the release and the
+    commits. A row that claims the equivalence with no registry entry behind it is refused, not printed."""
+    rows = _FROZEN_ROWS if rows is None else rows
+    shown = {e.get("backend_key") for t in tables for e in t.get("entries") or []}
+    used = {(str(r.get("engine_commit") or ""), str(r.get("server_engine_commit_equiv") or ""))
+            for r in rows if str(r.get("server_engine_commit_equiv") or "").strip() and r.get("backend") in shown}
+    out = []
+    for pin, reported in sorted(used):
+        release = _EP.native_server_equivalent(reported, pin)
+        entry = _EP._equiv_registry().get(release) if release else None
+        if not entry:
+            raise SystemExit(f"REFUSING: a row stamps server_engine_commit_equiv={reported[:9]!r} against engine_commit {pin[:9]!r} and "
+                             f"engine_commit_equiv.json has no release pair for it")
+        # the registry's spelling of both commits, whatever length the row or the stage pin wrote (9 or 40 characters)
+        short_pin = entry["pin"][:10]
+        short_eq = next(x for x in entry["equivalent"] if _EP.commit_matches(reported, x))[:10]
+        files, lines = entry.get("files_changed"), entry.get("version_string_lines")
+        if not (isinstance(files, int) and isinstance(lines, int) and entry.get("non_version_lines") == 0):
+            raise SystemExit(f"REFUSING: the engine_commit_equiv.json entry for {release} does not state a version-strings-only difference")
+        text = (f"The ArcadeDB {release} native server image reports engine commit {short_eq}, and every other ArcadeDB build on the page (the JVM image, "
+                f"the jars, and both Python wheels) is commit {short_pin}: upstream builds the native server image at the release tag, one commit after "
+                f"{short_pin}. The difference between the two commits is {files:,} files and {lines:,} changed lines, every one "
+                f"a version string and none of them source, so the rows keep {short_pin} as their engine commit.")
+        if text not in out:          # the same pair written with a 9-character and a 40-character pin is one sentence
+            out.append(_gen(text, release, short_pin, short_eq, f"{files:,}", f"{lines:,}"))
+    return out
+
+
 def _global_conditions(tables):
     reps = _reps_note(tables)
     out = [_R("GLOBAL", "docker"), _R("GLOBAL", "memory")]
     if reps:
         out.append(reps)
+    out += _native_server_equiv_note(tables)
     out += [_R("GLOBAL", "defaults"), _R("GLOBAL", "digest"),
             _R("GLOBAL", "index_order"), _R("GLOBAL", "jvm_heap")]
     return out
@@ -2693,7 +2833,8 @@ def _l4_canonical(all_rows):
             # KEYED ON THE TIER TOO: grouped by display label alone, a table with
             # two tiers (ts100, ts1000) would publish every cell as a median across
             # BOTH corpora, a number belonging to neither (BUGS F110).
-            grouped[(label, str(r.get("scale")))].append(r)
+            # A split page keys the two builds apart (the label carries the build), so no l4 median pools them.
+            grouped[(_with_build(label, _arm_build(r)), str(r.get("scale")))].append(r)
     return grouped or None
 
 
@@ -2738,10 +2879,11 @@ def _sparse_multipass_table():
     # optional so the table renders before they land, and the sparse
     # condition says whether 100k has a second pass by looking, not by text.
     for tier in ("medium", "small", "tiny"):
+        _sp_units = []
         for arm, backend, label in SPARSE_MP_ARMS + SPARSE_MP_OPTIONAL_ARMS:
-            fp = root / f"sp_{arm}_{tier}.json"
-            if not fp.is_file():
-                continue
+            for _ob, _fps in _overlay_files_by_build(root, f"sp_{arm}", f"_{tier}.json", backend):
+                _sp_units += [(arm, backend, _with_build(label, _ob), _ob, _fps[0])]
+        for arm, backend, label, _ob, fp in _sp_units:
             passes = json.loads(fp.read_text(encoding="utf-8"))
             cold = [r for r in passes if r.get("rep") == 0]
             warm = [r for r in passes if r.get("rep", 0) >= 1]
@@ -2754,6 +2896,7 @@ def _sparse_multipass_table():
             w99 = statistics.median(r["query_p99_ms"] for r in warm if r.get("query_p99_ms") is not None) if any(r.get("query_p99_ms") is not None for r in warm) else None
             entries.append({
                 "backend": label,
+                "build": _ob or None,
                 "backend_key": backend,
                 "is_arcadedb": "arcade" in backend,
                 "precision": SPARSE_PRECISION.get(backend),
@@ -2900,7 +3043,7 @@ def _lc_short_reason(text):
 LIFECYCLE_WITHHELD = {"graph_gav": "its query grew from a bounded set of seeds to an unbounded 2-hop, so it stays off this table until the query is bounded again."}   # PAGE-SPEC rule 7
 
 
-def _lifecycle_table(all_rows, twin_rows=()):
+def _lifecycle_table(all_rows):
     """Built from the FROZEN CSV, like every other table in this file.
 
     The first version called load_canonical(), which is make_paper_tables' name
@@ -2912,12 +3055,6 @@ def _lifecycle_table(all_rows, twin_rows=()):
     rows = [r for r in all_rows if r.get("lane") == "lifecycle"]
     if not rows:
         return None
-    twin_by = {}
-    for r in twin_rows:
-        if r.get("lane") == "lifecycle" and not r.get("lifecycle_situation_unexpressible"):
-            twin_by.setdefault((r.get("workload"), r.get("scale"), str(r.get("backend", "")).endswith("_server"),
-                                _lifecycle_engine(r.get("backend", ""))), []).append(r)
-
     # Rows fold by situation, size, deployment, and ENGINE. An ArcadeDB
     # label names only the situation; the comparator arms (DECISIONS #95a) share the table, so a
     # comparator row names its engine inside the parentheses and carries an
@@ -2937,18 +3074,29 @@ def _lifecycle_table(all_rows, twin_rows=()):
             # registered as an absence the coverage gate reads.
             declared.append(r)
             continue
-        by.setdefault((r.get("workload"), r.get("scale"), _srv, _engine_of(r)), []).append(r)
+        by.setdefault((r.get("workload"), r.get("scale"), _srv, _engine_of(r), _arm_build(r)), []).append(r)
 
     entries = []
-    _lc_columns = (["JVM start ms", "first open ms", "cold process ms"]
+    # The engine's own start step: start_jvm() on the JVM build (`jvm_start_ms`), which the native build has no counterpart of (null);
+    # there the same step is `engine_load_ms` (library load and isolate creation). A page holding both builds names the column for both (below).
+    _start_field, _start_label = (("engine_load_ms", "engine load ms")
+                                  if any(_AI.build_of(r) == "native" for r in rows) else ("jvm_start_ms", "JVM start ms"))
+    # BOTH BUILDS ON ONE TABLE: the step is start_jvm() on the JVM build and library load plus isolate creation on the native one, so
+    # the column is named for what both are, and each arm reads its own field (the sentence under the table says which is which).
+    _both_builds = {"native", "jvm"} <= _AI.builds_in(rows)
+    if _both_builds:
+        _start_label = "engine start ms"
+    _lc_columns = ([_start_label, "first open ms", "cold process ms"]
                    + [LIFECYCLE_SCENARIO_LABELS[k] for k in LIFECYCLE_PAGE_SCENARIOS])
-    for (situation, scale, _srv, engine), rs in sorted(by.items()):
+    for (situation, scale, _srv, engine, build), rs in sorted(by.items()):
         if situation in LIFECYCLE_WITHHELD:
             continue
+        _start_field = ("engine_load_ms" if build == "native" else "jvm_start_ms") if _both_builds else _start_field
         _ours = engine == "ArcadeDB"
         _mode = "server" if _srv else "embedded"
         entry = {
-            "backend": _lifecycle_row_label(rs[0].get("backend"), situation),
+            "backend": _with_build(_lifecycle_row_label(rs[0].get("backend"), situation), build),
+            "build": build or None,
             "backend_key": str(rs[0].get("backend")),
             "is_arcadedb": _ours,
             "engine": engine,
@@ -2969,7 +3117,7 @@ def _lifecycle_table(all_rows, twin_rows=()):
         # session number: a 5 ms open inside a process that took half a second to
         # reach its first database call is not a 5 ms cost to anyone launching a
         # CLI.
-        for field, label in (("jvm_start_ms", "JVM start ms"),
+        for field, label in ((_start_field, _start_label),
                              ("first_open_ms", "first open ms"),
                              ("cold_process_ms", "cold process ms")):
             got = _agg(rs, field)
@@ -2993,17 +3141,6 @@ def _lifecycle_table(all_rows, twin_rows=()):
             got = _agg(rs, field)
             if got is not None:
                 entry["metrics"][label] = got
-        _trs = twin_by.get((situation, scale, _srv, engine))
-        if _trs and entry["metrics"]:
-            twin_metrics = {}
-            for field, label in (("jvm_start_ms", "JVM start ms"), ("first_open_ms", "first open ms"),
-                                 ("cold_process_ms", "cold process ms"),
-                                 *[(f"{k}_session_ms", LIFECYCLE_SCENARIO_LABELS[k]) for k in LIFECYCLE_PAGE_SCENARIOS],
-                                 (MEM_PEAK_FIELD, "peak memory GiB")):
-                got = _agg(_trs, field)
-                if got is not None:
-                    twin_metrics[label] = got
-            _attach_twin(entry, twin_metrics, _trs)
         if entry["metrics"]:
             entries.append(entry)
 
@@ -3047,6 +3184,7 @@ def _lifecycle_table(all_rows, twin_rows=()):
         "title": "Session cost, open to close",
         "dataset": "synthetic, one structure per row",
         "conditions": [_R("lifecycle", k) for k in ("session", "cold_start", "clean_close", "server_rows")]
+                      + ([_R("lifecycle", "engine_start")] if _both_builds else [])
                       + [_gen(f"{LIFECYCLE_SITUATION_LABELS.get(k, k)} is withheld: {v}", v) for k, v in sorted(LIFECYCLE_WITHHELD.items())]
                       + declared_notes,
         "columns": _lc_columns,
@@ -3240,10 +3378,10 @@ def _durability_table(all_rows):
             # out of this one for the same reason.
             if str(r.get("backend")) in OFF_PAGE_ARMS:
                 continue
-            by.setdefault((str(r.get("backend")), str(r.get("scale")) if per_scale else None),
+            by.setdefault((str(r.get("backend")), str(r.get("scale")) if per_scale else None, _arm_build(r)),
                           []).append(r)
-        for (backend, sc), rs in sorted(by.items(), key=lambda kv: (_durability_scale_rank(lane, kv[0][1]),
-                                                                     kv[0][0])):
+        for (backend, sc, build), rs in sorted(by.items(), key=lambda kv: (_durability_scale_rank(lane, kv[0][1]),
+                                                                            kv[0][0], kv[0][2])):
             if sc is not None:
                 # ONE ROW PER CORPUS SIZE for an operation whose cost grows with
                 # the corpus, named in the Size column beside the operation.
@@ -3261,7 +3399,8 @@ def _durability_table(all_rows):
             no_setting = any(str(r.get("durability_no_setting")).lower() in ("true", "1")
                              for r in rs)
             entry = {
-                "backend": display_name(backend),
+                "backend": _with_build(display_name(backend), build),
+                "build": build or None,
                 "is_arcadedb": "arcadedb" in backend,
                 "scale": op_key_s,
                 "scale_label": op_label_s,
@@ -3431,7 +3570,7 @@ def multimodel_engine(name):
     """The capability table's row for an engine name (MULTIMODEL_ALIASES)."""
     return MULTIMODEL_ALIASES.get(name, name)
 MULTIMODEL_CELLS = {"measured": "measured", "declared": "declared", "none": "no arm"}
-MULTIMODEL_KINDS = {"censored": "censored", "withheld": "withheld",
+MULTIMODEL_KINDS = {"censored": "censored", "withheld": "withheld", "not measured": "not measured",
                     "unexpressible": "cannot express", "envelope": "out of memory",
                     "failed": "failed",
                     # A row a defect in the engine's own release decided
@@ -3604,7 +3743,7 @@ def _multimodel_table(finished):
     }
 
 
-def _l4_table(all_rows, twin_rows=()):
+def _l4_table(all_rows):
     grouped = _l4_canonical(all_rows)
     if not grouped:
         # A LANE SCOPED OUT IS NOT A MISSING ARTIFACT, the third place today
@@ -3637,15 +3776,14 @@ def _l4_table(all_rows, twin_rows=()):
     # Five queries, one p99, one cold column, in the order the section reads
     # (OCT_TABLE_METRICS), resolved once so the column list and the cells agree.
     _l4_cols = OCT_TABLE_METRICS["l4"] + [MEM_PHASE_COLUMN]
-    twin_grouped = _l4_canonical(twin_rows) or {}
     entries = []
     # Tier first, then the engine order the section reads, so the table shows
     # each corpus as its own row group the way every other multi-tier lane
     # does rather than interleaving two corpora under one heading.
     _tier_rank = {"ts100": 0, "ts1000": 1}
     for key in sorted(grouped, key=lambda k: (_tier_rank.get(k[1], 99),
-                                              order.index(k[0]) if k[0] in order else 99,
-                                              k[0])):
+                                              order.index(_strip_build(k[0])) if _strip_build(k[0]) in order else 99,
+                                              _strip_build(k[0]), {"native": 0, "jvm": 1}.get(_AI.build_in_label(k[0]), 2))):
         label, _scale = key
         rs = grouped[key]
         entry = {
@@ -3660,7 +3798,8 @@ def _l4_table(all_rows, twin_rows=()):
             "scale_label": f"{_l4_points(_scale)} points",
             "workload": L4_SHAPE["workload"],
             "n_docs": str(rs[0].get("n_points")),
-            "deployment": L4_DEPLOYMENT[label],
+            "deployment": L4_DEPLOYMENT[_strip_build(label)],
+            "build": _AI.build_in_label(label),
             "image": None,
             # One engine name plus one version. The two ArcadeDB arms recorded
             # this differently ("26.8.1" from one adapter, "arcadedb 26.8.1"
@@ -3678,16 +3817,6 @@ def _l4_table(all_rows, twin_rows=()):
                 if got is not None:
                     entry["metrics"][lab] = got
                     break
-        _trs = twin_grouped.get(key)
-        if _trs and entry["metrics"]:
-            twin_metrics = {}
-            for field, lab in _l4_cols:
-                for candidate in ((field,) if isinstance(field, str) else field):
-                    got = _agg(_trs, candidate)
-                    if got is not None:
-                        twin_metrics[lab] = got
-                        break
-            _attach_twin(entry, twin_metrics, _trs)
         if entry["metrics"]:
             entries.append(entry)
 
@@ -4198,6 +4327,7 @@ OCT_PROSE = {
     },
     "lifecycle": {
         "session": ("The SESSION is open + action + close. Reporting open and close alone hides work triggered between them.", []),
+        "engine_start": ("Engine start ms is the start_jvm() call on the JVM build, and the library load with the creation of the isolate on the native build; the two steps are the engine's own start, which is why they share a column.", []),
         "cold_start": ("Cold start is measured in a fresh subprocess and reported beside every session number, because a millisecond open inside a process that takes half a second to reach its first database call is not a millisecond to whoever launched it.", []),
         "clean_close": ("A clean close should be O(what was written), not O(what is stored): write nothing and closing should cost the same at 10k documents and 10M.", []),
         "server_rows": ("Server rows have no JVM start, first open, or cold process: the server is already running when the probe connects, so those three columns describe the embedded process only. The session columns are measured for both.", []),
@@ -4398,8 +4528,9 @@ def _entry_rows(e, lane, wl, exact_only=False):
         # ArcadeDB ones that were.
         return "(" not in dn and str(_eb).startswith(dn + " (")
 
+    # one build's rows behind one build's entry (an entry that names no build reads every row of its arm)
     _match = lambda r: (r.get("lane") == lane and (not wl or r.get("workload") == wl)
-                        and _same_arm(r))
+                        and _same_arm(r) and (not e.get("build") or _arm_build(r) == e["build"]))
     rs = [r for r in _FROZEN_ROWS if _match(r) and str(r.get("scale")) == str(e.get("scale"))]
     if not rs and not exact_only:
         rs = [r for r in _FROZEN_ROWS if _match(r)]
@@ -4432,6 +4563,7 @@ def _heap_not_pinned(e, lane, wl):
     rs = [r for r in _FROZEN_ROWS
           if r.get("lane") == lane and (not wl or r.get("workload") == wl)
           and display_name(str(r.get("backend"))) == e.get("backend")
+          and (not e.get("build") or _arm_build(r) == e["build"])
           and str(r.get("scale")) == str(e.get("scale"))]
     if not rs:
         return False
@@ -4595,8 +4727,14 @@ def _pg_memory_note(table):
 def _gav_pair_note(table):
     """Only when the table carries both arms of the ablation: the sentence must not describe a pair that is not there."""
     names = {str(e["backend"]) for e in table.get("entries", [])}
-    pairs = [(a, a[:-1] + ", GAV)") for a in sorted(names)
-             if a.startswith("ArcadeDB (") and "GAV" not in a and (a[:-1] + ", GAV)") in names]
+    def _gav_twin(a):
+        # the view goes before the build: "ArcadeDB (embedded, native build)" -> "ArcadeDB (embedded, GAV, native build)"
+        b = _AI.build_in_label(a)
+        if not b:
+            return a[:-1] + ", GAV)"
+        return _strip_build(a)[:-1] + f", GAV, {_AI.BUILD_NAMES[b]})"
+    pairs = [(a, _gav_twin(a)) for a in sorted(names)
+             if a.startswith("ArcadeDB (") and "GAV" not in a and _gav_twin(a) in names]
     if not pairs:
         return None
     listed = "; ".join(f"{a} and {b}" for a, b in pairs)
@@ -4850,37 +4988,100 @@ def _arango_ivf_note(table, rows):
     return _gen(" ".join(parts), *dict.fromkeys(values))
 
 
-def _attach_twin(entry, twin_metrics, twin_rows):
-    """Put the twin beside the headline entry, over the labels the headline cell has (the same metric labels, no more)."""
-    kept = {k: v for k, v in twin_metrics.items() if k in entry["metrics"]}
-    if kept:
-        entry["client_twin"] = {"client": _twin_client(twin_rows), "metrics": kept}
+# THE ONE CLIENT THE SERVED ARCADEDB HEADLINE RUNS THROUGH (DECISIONS #268, #285). The row's `arcadedb_http_client` is
+# read from the session that ran; a row that names any other client does not belong in a printed table.
+# REMOVE WHEN: upstream ships the transport fix (ArcadeData/arcadedb-drivers #188 merged and released) and the decision
+# to publish that client is made; until then the page names the benchmark's own client only.
+_SERVED_CLIENT_SOURCE = "experiments/lean_http.py"
+_OTHER_CLIENT = re.compile(r"arcadedb[-_ ]?driver", re.I)
 
 
-def _twin_client(rs):
-    """The client a twin cell's rows name (one name in a clean freeze), or None."""
-    named = collections.Counter(str(r.get("arcadedb_http_client") or "") for r in rs)
-    return named.most_common(1)[0][0] or None if named else None
+def _lean_client_name():
+    import lean_http
+    return lean_http.LEAN_NAME
+
+
+def _is_served_arcadedb(backend):
+    b = str(backend or "")
+    return b.startswith("arcadedb") and b.endswith("_server")
+
+
+_OTHER_CLIENT_STAMP = re.compile(r'"arcadedb_http_client"\s*:\s*"[^"]*arcadedb[-_ ]?driver', re.I)
+
+
+def _refuse_other_client_overlays():
+    """The multipass overlays (dense_mp5, sparse_mp) are read by the page without the freeze, so the rule is held here: an
+    overlay file whose rows name another client refuses the page. A served arm's twin job writes the same file name as the
+    other client's job, so the second job to finish wins; this catches the case where it was not the benchmark's own."""
+    pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
+    bad = []
+    for d in sorted(RESULTS.glob(f"*_{pin}")) if pin else []:
+        for fp in sorted(d.glob("*.json")) if d.is_dir() else []:
+            if _OTHER_CLIENT_STAMP.search(fp.read_text(encoding="utf-8", errors="replace")):
+                bad.append(f"{d.name}/{fp.name}")
+    if bad:
+        raise SystemExit(f"REFUSING to print: {len(bad)} overlay file(s) were not measured through the benchmark's own HTTP "
+                         f"client ({', '.join(bad[:4])}{' ...' if len(bad) > 4 else ''}); re-run the arm's lean job")
+
+
+def _refuse_other_client_rows(rows):
+    """Refuse a frozen row of a served ArcadeDB arm that names a client other than the benchmark's own."""
+    _refuse_other_client_overlays()
+    bad = collections.Counter(
+        (str(r.get("backend")), str(r.get("arcadedb_http_client")))
+        for r in rows if _OTHER_CLIENT.search(str(r.get("arcadedb_http_client") or "")))
+    if bad:
+        for (be, client), n in sorted(bad.items()):
+            print(f"  {n} row(s) of {be} name the client {client!r}")
+        raise SystemExit(
+            "REFUSING to print: the frozen rows hold a served ArcadeDB row that was not measured through the benchmark's "
+            "own HTTP client. make_paper_tables.load_canonical sets those rows aside; re-freeze before the page is built.")
+
+
+def _served_client_table(table):
+    """True when the table prints a served ArcadeDB entry."""
+    return any(_is_served_arcadedb(e.get("backend_key")) for e in table.get("entries") or [])
+
+
+# What a headline served row still sends over the benchmark's own lean HTTP client (lean_http.OfficialSession: everything the driver has no
+# call for), stated once so the sentence under a table cannot say the driver timed "every call" (DECISIONS #259 (4)).
+_SERVED_LEAN_SCOPE = ("Bulk loads, the server probe, transactions, and streamed results go through the benchmark's own lean HTTP client in "
+                      "the headline rows too.")
 
 
 def _arcadedb_client_note(table):
-    """What the served ArcadeDB rows ran through, from the rows: the official driver is the headline and the lean
-    HTTP client's twin is printed beside it as a labelled sensitivity (`client_twin` on the entry), never pooled
-    into the headline median. None for a table with no served ArcadeDB row."""
-    heads = sorted({str(r.get("arcadedb_http_client")) for r in _FROZEN_ROWS
-                    if str(r.get("backend") or "").startswith("arcadedb") and str(r.get("backend")).endswith("_server")
-                    and str(r.get("arcadedb_http_client") or "").strip() not in ("", "None")
-                    and any(e.get("backend_key") == r.get("backend") for e in table.get("entries") or [])})
-    twins = sorted({str((e.get("client_twin") or {}).get("client")) for e in table.get("entries") or []
-                    if (e.get("client_twin") or {}).get("client")})
+    """What the served ArcadeDB rows ran through: the benchmark's own minimal HTTP client, named from the rows. None
+    for a table with no served ArcadeDB row. A row naming another client, or two clients under one table, refuses."""
+    heads = {str(r.get("arcadedb_http_client")) for r in _FROZEN_ROWS
+             if _is_served_arcadedb(r.get("backend"))
+             and str(r.get("arcadedb_http_client") or "").strip() not in ("", "None")
+             and any(e.get("backend_key") == r.get("backend") for e in table.get("entries") or [])}
     if not heads:
         return None
-    text = (f"ArcadeDB's served rows time every call through {_join_and(heads)}, the vendor's official Python client, "
-            f"the same kind of client the other engines are measured through.")
-    if twins:
-        text += (f" The same cells also ran through the benchmark's own lean HTTP client ({_join_and(twins)}); "
-                 f"each is printed on its row as a labelled sensitivity and is not part of the headline median.")
-    return _gen(text, *heads, *twins)
+    lean = _lean_client_name()
+    if heads != {lean}:
+        raise SystemExit(f"REFUSING to print table {table.get('id')!r}: its served ArcadeDB rows name {sorted(heads)}, "
+                         f"and the one client the page may name is {lean!r}")
+    text = (f"ArcadeDB's served rows time every call through the benchmark's own minimal HTTP client, {lean} "
+            f"(source: {_SERVED_CLIENT_SOURCE}), which keeps one persistent http.client connection per host. "
+            f"The other engines are measured through their vendors' own Python clients, so client weight differs "
+            f"between the served engines.")
+    return _gen(text, lean, _SERVED_CLIENT_SOURCE)
+
+
+def _imgdefaults_not_measured_note(table):
+    """The image-defaults ArcadeDB arm has rows only from a client other than the benchmark's own, so its cell is not
+    printed and the table says why (the arm is a declared absence). None on every other table, and where it is printed.
+    REMOVE WHEN: a lean-client job exists for this arm (runner.ARCADEDB_HTTP_ARMS) and its rows are frozen."""
+    if table.get("id") not in ARM_TABLES.get(JVM_DEFAULTS_ARM, ()) or not _served_client_table(table):
+        return None
+    if any(e.get("backend_key") == JVM_DEFAULTS_ARM for e in table.get("entries") or []):
+        return None
+    label = display_name(JVM_DEFAULTS_ARM)
+    text = (f"{label} is not printed: it was not measured through the benchmark's own HTTP client, which every "
+            f"served ArcadeDB row on this table uses.")
+    _declare_absence(table["id"], label, None, "withheld", text)
+    return _gen(text, label)
 
 
 def _oct_conditions(table):
@@ -4960,6 +5161,9 @@ def _oct_conditions(table):
     _client = _arcadedb_client_note(table)
     if _client:
         tail.append(_client)
+    _imgnote = _imgdefaults_not_measured_note(table)
+    if _imgnote:
+        tail.append(_imgnote)
     jvm = _jvm_memory_note(table)
     if jvm:
         tail.append(jvm)
@@ -5166,7 +5370,11 @@ def _censored_cells():
     for r in rows:
         if not _same_pin(r):
             continue
-        key = (r.get("lane"), str(r.get("scale")), r.get("backend"), r.get("workload"))
+        # In-process ArcadeDB arms are censored per build (arm + build + size): a native out-of-memory or cap decision never takes
+        # the JVM entry off the page, and the other way round. The build rides on the backend element as "backend@build" and
+        # the consumers split it again; an old row with no build is the JVM build (arm_identity.build_of).
+        _b = _arm_build(r)
+        key = (r.get("lane"), str(r.get("scale")), f"{r.get('backend')}@{_b}" if _b else r.get("backend"), r.get("workload"))
         err = str(r.get("error") or "")
         if not err:
             clean.add(key)
@@ -5373,6 +5581,7 @@ def _censored_entries(table):
                        if not e.get("outcome")}
     out, marks = [], set()
     for (l, scale, backend, w), secs in sorted(_censored_cells().items(), key=str):
+        backend, _, build = str(backend).partition("@")
         if l != lane or (wl and w != wl):
             continue
         if scales and str(scale) not in scales:
@@ -5389,7 +5598,8 @@ def _censored_entries(table):
         # "SurrealDB (embedded)" twice, one for documents with ten indexes and
         # one for the graph, and a reader could not tell which was which.
         _lc = lane == "lifecycle"
-        out.append({"backend": _lifecycle_row_label(backend, w) if _lc else display_name(backend),
+        out.append({"backend": _with_build(_lifecycle_row_label(backend, w) if _lc else display_name(backend), build),
+                    "build": build or None,
                     **({"engine": _lifecycle_engine(backend)} if _lc else {}),
                     "backend_key": backend,
                     "is_arcadedb": "arcadedb" in str(backend).lower(),
@@ -5878,7 +6088,8 @@ def _censored_notes(table_id):
     notes = []
     merged = {}
     scales = _table_scales(table_id)
-    for (l, scale, backend, w), secs in sorted(_censored_cells().items(), key=str):
+    for (l, scale, _qbackend, w), secs in sorted(_censored_cells().items(), key=str):
+        backend, _, _build = str(_qbackend).partition("@")
         if l != lane or (wl and w != wl):
             continue
         if scales and str(scale) not in scales:
@@ -5930,7 +6141,7 @@ def _censored_notes(table_id):
                 pins = [scale_label(lane, scale), scale_label(lane, secs.at)]
             else:
                 budget = f"{secs / 3600:g} hour" if secs else "its"
-                _phase = _CENSORED_PHASE.get((lane, str(scale), backend, w))
+                _phase = _CENSORED_PHASE.get((lane, str(scale), _qbackend, w))
                 _in = f" It was still in {_phase} when the budget ran out." if _phase else ""
                 tail = (f" at {scale_label(lane, scale)}: {_cell} exceeded "
                         f"its {budget} budget, the same budget every engine on this table had, on its first "
@@ -5941,7 +6152,7 @@ def _censored_notes(table_id):
                     f"inside its budget and was not retried, so there is no row. What it reported: "
                     f"{secs}")
             pins = [scale_label(lane, scale), str(secs)]
-        merged.setdefault((kind, tail, tuple(pins)), []).append(display_name(backend))
+        merged.setdefault((kind, tail, tuple(pins)), []).append(_with_build(display_name(backend), _build))
 
     # ONE SENTENCE FOR THE ENGINES THAT HAVE THE SAME THING TO SAY. Three
     # engines were censored at TPC-H SF10 and the page printed three sentences
@@ -6818,7 +7029,7 @@ def _finish_table(table: dict) -> dict:
     _per_situation = table.get("id") == "lifecycle"
 
     def _cell_of(m):
-        return (str(m.get("backend_key")), str(m.get("scale")), str(m.get("backend")) if _per_situation else "")
+        return (str(m.get("backend_key")), str(m.get("scale")), str(m.get("backend")) if _per_situation else "", m.get("build") or "")
     _cens = {_cell_of(m) for m in _marked}
     table["entries"] = [e for e in table["entries"] if e.get("outcome") or _cell_of(e) not in _cens]
     entries = table["entries"] + _marked
@@ -6836,7 +7047,9 @@ def _finish_table(table: dict) -> dict:
         base = re.sub(r"\s*\(.*$", "", str(e["backend"])).lower()
         return (scale_rank(e), 0 if e.get("is_arcadedb") else 1, base,
                 DEPLOYMENT_ORDER.get(e.get("deployment"), 2),
-                PRECISION_ORDER.get(e.get("precision"), 2))
+                PRECISION_ORDER.get(e.get("precision"), 2),
+                # the native build (the default install) first, its JVM twin right after it
+                {"native": 0, "jvm": 1}.get(e.get("build"), 2))
     table["entries"] = sorted(entries, key=key)
     # THE HEAP BESIDE THE PEAK (DECISIONS #116 item 7, decided: the
     # memory column stays the peak an operator has to provision, with the heap
@@ -7000,11 +7213,10 @@ def _restructure_tables(tables, rows):
         mp = {(e["backend"], e["scale"]): e for e in by["l3smp"]["entries"]}
         for e in by["l3s"]["entries"]:
             m = e["metrics"]
-            for mm in (m, (e.get("client_twin") or {}).get("metrics") or {}):
-                if "p50 ms" in mm:
-                    mm["cold p50 ms"] = mm.pop("p50 ms")
-                if "p99 ms" in mm:
-                    mm["cold p99 ms"] = mm.pop("p99 ms")
+            if "p50 ms" in m:
+                m["cold p50 ms"] = m.pop("p50 ms")
+            if "p99 ms" in m:
+                m["cold p99 ms"] = m.pop("p99 ms")
             src = mp.get((e["backend"], e["scale"]))
             if src:
                 for k in ("warm p50 ms", "warm p99 ms", "gain"):
@@ -7028,11 +7240,11 @@ def _restructure_tables(tables, rows):
         # pass to show.
         t = by["l3s"]
         for e in t["entries"]:
-            for mm in (e["metrics"], (e.get("client_twin") or {}).get("metrics") or {}):
-                if "p50 ms" in mm:
-                    mm["cold p50 ms"] = mm.pop("p50 ms")
-                if "p99 ms" in mm:
-                    mm["cold p99 ms"] = mm.pop("p99 ms")
+            mm = e["metrics"]
+            if "p50 ms" in mm:
+                mm["cold p50 ms"] = mm.pop("p50 ms")
+            if "p99 ms" in mm:
+                mm["cold p99 ms"] = mm.pop("p99 ms")
         t["columns"] = [{"p50 ms": "cold p50 ms", "p99 ms": "cold p99 ms"}.get(c, c) for c in t["columns"]]
     if "l1tpc" in by:
         # THE PAGE SHOWS THE STANDARD DOCUMENT BENCHMARKS ONLY: TPC-C is the
@@ -7042,9 +7254,6 @@ def _restructure_tables(tables, rows):
         def clone(e, keep):
             n = dict(e)
             n["metrics"] = {k: v for k, v in e["metrics"].items() if k in keep}
-            if e.get("client_twin"):
-                n["client_twin"] = dict(e["client_twin"], metrics={k: v for k, v in e["client_twin"]["metrics"].items()
-                                                                    if k in keep})
             return n
         # Six transactional operations (#82a) and five analytical queries (#82),
         # each a warm median, with a ninety-ninth percentile on the headline
@@ -7103,14 +7312,9 @@ def main() -> int:
     rows = list(csv.DictReader(FROZEN.open()))
     _PI.refuse_other_instruments(rows, FROZEN_NAME)
     _refuse_gav_without_supertype(rows)
-    # THE SERVED ARCADEDB CLIENT TWIN IS NOT THE HEADLINE. Every served ArcadeDB cell runs twice: through the official
-    # driver (role `headline`) and through the benchmark's lean HTTP client (role `sensitivity`). The twin's rows are kept
-    # apart from every table's rows, so they are never pooled into a headline median, and are printed beside the
-    # headline cell as `client_twin`.
-    _twin_rows = [r for r in rows if str(r.get("arcadedb_http_client_role") or "") == "sensitivity"]
-    if _twin_rows:
-        _twin_ids = {id(r) for r in _twin_rows}
-        rows = [r for r in rows if id(r) not in _twin_ids]
+    # EVERY SERVED ARCADEDB HEADLINE CELL COMES FROM THE BENCHMARK'S OWN HTTP CLIENT (DECISIONS #268, #285). The freeze
+    # (make_paper_tables.load_canonical) sets the other client's rows aside, so none is here; one that is refuses the page.
+    _refuse_other_client_rows(rows)
     # THE CAP RULE, AT REPORT TIME (DECISIONS #188): an arm-cell whose pass-1 median is over its rule cap is shown censored
     # (_censored_cells) and its numbers are not shown, so its rows leave the tables here. Strict-class rows are the
     # durability table's and stay.
@@ -7125,8 +7329,16 @@ def main() -> int:
             print(f"  cap rule: {len(_cut)} rows of {len(_over)} over-the-cap arm-cells withheld, shown censored instead")
             _gone = {id(r) for r in _cut}
             rows = [r for r in rows if id(r) not in _gone]
-    global _FROZEN_ROWS
+    # TWO ARCADEDB BUILDS, TWO ARMS (26.11.1): native and jvm rows of a release share engine_version and arm names, so the tables
+    # group on the build (_arm_build) and label it; no cell is a median over both. BENCH_ENGINE_BACKEND freezes one build on purpose.
+    rows = _AI.select_build(rows)
+    # ONE ENGINE COMMIT FOR BOTH BUILDS: a freeze whose native and JVM rows name two engines is refused, not printed side by side.
+    _bad = _AI.pair_problems(rows)
+    if _bad:
+        raise SystemExit("REFUSING: " + "; ".join(_bad))
+    global _FROZEN_ROWS, _SPLIT
     _FROZEN_ROWS = rows
+    _SPLIT = _AI.splits_page(rows)
     # WITHHELD: ArcadeDB rows whose engine_version identifies no build.
     #
     # Not rendered, and said out loud rather than dropped quietly. A number we
@@ -7160,9 +7372,6 @@ def main() -> int:
     if _dropped:
         print(f"  one setting per table: {len(_dropped)} strict rows set aside for the durability table only")
         rows = [r for r in rows if r not in _dropped]
-    # The twin rows get the same one-setting rule: a strict row is the durability table's, never a twin cell's.
-    _twin_rows = [r for r in _twin_rows if not (str(r.get("durability_class")) == "strict" and (
-        r.get("lane"), r.get("workload"), r.get("backend"), str(r.get("scale"))) in _has_relaxed)]
     names = _image_version_names()
 
     # The tabular lanes run OLTP and OLAP as separate workloads over ONE corpus
@@ -7198,11 +7407,7 @@ def main() -> int:
         # rather than a wrong number, and the l2olap table below is what would
         # have sprung it.
         grouped[(r["lane"], r["scale"], r["backend"], wl,
-                 r.get("gav") or "")].append(r)
-    twin_grouped = defaultdict(list)
-    for r in _twin_rows:
-        wl = "" if r["lane"] in MERGED_WORKLOAD_LANES else r.get("workload", "")
-        twin_grouped[(r["lane"], r["scale"], r["backend"], wl, r.get("gav") or "")].append(r)
+                 r.get("gav") or "", _arm_build(r))].append(r)
 
     tables = []
     for lane, spec in LANES.items():
@@ -7211,7 +7416,7 @@ def main() -> int:
         # graph lane's rows, so the spec may name the lane it reads.
         src_lane = spec.get("lane_source", lane)
         only_scales = spec.get("only_scales")
-        for (ln, scale, backend, workload, gav), rs in sorted(grouped.items()):
+        for (ln, scale, backend, workload, gav, build), rs in sorted(grouped.items()):
             if ln != src_lane:
                 continue
             if only_scales and scale not in only_scales:
@@ -7219,12 +7424,10 @@ def main() -> int:
             # Row-level, not group-level: merged lanes (l1, l1tpc) group both
             # workloads under one key with a blank label, so a group-level
             # test never matched and the per-query OLAP table was empty (BUGS F30).
-            _trs = twin_grouped.get((ln, scale, backend, workload, gav), [])
             if spec.get("only_workload"):
                 rs = [r for r in rs if r.get("workload") == spec["only_workload"]]
                 if not rs:
                     continue
-                _trs = [r for r in _trs if r.get("workload") == spec["only_workload"]]
             # The no-settle ablation is MEASURED but not PUBLISHED, and the
             # page was the only place it appeared. Neither paper reports it:
             # T4 is a clean head-to-head, one ArcadeDB row against three
@@ -7287,8 +7490,11 @@ def main() -> int:
             if lane == "l2olap" and gav != "False" and "arcade" in backend:
                 label = (f"{label[:-1]}, GAV)" if label.endswith(")")
                          else f"{label} (GAV)")
+            # The build goes last, after the precision and the view, so the two builds of one arm differ only in that suffix.
+            label = _with_build(label, build)
             entry = {
                 "backend": label,
+                "build": build or None,
                 # The runner's own key for the arm, so a gate can hold the
                 # table against runner.LANES without parsing the label
                 # (page_check._check_lane_roster).
@@ -7347,24 +7553,17 @@ def main() -> int:
                 "host": rs[0].get("host") or None,
                 "metrics": {},
             }
-            twin_metrics = {}
             for field, label in _metrics_for(lane, spec, src_lane):
-                src, tsrc = rs, _trs
+                src = rs
                 if field in MEM_FIELDS and src_lane in MERGED_WORKLOAD_LANES:
                     # See MEM_FIELDS above: this lane's rows were merged across
                     # workloads, which is right for a metric that only one
                     # workload produces and wrong for one both produce. Report
                     # the transactional run rather than a median straddling two.
                     src = [r for r in rs if r.get("workload") == "oltp"] or rs
-                    tsrc = [r for r in _trs if r.get("workload") == "oltp"] or _trs
                 got = _agg(src, field)
                 if got is not None:
                     entry["metrics"][label] = got
-                if tsrc:
-                    tgot = _agg(tsrc, field)
-                    if tgot is not None:
-                        twin_metrics[label] = tgot
-            _attach_twin(entry, twin_metrics, _trs)
             if lane == "l3d":
                 _beam_extras(entry, rs)
             if entry["metrics"]:
@@ -7505,7 +7704,7 @@ def main() -> int:
     # Python-cost table are built from artifacts of the campaign, not from the
     # frozen rows; the durability table sits beside the session-cost table
     # (DECISIONS #90) and is built from the same rows the write tables are.
-    _extras = [_sparse_multipass_table(), _l4_table(rows, _twin_rows), _lifecycle_table(rows, _twin_rows), _durability_table(_all_rows),
+    _extras = [_sparse_multipass_table(), _l4_table(rows), _lifecycle_table(rows), _durability_table(_all_rows),
                _e4_table(), _python_cost_table()]
     for extra in _extras:
         if extra and extra["entries"]:
@@ -7604,6 +7803,8 @@ def main() -> int:
             _t.setdefault("conditions", [])
             if _note not in _t["conditions"]:
                 _t["conditions"].append(_note)
+    _declare_missing_builds(tables)
+    _disclose_server_builds(tables)
     # THE OVERRIDES A READER MEETS (CAMPAIGN section 7 row 21). PROTOCOL.md
     # section 7 lists every default this benchmark overrides, and the rows its
     # last column marked NOWHERE were named in no sentence under any table. One
@@ -7722,6 +7923,8 @@ def main() -> int:
     for table in tables:
         rel = SOURCES.get(table["id"])
         paths = [rel] if isinstance(rel, str) else list(rel or [])
+        if _served_client_table(table) and _SERVED_CLIENT_SOURCE not in paths:
+            paths.append(_SERVED_CLIENT_SOURCE)
         table["source_paths"] = paths
         table["source_urls"] = [_source_url(p) for p in paths]
         # Kept so an older page build still renders something true: the first

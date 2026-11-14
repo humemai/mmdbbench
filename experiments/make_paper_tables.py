@@ -88,6 +88,7 @@ def _commit_matches(row_commit):
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 import publish_instrument as _PI
+import arm_identity as _AI
 import io_stat_correction as _IOC
 RESULTS = str(_PI.results_dir())
 
@@ -208,6 +209,7 @@ WITHHELD_RECALL = []
 # Rows dropped for an unsettled disk reading.
 UNSETTLED_DISK = []
 _OTHERS_SAID = []
+_OFFICIAL_SAID = []
 
 
 def _write_withheld_recall():
@@ -269,8 +271,25 @@ def _assert_lanes_registered():
             f"export_web.SCALE_LABELS, then fairness_check.LANE_SCRIPT.")
 
 
-def load_canonical(apply_corpus=True, include_twins=False):
+# THE SERVED ARCADEDB HEADLINE IS THE BENCHMARK'S OWN HTTP CLIENT (DECISIONS #268, #285). The harness still measures a served
+# cell through the vendor's driver as well (role `headline`, client name `arcadedb-driver ...`) and through lean_http (role
+# `sensitivity`, the name the freeze keeps for it); the rows of the first are measured and not published, so the freeze
+# sets them aside here, before any dedupe, table, gate or claim sees them. An arm with no lean row therefore has no cell.
+# REMOVE WHEN: upstream ships the transport fix (ArcadeData/arcadedb-drivers #188 merged and released) and the owner decides
+# to publish that client; flip this test, not the rows.
+OFFICIAL_CLIENT_SET_ASIDE = collections.Counter()
+
+
+def is_official_client_row(r):
+    """True for a row the page does not print: measured through the vendor's own Python driver (its role stamp or recorded client name) or on the PostgreSQL wire (a labelled twin, measured and not published)."""
+    return (r.get("arcadedb_http_client_role") == "headline"
+            or "arcadedb-driver" in str(r.get("arcadedb_http_client") or "")
+            or r.get("arcadedb_client_wire") == "pgwire")
+
+
+def load_canonical(apply_corpus=True):
     _assert_lanes_registered()
+    OFFICIAL_CLIENT_SET_ASIDE.clear()
     del WITHHELD_RECALL[:]   # per call, or the sidecar counts every earlier call's rows again
     del UNSETTLED_DISK[:]
     CORPUS_EXCLUDED.clear()
@@ -305,6 +324,9 @@ def load_canonical(apply_corpus=True, include_twins=False):
         if r.get("rc") != 0:
             continue
         if r["scale"] not in PAPER_SCALES.get(r["lane"], []):
+            continue
+        if is_official_client_row(r):
+            OFFICIAL_CLIENT_SET_ASIDE[r.get("backend")] += 1
             continue
         # A PARTIAL LANDING FREEZES ONLY ITS OWN LANES. `land_stage --only-lanes`
         # filtered what was PULLED and nothing downstream, so the freeze still
@@ -546,22 +568,26 @@ def load_canonical(apply_corpus=True, include_twins=False):
         # sweep row and a GAV-ablation row could once have shadowed a published
         # cell. Rows before #90 carry no class and default to relaxed, which is
         # what they were.
-        # THE CLIENT ROLE IS PART OF THE KEY. A served ArcadeDB cell runs twice: on the headline client and, as a twin job, on
-        # the lean HTTP client (`arcadedb_http_client_role` = sensitivity). Same lane, scale, workload, backend and rep, so
-        # without the role the later of the two would replace the other on ts_utc.
         k = (r["lane"], r["scale"], r.get("n_docs"), r.get("workload"),
              r["backend"], r.get("gav") is not False, r["rep"],
-             r.get("durability_class") or "relaxed", r.get("arcadedb_http_client_role") == "sensitivity")
+             r.get("durability_class") or "relaxed",
+             # THE BUILD IS PART OF THE KEY (26.11.1): `arcadedb` (native) and `arcadedb-jvm` of one release stamp the same
+             # engine_version and the same backend name, so without it the later build would replace the other on ts_utc.
+             # Rows before the field are the JVM build; served arms and comparators carry None (arm_identity.build_of).
+             _AI.build_of(r))
         if k not in best or r["ts_utc"] > best[k]["ts_utc"]:
             best[k] = r
     _write_withheld_recall()
     if UNSETTLED_DISK:
         print(f"  blanked the disk reading of {len(UNSETTLED_DISK)} row(s): it had not settled; "
               f"their other measurements stand")
-    # The paper tables, the gates and the claims read the headline rows. The twin rows go to the freeze (include_twins) so
-    # the exporter can show them beside the headline, labelled, and are never pooled into a headline median.
-    out = [r for r in best.values() if include_twins or r.get("arcadedb_http_client_role") != "sensitivity"]
-    return out
+    if OFFICIAL_CLIENT_SET_ASIDE and not _OFFICIAL_SAID:
+        _OFFICIAL_SAID.append(1)
+        print(f"  set aside {sum(OFFICIAL_CLIENT_SET_ASIDE.values())} row(s) not measured through the benchmark's own HTTP client: "
+              + ", ".join(f"{b} {n}" for b, n in sorted(OFFICIAL_CLIENT_SET_ASIDE.items(), key=str)))
+    # BOTH BUILDS BY DEFAULT: the freeze keeps the native and the JVM rows (the key above carries the build, so neither replaces the
+    # other) and the exporter shows them as two arms. BENCH_ENGINE_BACKEND=native|jvm freezes one build on purpose.
+    return _AI.select_build(list(best.values()))
 
 
 def cells(rows, key):
@@ -690,10 +716,24 @@ def write(name, body):
     print("wrote", name)
 
 
+def _builds_of_rows(rows):
+    """The builds present in `rows`, native first."""
+    got = {_AI.build_of(r) for r in rows} - {None}
+    return [b for b in ("native", "jvm") if b in got]
+
+
+def _build_name(label, build, split):
+    """The arm's label with its build when the table names builds ("ArcadeDB (srv)" -> "ArcadeDB (srv, native build)")."""
+    return _AI.build_label(label, build) if (build and split) else label
+
+
 def tabular_table(rows):
     l1 = [r for r in rows if r["lane"] == "l1"]
     tpc = [r for r in rows if r["lane"] == "l1tpc"]
-    order = ["arcadedb_embedded", "arcadedb_server", "duckdb", "postgres"]
+    # Both ArcadeDB builds, embedded and server, stand as their own rows (#222 (4)); a freeze of old rows has no native row and renders as before.
+    split = _AI.splits_page(rows)
+    order = [(be, b) for be in ("arcadedb_embedded", "arcadedb_server")
+             for b in (("native", "jvm") if split else (None,))] + [("duckdb", None), ("postgres", None)]
     # Peak memory (owned: anonymous plus shared, issue #353) from the OLTP
     # rows only. This lane runs OLTP and OLAP over one corpus, and memory is
     # recorded for BOTH, so pooling them would report a median straddling two
@@ -703,9 +743,9 @@ def tabular_table(rows):
     lines = [r"\begin{tabular}{lrrrrr}", r"\toprule",
              r"System & OLTP (ops/s) & Ins.\ p99 (ms) & "
              r"Q1 (ms) & Q6 (ms) & Peak memory (GiB) \\", r"\midrule"]
-    for be in order:
-        oltp = [r for r in l1 if r["backend"] == be and r["workload"] == "oltp"]
-        tq = [r for r in tpc if r["backend"] == be and r["workload"] == "olap"]
+    for be, bld in order:
+        oltp = [r for r in l1 if r["backend"] == be and r["workload"] == "oltp" and (bld is None or _AI.build_of(r) == bld)]
+        tq = [r for r in tpc if r["backend"] == be and r["workload"] == "olap" and (bld is None or _AI.build_of(r) == bld)]
         # MEDIAN ONLY for Q1/Q6, ranges kept for OLTP and insert p99.
         #
         # Not a space-saving dodge: it puts dispersion where dispersion is
@@ -718,7 +758,7 @@ def tabular_table(rows):
         # as it took last time. The caption states the bound they now carry
         # implicitly, and the artifact has every repetition.
         lines.append(" & ".join([
-            NAMES[be],
+            _build_name(NAMES[be], bld, split),
             mmm(oltp, "oltp_ops_per_s"), mmm(oltp, "insert_p99_ms"),
             fmt(st.median([r["q1_ms"] for r in tq
                            if isinstance(r.get("q1_ms"), (int, float))]))
@@ -774,7 +814,7 @@ def graph_table(rows):
 # would keep the failure mode alive, since the next missing directory would
 # re-arm it. _sparse_2681_rows below refuses instead of falling back.
 
-def _pinned_sparse_rows(arm="arcadedb_sparse_embedded"):
+def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
     """T4's ArcadeDB rows from the PINNED campaign, when it is complete.
 
     The paper corpus rows (8,841,823 x 30,109; load_canonical's PAPER_CORPUS
@@ -805,21 +845,39 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded"):
     # partial or mixed, and still refuses.
     if not out:
         return {}
+    # Both builds of one release at one pin: the page shows both (export_web reads the frozen rows itself); this path feeds the paper's
+    # LaTeX table, which is one build, so it validates each build and returns the chosen one (below).
+    _builds = {_AI.build_of(r) for t in out for r in out[t]}
+    if len(_builds) > 1:
+        # Both builds measured: each is validated on its own below (five reps at every tier, one identity). The paper's LaTeX table is
+        # ONE build per call and NO DEFAULT (#222 (4)): the caller names the build (or "all" for every build, each validated), and
+        # BENCH_ENGINE_BACKEND names it for a one-build freeze. The tables loop over the builds and print both.
+        _want = build or _AI.wanted_build()
+        if _want is None:
+            sys.stderr.write("pinned sparse rows hold both builds: name the build (there is no single-build default)\n")
+            return None
+        for _b in sorted(_builds - ({_want} if _want != "all" else set())):
+            _other = {t: [r for r in rs if _AI.build_of(r) == _b] for t, rs in out.items()}
+            if any(len(_other.get(t, [])) < 5 for t in tiers) or len({_AI.arm_identity(r) for t in tiers for r in _other[t]}) != 1:
+                sys.stderr.write(f"pinned sparse rows of the {_b} build are incomplete or span two identities\n")
+                return None
+        if _want != "all":
+            out = {t: [r for r in rs if _AI.build_of(r) == _want] for t, rs in out.items()}
     if any(len(out.get(t, [])) < 5 for t in tiers):
         missing = [t for t in tiers if len(out.get(t, [])) < 5]
         sys.stderr.write(f"pinned sparse rows incomplete at {missing}\n")
         return None
-    versions = {str(r.get("engine_version")) for t in tiers for r in out[t]}
-    if len(versions) != 1:
-        sys.stderr.write(f"pinned sparse rows span {sorted(versions)}\n")
+    versions = {_AI.arm_identity(r) for t in tiers for r in out[t]}   # (engine_version, build): one engine, one build
+    if len(versions) != (len(_builds) if build == "all" else 1):
+        sys.stderr.write(f"pinned sparse rows span {sorted(versions, key=str)}\n")
         return None
     return out
 
 
-def _sparse_2681_rows(arm="arcadedb_sparse_embedded"):
+def _sparse_2681_rows(arm="arcadedb_sparse_embedded", build=None):
     """The pinned sparse rows, or refuse. There is no overlay fallback:
     incomplete or mixed pinned rows stop the generation."""
-    pinned = _pinned_sparse_rows(arm)
+    pinned = _pinned_sparse_rows(arm, build)
     if pinned is None:
         raise SystemExit(f"pinned sparse rows for {arm} incomplete or mixed (see stderr); no fallback")
     return pinned   # {} when the arm has not run at this pin (absent, not partial)
@@ -831,7 +889,9 @@ def sparse_table(rows):
     # runs.jsonl and are untouched: they are not ArcadeDB runs, their own
     # versions did not change, and the F9 control re-runs one of them to
     # license keeping the other two.
-    arc = _sparse_2681_rows()
+    arc_all = _sparse_2681_rows(build="all")
+    arc_builds = _builds_of_rows([r for rs in arc_all.values() for r in rs])
+    arc_by_build = {b: {t: [r for r in rs if _AI.build_of(r) == b] for t, rs in arc_all.items()} for b in arc_builds}
     order = ["arcadedb_sparse_embedded", "qdrant_sparse", "milvus_sparse",
              "elasticsearch_sparse"]
     tiers = (("tiny", "100k"), ("small", "1M"), ("medium", "8.84M"))
@@ -851,7 +911,8 @@ def sparse_table(rows):
     # which is the side of the trade the sparse narrative uses less.
     lines = [r"\begin{tabular}{llrrr}", r"\toprule",
              r"System & Tier & p50 (ms) & p99 (ms) & R@10 \\", r"\midrule"]
-    for i, be in enumerate(order):
+    blocks = [(be, b) for be in order for b in (arc_builds if be == "arcadedb_sparse_embedded" and arc_builds else [None])]
+    for i, (be, bld) in enumerate(blocks):
         if i:
             lines.append(r"\addlinespace")
         for j, (sc, lab) in enumerate(tiers):
@@ -866,10 +927,10 @@ def sparse_table(rows):
                 # has not run at this pin, and the `if not g` branch four
                 # lines down already renders that as "--". Indexing raised
                 # KeyError instead and took the whole publish with it.
-                g = arc.get(sc) or []
+                g = arc_by_build.get(bld, {}).get(sc) or []
             # The system name labels its block once; repeating it down three
             # rows is noise the eye has to subtract.
-            head = NAMES[be] if j == 0 else ""
+            head = _build_name(NAMES[be], bld, len(arc_builds) > 1 or "native" in arc_builds) if j == 0 else ""
             if not g:
                 lines.append(" & ".join([head, lab, "--", "--", "--"]) + r" \\")
                 continue
@@ -935,6 +996,20 @@ def mp_arms_present(small=False):
     return base + _optional_arms_present(cand, os.path.basename(cand), optional)
 
 
+# The in-process ArcadeDB arms of the dense overlay (the others are served or comparators, which have no native build).
+MP_INPROCESS_ARMS = ("fp32", "int8")
+
+
+def _refuse_partial_native(cand, label, arms=MP_INPROCESS_ARMS, prefix="mp"):
+    """The native build's overlay files (mp_<arm>_native_b<k>.json) are all there or none: a partial native run is a run in progress,
+    and publishing it beside a complete JVM overlay would print a native arm built from fewer builds than its twin."""
+    have = {a: [b for b in range(1, MP_BUILDS + 1) if os.path.isfile(os.path.join(cand, f"{prefix}_{a}_native_b{b}.json"))]
+            for a in arms}
+    if any(have.values()) and any(len(v) != MP_BUILDS for v in have.values()):
+        part = {a: len(v) for a, v in have.items() if len(v) != MP_BUILDS}
+        raise SystemExit(f"{label}: the native build's overlay is partial {part} of {MP_BUILDS} builds per arm; no fallback, re-run the arm")
+
+
 def dense_mp_dir():
     """results/dense_mp5_<pin>: complete, or absent, or refuse. PINNED ONLY: a
     fallback to an older overlay would publish an older engine's numbers
@@ -965,6 +1040,7 @@ def dense_mp_dir():
     if missing:
         raise SystemExit(f"dense_mp5_{pin}: {len(missing)} of {len(MP_ARMS) * MP_BUILDS} files missing "
                          f"(e.g. {missing[0]}); no fallback, re-run the arm")
+    _refuse_partial_native(cand, f"dense_mp5_{pin}")
     return cand
 
 
@@ -1016,6 +1092,7 @@ def _dense_multipass():
     # could not decide whether an 85% cold-latency move between two engine
     # builds was a regression or noise. It is now five, one per build.
     stats = {}
+    _both_builds = bool(glob.glob(os.path.join(dense_mp_dir(), "mp_*_native_b*.json"))) and not _AI.wanted_build()
     for fp in sorted(glob.glob(os.path.join(dense_mp_dir(), "mp_*_b*.json"))):
         try:
             passes = json.load(open(fp))
@@ -1025,6 +1102,14 @@ def _dense_multipass():
             continue
         p0 = passes[0]
         be = p0.get("backend")
+        if is_official_client_row(p0):
+            # the same rule as load_canonical: a served ArcadeDB overlay measured through the other client is not published
+            print(f"  set aside {os.path.basename(fp)}: not measured through the benchmark's own HTTP client")
+            continue
+        _ob = _AI.build_of(p0)
+        _want = _AI.wanted_build()
+        if _want and _ob not in (None, _want):
+            continue                      # a one-build freeze reads that build's overlay files only
         label = NAMES.get(be, be)
         if be == "arcadedb_dense_embedded":
             q = str(p0.get("quantization", "")).lower()
@@ -1036,6 +1121,8 @@ def _dense_multipass():
             # this; the server arm was the one row still asserting.
             q = str(p0.get("quantization", "")).lower()
             label = "ArcadeDB (srv, int8)" if "int8" in q else "ArcadeDB (srv, fp32)"
+        if _ob and _both_builds:
+            label = f"{label} [{_ob}]"    # both builds in the directory: two arms, never one pooled label
         s = stats.setdefault(label, {"build": [], "cold": [], "warm": [],
                                      "cold99": [], "recall": []})
         # One value per BUILD for anything that is a property of the build.
@@ -1381,7 +1468,7 @@ def main(freeze=True):
     rows = load_canonical()
     print(f"{len(rows)} canonical rows")
     if freeze:
-        freeze_paper_rows(load_canonical(include_twins=True))
+        freeze_paper_rows(rows)
     tabular_table(rows)
     graph_table(rows)
     sparse_table(rows)

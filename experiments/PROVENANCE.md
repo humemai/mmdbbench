@@ -14,7 +14,8 @@ The benchmark harness was developed in [humemai/arcadedb-embedded-python](https:
 | `land_stage.py`, `test_land_stage_branch.py` (taken whole: `land_stage.py` pushes a branch and never `main`) and the two sentences of `PUBLISHING.md` that name its flag and the pulled-file knob | `f5f42f3228` (2026-11-14) | `bench/landing-fixes-2611` | 3 |
 | layout and path edits of the step 2 files (root lookups, `BINDINGS_REPO`, links, skips without the runbook) | written here, on `4272386cfa` | | 3 |
 | `test_moved_paths.py`, `.github/workflows/test-experiments.yml`, the hook exclusions of `.pre-commit-config.yaml` | written here | | 3 |
-| `benchmarks/python-bindings/` (the frozen artifact of the SciPy 2026 paper, 91 files, byte-identical, never edited here) | `6463877445` (2026-10-06, the last commit that touched it; the tree is the same at `4272386cfa` and at the origin's `main`) | `main` | 4 |
+| `benchmarks/python-bindings/` (the frozen artifact of the SciPy 2026 paper, 91 files, byte-identical, never edited here) | `6463877445` (2026-10-06, the last commit that touched it; the tree is the same at `4272386cfa` and at the origin's `main`) | `main` | 3b |
+| origin PR 554 over `4272386cfa`: four ArcadeDB arms (`arcadedb` and `arcadedb-jvm`), PostgreSQL-wire twin, official driver, page and landing code (68 files, `CAMPAIGN.md` left out; `land_stage.py` stays at its step 3 version) | `17be3f686b` (2026-11-09) | `bench/arcadedb-import-26111` | 4 |
 
 `f5f42f3228` is a descendant of `4272386cfa` that also holds the commits of origin PRs 554 and 584, so its `land_stage.py` carries their options too (`--post1-reps`, `--post-tag`, `BENCH_LAND_PULLED_FILE`); `post1_rows.py`, which `--post1-reps` imports, arrives with those PRs.
 
@@ -28,7 +29,7 @@ The rows carry the engine version, the engine commit and the wheel, but no harne
 | --- | --- | --- | --- |
 | Comparators, 2611 passes | `main` of the origin at the start of each stage (a stage pulls `main` before it runs); `4272386cfa` is the base of the copy, commits of `main` after it (for example `31fcc9bc7b`, 2026-11-09) are not in the copy | `main` | in part (the base) |
 | PG+AGE reruns (visited probe budget, `statement_timeout` limit) | `9559b02953` (2026-11-13), the two commits of origin PR 596 on `4272386cfa` | `bench/comparator-reruns-2611-on-4272386` | not yet |
-| ArcadeDB four arms, JVM and native, 26.11.1 | `eb7c767d97` (2026-11-07), part of origin PR 554 | `bench/arcadedb-import-26111` | not yet |
+| ArcadeDB four arms, JVM and native, 26.11.1 | `eb7c767d97` (2026-11-07), part of origin PR 554 | `bench/arcadedb-import-26111` | yes, step 4 (the tree is `17be3f686b`, which holds `eb7c767d97` and seven later commits of the PR) |
 | PostgreSQL-wire twin and HTTP catch-up cells | `defe8f18ac` (2026-11-08) | `bench/catchup-2611` | not yet |
 | Rerun of the embedded cells with the 26.11.1.post2 wheels | `00f9e7d723` (2026-11-11), origin PR 554 and PR 584 combined, plus two commits | `bench/post2-rerun-on-livepin` | not yet |
 

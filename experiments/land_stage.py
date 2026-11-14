@@ -461,6 +461,46 @@ def publish_branch(branch, message, site_files, tracked):
     return 0
 
 
+def apply_overlay_merge(specs, exclude_arms, pin, results=None):
+    """--overlay-merge LABEL:PIN:DIR (repeatable) and --overlay-exclude ARM: build results/dense_mp5_<pin> and dense_mp5_small_<pin> from the
+    overlay directories of other sources (humemai/mmdbbench#28, #29), through overlay_merge.merge: the comparators of another engine pin, a
+    catch-up directory of the same pin. DIR holds dense_mp5_<PIN> and/or dense_mp5_small_<PIN> (also with the host's `_2611` suffix). The
+    directory a landing already holds is a source too, so nothing is overwritten silently; a name collision refuses."""
+    if not specs:
+        return
+    import overlay_merge
+    results = Path(results) if results else RESULTS
+    parsed = []
+    for spec in specs:
+        parts = spec.split(":", 2)
+        if len(parts) != 3 or not all(parts):
+            sys.exit(f"REFUSING: --overlay-merge {spec!r} must be LABEL:PIN:DIR")
+        parsed.append(parts)
+    for stem in ("dense_mp5", "dense_mp5_small"):
+        target = results / f"{stem}_{pin}"
+        sources = [("existing@" + pin, target)] if target.is_dir() else []
+        for label, spin, d in parsed:
+            src = next((c for c in (Path(d) / f"{stem}_{spin}", Path(d) / f"{stem}_{spin}{ROWS_SUFFIX}") if c.is_dir()), None)
+            if src is None:
+                print(f"  overlay-merge: no {stem}_{spin} in {d}")
+                continue
+            sources.append((f"{label}@{spin}", src))
+        if sources:
+            lines = overlay_merge.merge(sources, target, exclude_arms=tuple(exclude_arms))
+            print(f"  {target.name}: {len(lines)} file(s) from {len(sources)} source(s), MANIFEST.txt beside them")
+
+
+def pull_post_rows(post_file, pin, tag, dest, scp=None):
+    """The rerun's rows file: the local merged file named by --post-file when given (the post2 rows live in two worktrees, so no single scp has
+    them; humemai/mmdbbench#29), else the one file of the host by name. A --post-file that is not a file stops: it never falls back to the host."""
+    if post_file:
+        if not Path(post_file).is_file():
+            sys.exit(f"REFUSING: --post-file {post_file} is not a file; not falling back to pulling from {HOST}.")
+        shutil.copyfile(post_file, dest)
+        return
+    (scp or sh)(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('runs_page', pin, '_' + tag + '.jsonl')}", str(dest)])
+
+
 def apply_mp_builds(n):
     """--mp-builds N: the dense overlay of this landing holds N builds per arm (humemai/mmdbbench#27). The environment carries it to
     every step that counts overlay files (make_paper_tables.mp_builds() reads BENCH_MP_BUILDS), so there is one number and one
@@ -526,6 +566,14 @@ def main():
     ap.add_argument("--post1-reps", type=int, default=0, metavar="N",
                     help="also pull runs_page_<pin>_2611_post1.jsonl (the wheels-only rerun) and land, per cell, the rows of ONE wheel "
                          "(post1_rows.resolve at N repetitions); exits nonzero on a cell that would mix wheels or is short of repetitions. Off by default")
+    ap.add_argument("--overlay-merge", action="append", default=[], metavar="LABEL:PIN:DIR",
+                    help="build the dense overlay directories of this landing from another source's directories (the comparators of another "
+                         "engine pin, a catch-up directory); repeatable; a name collision refuses (humemai/mmdbbench#28, #29)")
+    ap.add_argument("--overlay-exclude", action="append", default=[], metavar="ARM",
+                    help="with --overlay-merge: leave this arm's overlay files out (its JVM and native files)")
+    ap.add_argument("--post-file", default="", metavar="FILE",
+                    help="the rerun's rows as one local file (merge the worktrees' files first, tools/merge_fourarm_rows.py), instead of pulling "
+                         "runs_page_<pin>_2611_<postN>.jsonl from the host")
     ap.add_argument("--mp-builds", type=int, default=0, metavar="N",
                     help="builds per arm of the dense overlay this landing holds: sets BENCH_MP_BUILDS for the steps below "
                          "(make_paper_tables.mp_builds(); humemai/mmdbbench#27). Default: BENCH_MP_BUILDS from the environment, else 3")
@@ -617,6 +665,7 @@ def main():
                check=False)
             have = sorted((RESULTS / d).glob(f"mp_{arm}_b*.json"))
             print(f"  {d}: {len(have)} files for {arm}")
+    apply_overlay_merge(args.overlay_merge, args.overlay_exclude, args.pin)
 
     # THE E4 TABLE IS A DIRECTORY OF ARTIFACTS, NOT ROWS IN THE JSONL, and
     # nothing pulled it. `export_web` aborts outright when
@@ -676,7 +725,7 @@ def main():
         if not re.fullmatch(r"post\d+", args.post_tag):
             sys.exit(f"REFUSING: --post-tag {args.post_tag!r} must look like post2")
         _p1 = SCRATCH / f"runs_page_host_{args.post_tag}.jsonl"
-        sh(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('runs_page', args.pin, '_' + args.post_tag + '.jsonl')}", str(_p1)])
+        pull_post_rows(args.post_file, args.pin, args.post_tag, _p1)
         rows, _dec, _prob = post1_rows.resolve(rows + post1_rows.load_jsonl(str(_p1)), args.post1_reps, orphans=args.post1_orphans)
         for _d in _dec:
             print("  post1: " + _d)

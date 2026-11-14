@@ -33,6 +33,18 @@ HOST = os.environ.get("BENCH_LAND_HOST", "mini")
 RESULTS = os.environ.get("BENCH_FOURARM_RESULTS", "benchmarks/experiments/results")
 
 
+def pull_targets(pin, rows_name="runs_page_{pin}_2611.jsonl", worktrees=""):
+    """[(worktree, remote file)]: the rows file of each worktree. `rows_name` takes {pin} (the post2 rerun writes runs_page_{pin}_2611_post2.jsonl);
+    `worktrees` is a colon-separated list that replaces the four four-arm directories (the post2 rerun's are ~/post2-wt/jvm and native)."""
+    bases = [b for b in worktrees.split(":") if b] if worktrees else PULL
+    return [(b, f"{b}/{RESULTS}/{rows_name.format(pin=pin)}") for b in bases]
+
+
+def local_name(i, base):
+    """Where a pulled copy lands: numbered, so two worktrees of one file name never overwrite each other (humemai/mmdbbench#29)."""
+    return f"{i}-{os.path.basename(base)}.jsonl"
+
+
 def merge(paths):
     first, best, order, seen = {}, {}, [], {}
     for path in paths:
@@ -65,15 +77,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
     ap.add_argument("--pull", metavar="PIN9")
+    ap.add_argument("--rows-name", default="runs_page_{pin}_2611.jsonl", help="the rows file name in each worktree, {pin} filled from --pull")
+    ap.add_argument("--worktrees", default="", help="colon-separated worktrees to pull from, instead of the four four-arm directories")
     ap.add_argument("sources", nargs="*")
     a = ap.parse_args()
     srcs = list(a.sources)
     d = tempfile.mkdtemp(prefix="fourarm-rows-") if a.pull else None
     try:                                  # the pulled copies are removed whatever happens (a failed scp used to leave /tmp/fourarm-rows-* behind)
         if a.pull:
-            for i, base in enumerate(PULL):
-                dst = os.path.join(d, f"{i}-{os.path.basename(base)}.jsonl")
-                r = subprocess.run(["scp", "-q", f"{HOST}:{base}/{RESULTS}/runs_page_{a.pull}_2611.jsonl", dst])
+            for i, (base, remote) in enumerate(pull_targets(a.pull, a.rows_name, a.worktrees)):
+                dst = os.path.join(d, local_name(i, base))
+                r = subprocess.run(["scp", "-q", f"{HOST}:{remote}", dst])
                 if r.returncode != 0:
                     if "catchup" in base:
                         print(f"note: no catch-up file {base} (not started yet?)", file=sys.stderr)

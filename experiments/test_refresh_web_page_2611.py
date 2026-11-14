@@ -49,7 +49,7 @@ def _ids(exported):
 def test_the_one_target_is_the_dbbench_lane_pages():
     assert R.PAGE_SOURCE == "src/lib/dbbench/lanes.ts"
     assert R.PAGE_DATA == "src/data/dbbench-benchmarks.json"
-    assert "page_check" in R.GATES and len(R.GATES) == 7
+    assert "page_check" in R.GATES and "landing_gates" in R.GATES and len(R.GATES) == 8
 
 
 def test_there_is_no_preview_or_skeleton_route(monkeypatch):

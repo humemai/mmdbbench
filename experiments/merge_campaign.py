@@ -188,10 +188,23 @@ def main():
     # (BUGS-20260830 F12). Idempotent on the canonical key was never enough;
     # it has to be idempotent on the row. A row is "already here" when a
     # stored row has the same canonical key and the same ts_utc.
-    _have = {(key(r), str(r.get("ts_utc"))) for r in existing}
+    # "already here" is the same canonical key, the same ts_utc AND the same run_id: the twin rows of one cell on the two HTTP clients (the official driver and the lean client) share a key
+    # and, in a generated fixture, a time, and are two rows, not one row twice.
+    _have = {(key(r), str(r.get("ts_utc")), r.get("run_id")): r for r in existing}
     _n = len(incoming)
-    incoming = [r for r in incoming if (key(r), str(r.get("ts_utc"))) not in _have]
-    print(f"already present : {_n - len(incoming)} of {_n} incoming rows, skipped")
+    # G2 (humemai/mmdbbench#78): a row skipped as "already present" is a drop. It is reported, written to dropped_rows.jsonl beside the store, and REFUSED when the stored row
+    # of that key and time differs in gav, backend_arm, a client, the durability class, the build, the scale or the workload.
+    import landing_gates as _G
+    _skipped = [(r, _have[(key(r), str(r.get("ts_utc")), r.get("run_id"))], "already present: same canonical key, ts_utc and run_id") for r in incoming
+                if (key(r), str(r.get("ts_utc")), r.get("run_id")) in _have]
+    _bad = _G.drop_problems(_skipped)
+    if _bad:
+        sys.exit("REFUSING: the merge would drop " + str(len(_bad)) + " row(s) that are not a retry of a stored row:\n  " + "\n  ".join(_bad[:10]))
+    incoming = [r for r in incoming if (key(r), str(r.get("ts_utc")), r.get("run_id")) not in _have]
+    print(f"already present : {_n - len(incoming)} of {_n} incoming rows, skipped (identical identity, none differs in an arm, class, client, build, scale or workload)")
+    if a.apply and _skipped:
+        _sha = _G.write_dropped(os.path.join(os.path.dirname(CANON), "dropped_rows.jsonl"), [_G.drop_record(d, k, why) for d, k, why in _skipped])
+        print(f"dropped rows    : {len(_skipped)} listed in dropped_rows.jsonl beside the store, sha256 {_sha}")
     if not incoming:
         print("nothing new to merge.")
         return

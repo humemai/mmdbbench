@@ -17,7 +17,7 @@ Descended from the binding-suite orchestrator
     memory caps, tier, repeats; every row in runs.jsonl carries run metadata.
 
 Usage (smoke):    python3 runner.py --lanes l1 --scale tiny --reps 1
-Paper (serial):   python3 runner.py --lanes l1,l2,l3s,l3d,l4 --scale medium --reps 5
+Paper (serial):   python3 runner.py --lanes l1,l2,l3s,l3d,l4 --scale medium --reps 3
 Sweep (parallel): python3 runner.py --parallel 3 --tier sweep ...
 """
 import argparse
@@ -4665,7 +4665,7 @@ def main():
                     help="all (default) runs every job; pgwire runs only the PostgreSQL-wire sensitivity twins "
                          "(a twin-only catch-up, DECISIONS #263). A selection with no such twin runs nothing and exits 0.")
     ap.add_argument("--scale", default="tiny", choices=list(MEM_BY_SCALE))
-    ap.add_argument("--reps", type=int, default=5)
+    ap.add_argument("--reps", type=int, default=3)   # the target n: the n=4 and n=5 passes are dropped (the owner, 2026-11-14)
     ap.add_argument("--only-reps", default="",
                     help="comma-separated rep numbers to run (e.g. '5' or '2,4'); "
                          "empty = all 1..reps")

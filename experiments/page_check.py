@@ -1414,7 +1414,9 @@ def _roster_arms(lane, RN, table):
         # protocol (Memgraph, LadybugDB, the int8 siblings of Neo4j, MongoDB and ArangoDB) is not on it and is not owed a row.
         import export_web as EW
         import make_paper_tables as MPT
-        overlay = {bk for arm, bk, _label, _ours in EW.DENSE_10M_ARMS if arm in MPT.MP_ARMS}
+        # the arms THIS landing holds (BENCH_MP_ARMS, humemai/mmdbbench#27 and #70), not the constant list of the n=5 plan
+        _held = set(MPT.mp_arms_present(small=False))
+        overlay = {bk for arm, bk, _label, _ours in EW.DENSE_10M_ARMS if arm in _held}
         owed = {a for a in owed if a in overlay or a in BC.DENSE_PQ_ARMS}
     return registered, owed
 

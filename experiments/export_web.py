@@ -6309,7 +6309,8 @@ def _censored_notes(table_id):
                     f"inside its budget and was not retried, so there is no row. What it reported: "
                     f"{secs}")
             pins = [scale_label(lane, scale), str(secs)]
-        merged.setdefault((kind, tail, tuple(pins)), []).append(_with_build(display_name(backend), _build))
+        merged.setdefault((kind, tail, tuple(pins)), []).append(
+            _with_build((_dense_arm_label(backend) if lane == "l3d" else None) or display_name(backend), _build))   # the label of the outcome row (#89)
 
     # ONE SENTENCE FOR THE ENGINES THAT HAVE THE SAME THING TO SAY. Three
     # engines were censored at TPC-H SF10 and the page printed three sentences

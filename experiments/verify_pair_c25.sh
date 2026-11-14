@@ -23,8 +23,6 @@ IMG="${PAIR_IMAGE:-arcadedb-c25:${SHORT}}"
 # tree and exits (test_pair_scripts.py holds this).
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 [ -z "${BENCH_PRINT_REPO:-}" ] || { echo "REPO=$REPO"; exit 0; }
-# The engine bindings (bindings/python: scripts/build.sh and dist/) are not in this repository: BINDINGS_REPO names the checkout that holds them.
-BINDINGS_REPO="${BINDINGS_REPO:?set BINDINGS_REPO to the checkout that holds bindings/python (its scripts/build.sh and dist/)}"
 # engine_matches <the engine version the image reports> <the wheel's version>.
 # A .devN wheel reports its own .devN (or the bare X.Y.Z of a snapshot jar), so .devN is dropped on both sides, as it always was.
 # A wheels-only X.Y.Z.postN ships the engine of X.Y.Z (DECISIONS #297; engine_pin.jar_pin says the same for the jars), and the native
@@ -38,6 +36,8 @@ engine_matches() {
   [ "$e" = "$w" ]
 }
 [ -z "${BENCH_PAIR_VERSION_CHECK:-}" ] || { set -- ${BENCH_PAIR_VERSION_CHECK}; if engine_matches "${1-}" "${2-}"; then echo MATCH; else echo MISMATCH; fi; exit 0; }
+# The engine bindings (bindings/python: scripts/build.sh and dist/) are not in this repository: BINDINGS_REPO names the checkout that holds them.
+BINDINGS_REPO="${BINDINGS_REPO:?set BINDINGS_REPO to the checkout that holds bindings/python (its scripts/build.sh and dist/)}"
 # The image the embedded arm runs: dbbench:arcadedb-<version> (build_images.sh tags it with the wheel's version; there is no floating tag).
 EMBEDDED_IMAGE="${EMBEDDED_IMAGE:-}"
 fail() { echo "PAIR UNVERIFIED: $*"; exit 1; }

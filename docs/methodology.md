@@ -10,7 +10,7 @@ These are the rules every published result follows. A result that breaks one of 
    Every deviation is listed on the [Engines](engines.md) page with the reason. An index added for one engine is added, in its equivalent form, for every engine that has one.
 4. **Equal resources.** Every engine gets the same memory cap and CPU allotment inside a lane, and the same durability classes are measured for every engine that offers them
    (a relaxed class and a strict class where the engine supports both).
-5. **Repetitions and medians.** Each cell is run up to five times, in whole passes of one repetition each: three repetitions for every engine first (the four ArcadeDB arms included), then a fourth, then a fifth. The page prints the median with the minimum and maximum, never a single run and never the mean, and states the number of repetitions behind a table whenever it is below five.
+5. **Repetitions and medians.** Each cell is run three times, in whole passes of one repetition each, for every engine (the four ArcadeDB arms included). The page prints the median with the minimum and maximum, never a single run and never the mean, and states the number of repetitions behind a table whenever it is below three. With three repetitions a difference below about 1.3 times is not claimed.
 6. **Budgets and censoring.** A query that cannot finish within its time budget is recorded as censored, with the budget, and is never silently dropped or counted as fast. Where an engine
    can be asked to stop a query itself, the budget is enforced by the engine; otherwise it is checked between iterations.
 7. **Failures are results.** An engine that runs out of memory, times out or refuses a task has that recorded as its result for the cell, with the error it gave.

@@ -143,6 +143,19 @@ def test_the_settings_read_back_from_cratedbs_single_statement_table_are_declare
     assert not any(re.search(pat, "crud_insert_p50_ms") for pat, _why in PC.NOT_PRINTED)      # a result field is not swallowed
 
 
+# ---------------------------------------------------------------- (d) one version string per engine
+def test_cratedb_prints_the_same_version_string_on_the_document_tables_and_the_durability_table():
+    """The preview made version_consistency_check fail: 'CrateDB publishes 2 different version strings: crate 6.4.6, cratedb 6.4.6'. The document tables name the engine from
+    its server image repo (`crate`, the pin table's version), the durability table from the row's own string ('CrateDB 6.4.6', no image). The rows record the product name,
+    and every other engine spells its product name (the image 'mongo' prints as 'mongodb', 'postgres' as 'postgresql': _ENGINE_SPELLING), so CrateDB is 'cratedb'."""
+    image = "crate@sha256:e7bded344df487e2595f59d7edaa0cf96979a00ba51f12ee66d7fcf8cd65f5f4"
+    docs = EW._engine_version("CrateDB", "6.4.6", image=image, commit=None)                  # the call of the document tables: the image's pinned version
+    durability = EW._engine_version("CrateDB", "CrateDB 6.4.6", image=None)                  # the call of the durability table: the row's own string
+    assert docs == durability == "cratedb 6.4.6", (docs, durability)
+    mongo_docs = EW._engine_version("MongoDB", "9.0.4", image="mongo@sha256:" + "0" * 64, commit=None)
+    assert mongo_docs == EW._engine_version("MongoDB", "mongodb 9.0.4", image=None) == "mongodb 9.0.4"    # the precedent this follows
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

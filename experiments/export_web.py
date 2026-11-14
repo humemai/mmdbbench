@@ -405,6 +405,7 @@ def _overlay_commit() -> str | None:
 _ENGINE_SPELLING = {
     "mongo": "mongodb",
     "postgres": "postgresql",
+    "crate": "cratedb",       # the image repo is `crate`, the rows record 'CrateDB 6.4.6', and the durability table names the engine from the row (humemai/mmdbbench#59)
 }
 
 

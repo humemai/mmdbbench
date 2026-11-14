@@ -169,7 +169,10 @@ def _is_arcade(backend):
 
 
 def newest_per_cell(rows):
-    """One row per run_id, the newest by ts_utc.
+    """One row per (build, run_id, arm), the newest by ts_utc.
+
+    The arm is `gav is False` (the no-view run of l2 olap, backend_arm "nogav"): the two arms of one rep share the run_id, and so do the JVM and the
+    native chain. Keyed on run_id alone the later row of a rep replaced the other arm's row (humemai/mmdbbench#77).
 
     A results file is append-only, so a re-run of a fixed cell leaves the old
     row in place beside the new one. Without this the gate reads the two as one
@@ -179,7 +182,7 @@ def newest_per_cell(rows):
     """
     best = {}
     for r in rows:
-        rid = r.get("run_id")
+        rid = (r.get("engine_backend"), r.get("run_id"), r.get("gav") is False) if r.get("run_id") else None
         if not rid:
             best[id(r)] = r
             continue

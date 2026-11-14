@@ -284,14 +284,19 @@ def _one_version(rs, where):
     carries one string either way, so version_consistency_check sees nothing.
     """
     _AI.refuse_pooled_builds(rs, where)   # (engine_version, build) is the arm: native and jvm rows of one release are two arms
-    seen = {str(r.get("engine_version")) for r in rs if r.get("engine_version")}
+    # A `.postN` wheel row is its release when every in-process ArcadeDB row of that release names one engine commit (arm_identity.post_releases,
+    # humemai/mmdbbench#53): the jars are the release's, the entry prints the release, and the raw rows keep the wheel. Anything else is as before.
+    releases = _AI.post_releases(rs)
+    seen = {_AI.release_version(r, releases) for r in rs if r.get("engine_version")}
     if len(seen) > 1:
         raise SystemExit(
             f"REFUSING: {where} pools rows that ran on different engine versions "
             f"{sorted(seen)}, and the entry prints one of them beside a median over "
             f"all of them. Whichever is printed, the cell names a build some of its "
             f"own numbers did not come from. Supersede the stale rows rather than "
-            f"publishing across them.")
+            f"publishing across them."
+            + (" (A .postN wheel counts as its release only when every in-process ArcadeDB row of that release names one engine commit.)"
+               if any(re.search(r"\.post\d+$", v) for v in seen) else ""))
     return rs[0]
 
 

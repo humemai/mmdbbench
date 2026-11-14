@@ -17,7 +17,8 @@ definition of `build`:
 `select_build(rows, want)` is the one place a freeze picks a build: with BENCH_ENGINE_BACKEND=native|jvm the other build's in-process
 ArcadeDB rows leave the freeze (they stay in runs.jsonl); without it BOTH builds stay, and the page shows them side by side as two arms
 (`splits_page`, `build_label`: "ArcadeDB (embedded, native build)" next to "ArcadeDB (embedded, JVM build)"). A table entry still never
-pools the two (`refuse_pooled_builds`). `pair_problems(rows)` is the gate over a two-build freeze: one engine commit, one engine_version.
+pools the two (`refuse_pooled_builds`). `pair_problems(rows)` is the gate over a two-build freeze: one engine commit, one engine_version
+(a `.postN` wheel of the release counts as the release: `name_post_wheels`, `post_releases`).
 No import of ArcadeDB, no I/O beyond reading engine_commit_equiv.json (through engine_pin): safe in every consumer, including the ones that read old rows.
 """
 import os
@@ -174,13 +175,55 @@ def strip_build(label):
     return label[:-len(f", {name})")] + ")" if label.endswith(f", {name})") else label[:-len(f" ({name})")]
 
 
+# A `.postN` WHEEL IS ITS RELEASE (humemai/mmdbbench#53). A wheels-only 26.11.1.postN changes the Python and native glue of the bindings, not the
+# engine: it carries the engine jars of 26.11.1 (DECISIONS #297, engine_pin.jar_pin; the byte-identity of the jars is proven at the release, #324
+# and #330). A rerun on it replaces the row of its cell at the cell's own pin (#327) and the page and the paper never name the rerun, so the freeze
+# names the release, and every gate that compares the engine of two rows reads a `.postN` row of the same engine as that release. What the rows keep
+# of the wheel (`wheel_label`, `wheel_name`, `wheel_sha256`, and `engine_version` itself in the raw rows file) is the raw identity, untouched.
+# The exception is narrow and is decided here, once: only an in-process ArcadeDB row, only to its own release (a post wheel of 26.11.2 is 26.11.2,
+# never 26.11.1), and only while every in-process row of that release names ONE non-empty engine_commit. Rows of a release under two commits, or
+# naming none, prove nothing about the jars: they keep their `.postN` string and the gates refuse them as before.
+def engine_release(version):
+    """The engine release a wheel version names: "26.11.1.post3" -> "26.11.1"; every other string (a dev build, a server banner, a comparator) as is."""
+    return engine_pin.jar_pin(str(version or ""))
+
+
+def post_releases(rows):
+    """The releases whose `.postN` rows may be read as the release: every in-process ArcadeDB row of the release names one non-empty engine_commit."""
+    commits = {}
+    for r in rows:
+        if in_process(r) and r.get("engine_version"):
+            commits.setdefault(engine_release(r["engine_version"]), set()).add(str(r.get("engine_commit") or ""))
+    return {rel for rel, cs in commits.items() if len(cs) == 1 and "" not in cs}
+
+
+def release_version(r, releases):
+    """The engine_version the row names for a gate or the page: its release when `r` is an in-process row of a post wheel and `releases` (from
+    `post_releases` over the same rows) vouches for it, else the row's own string."""
+    v = str(r.get("engine_version") or "")
+    rel = engine_release(v)
+    return rel if rel != v and in_process(r) and rel in releases else v
+
+
+def name_post_wheels(rows):
+    """The rows of a freeze with `engine_version` of every post-wheel row set to its release (see above); the input rows are not changed."""
+    releases = post_releases(rows)
+    out = []
+    for r in rows:
+        v = release_version(r, releases)
+        out.append(r if v == r.get("engine_version") else dict(r, engine_version=v))
+    return out
+
+
 def pair_problems(rows):
     """What stops a two-build freeze from being published, as a list of sentences (empty: fine).
 
     The two builds of one release are built from ONE engine commit. A freeze whose native and JVM rows name different engine_versions
-    or different engine commits compares two engines, not two builds of one, so the page must not print them side by side.
+    or different engine commits compares two engines, not two builds of one, so the page must not print them side by side. A `.postN` wheel
+    row counts as its release (`post_releases`): the engine_commit is still compared as is, so a post row of another commit is refused.
     """
     out = []
+    releases = post_releases(rows)
     by = {}
     for r in rows:
         if built(r) and build_of(r):
@@ -190,7 +233,8 @@ def pair_problems(rows):
     for field in ("engine_version", "engine_commit"):
         # engine_version of a served row is the server's own build string ("server:<v> (build ...)"), not the wheel's: compare the wheels' versions
         # on the in-process rows; the commit is one value for every ArcadeDB row, served ones included.
-        seen = {b: sorted({str(r.get(field) or "") for r in rs if field != "engine_version" or in_process(r)} - {""}) for b, rs in by.items()}
+        seen = {b: sorted({(release_version(r, releases) if field == "engine_version" else str(r.get(field) or "")) for r in rs
+                           if field != "engine_version" or in_process(r)} - {""}) for b, rs in by.items()}
         flat = {v for vs in seen.values() for v in vs}
         if len(flat) > 1:
             out.append(f"the two ArcadeDB builds name different {field} values {seen}; one release is built from one engine commit")

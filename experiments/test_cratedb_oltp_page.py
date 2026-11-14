@@ -134,6 +134,15 @@ def test_the_cold_column_names_cratedbs_first_query_by_its_display_name():
     assert "crud_insert" not in text and "insert / new-order" in text, text
 
 
+# ---------------------------------------------------------------- (d) the settings of the single-statement table
+def test_the_settings_read_back_from_cratedbs_single_statement_table_are_declared_not_printed():
+    """The preview made page_check A2 say 'UNCOVERED l1tpc: 2 measured field(s) are neither a column nor declared: cratedb_crud_refresh_interval_ms, cratedb_crud_shards'."""
+    import re
+    for field in ("cratedb_crud_shards", "cratedb_crud_refresh_interval_ms"):
+        assert any(re.search(pat, field) for pat, _why in PC.NOT_PRINTED), field
+    assert not any(re.search(pat, "crud_insert_p50_ms") for pat, _why in PC.NOT_PRINTED)      # a result field is not swallowed
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

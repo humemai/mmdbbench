@@ -2147,10 +2147,12 @@ def _equivalence_notes(rows):
                         f"compared, because it "
                         f"{str(d)[len(bench_common.CENSORED_ANSWER_PREFIX):]}")
     for tid, by_reason in unexpr.items():
+        grouped = {}      # the same reason for the same engines is said once, with every query it covers
         for (query, why), names in by_reason.items():
-            _n = sorted(names)
-            per_table[tid].append(f"{_join_and(_n)} cannot "
-                                  f"express {query}: {why}")
+            grouped.setdefault((why, tuple(sorted(names))), []).append(query)
+        for (why, names), queries in grouped.items():
+            per_table[tid].append(f"{_join_and(list(names))} cannot "
+                                  f"express {_queries_phrase(queries)}: {why}")
     out = {}
     _lc = _lifecycle_answer_note(groups)
     if _lc:
@@ -4777,31 +4779,35 @@ def _jvm_memory_note_fixed_heap(table):
         # THE HEAPS OF AN ARM ARE READ OVER EVERY SIZE OF THE TABLE, not off its first entry: CrateDB runs a 4g heap at tpch1 and an 8g heap at tpch10, and
         # quoting the first size's figure against 4g printed "143 per cent of its 4g heap" beside a column that holds the 8g size. An arm with more than one
         # heap on the table is named and never quoted (the rule the comment above states); the example is its first entry's cell as before.
-        seen = found.setdefault(e.get("backend"), [set(), float(cell["median"])])
-        seen[0] |= heaps
-    found = {b: (next(iter(hs)) if len(hs) == 1 else None, gib) for b, (hs, gib) in found.items()}
+        # EVERY CELL IS KEPT with the heap it ran (an entry whose rows ran two heaps has none to read it against): the heap follows the memory cap, so every JVM arm of
+        # the real tables ran a different heap at each size, and an example that asked for one heap on the whole table was dropped from four tables.
+        found.setdefault(e.get("backend"), []).append((next(iter(heaps)) if len(heaps) == 1 else None, float(cell["median"]),
+                                                       str(e.get("scale_label") or e.get("scale") or "").split(" (")[0]))
     if not found:
         return None
     names = _join_and(sorted(found))
     _one = len(found) == 1
-    # The biggest cell among them carries the example, so the sentence names a
-    # number the reader can find in the column rather than an average of them.
-    quotable = {k: v for k, v in found.items() if v[0]}
+    # THE EXAMPLE IS ONE CELL of the column, read against the heap that cell ran, so the sentence names a number the reader can find rather than an average of
+    # them. An arm that ran one heap on the whole table comes first (the highest per cent of its heap); with none, the highest cell of any arm, and the size of the
+    # cell is named when the table has several (an arm that ran two heaps is never quoted as if it had one).
+    one_heap = [b for b, cs in found.items() if cs[0][0] and len({h for h, _g, _s in cs}) == 1]
+    pool = [(b, c) for b in (one_heap or found) for c in found[b] if c[0]]
+    several = len({str(e.get("scale")) for e in table.get("entries", [])}) > 1
     head = (f"{names} {'runs' if _one else 'run'} on a JVM, and for {'it' if _one else 'them'} "
             f"this column is close to the heap {'it was' if _one else 'they were'} given rather "
             f"than the memory the work needed")
     tail = ("Every engine on a table gets the same memory envelope; how much of it a JVM "
             "takes is a property of the runtime, so read these cells against each other "
             "rather than against an engine that manages its own memory.")
-    if not quotable:
-        # Every JVM arm here ran more than one heap across this table's sizes,
-        # so there is no single figure to quote and the sentence says the thing
-        # that is true without one.
+    if not pool:
+        # No cell of this table has a heap to be read against, so there is no
+        # figure to quote and the sentence says the thing that is true without one.
         return _gen(f"{head}. {tail}", names)
-    who, (heap, gib) = max(quotable.items(), key=lambda kv: kv[1][1])
+    who, (heap, gib, size) = max(pool, key=lambda bc: bc[1][1] / float(bc[1][0][:-1]))
     pct = f"{gib / float(heap[:-1]) * 100:.0f}"
-    return _gen(f"{head}: {who}'s {gib:.2f} GiB here is about {pct} per cent of its {heap} heap. {tail}",
-                names, f"{gib:.2f}", pct, heap)
+    where = f"at {size}" if several and size else "here"
+    return _gen(f"{head}: {who}'s {gib:.2f} GiB {where} is about {pct} per cent of its {heap} heap. {tail}",
+                names, f"{gib:.2f}", pct, heap, *([size] if where != "here" else []))
 
 
 def _owned_side(r, side):
@@ -6699,9 +6705,26 @@ def _unexpressible_cells():
     return out
 
 
+# THE ANSWER-CHECK QUERIES OF THE DOCUMENT TRANSACTION TABLE, in the words of its columns. `neworder` and `payment` are the two transactions (the new-order and
+# payment columns); `stock` and `payments` are the untimed end-state checks that read what those transactions wrote (the part stock counters, the payments table):
+# the page prints no column for them, so they are named in one clause, never as a raw key.
+_ANSWER_QUERY_WORDS = {"neworder": "new-order", "payment": "payment"}
+_END_STATE_CHECKS = ("stock", "payments")
+
+
+def _queries_phrase(queries):
+    qs = sorted(set(queries))
+    main = [_ANSWER_QUERY_WORDS.get(q, q) for q in qs if q not in _END_STATE_CHECKS]
+    checks = [q for q in qs if q in _END_STATE_CHECKS]
+    if not checks:
+        return _join_and(main)
+    tail = f"the {_join_and(sorted(checks))} checks that read their end state"
+    return f"{_join_and(main)} (and {tail})" if main else tail
+
+
 def _unexpressible_notes(table_id, entries):
-    """One sentence per engine that declared it cannot ask a query here, and
-    the same fact registered as a structured absence."""
+    """One sentence per engine and distinct reason for the queries it declared it cannot ask here (the reason said once, the queries named as the table's
+    columns name them), and the same facts registered as structured absences, one per query."""
     lane_wl = _TABLE_LANE.get(table_id)
     if not lane_wl:
         return []
@@ -6713,15 +6736,20 @@ def _unexpressible_notes(table_id, entries):
         name = display_name(backend)
         if not any(str(e.get("backend")) == name for e in entries):
             continue
+        by_reason = {}
         for query, reason in sorted(queries.items()):
-            why = _gen(f"{name} does not answer {query} on this table: the engine's "
-                       f"own language cannot express it, declared by the adapter "
-                       f"rather than left blank ({reason}).", name, query, reason)
-            notes.append(why)
-            rec = {"backend": name, "column": None, "kind": "unexpressible",
-                   "query": query, "why": why}
+            by_reason.setdefault(reason, []).append(query)
+            rec = {"backend": name, "column": None, "kind": "unexpressible", "query": query,
+                   "why": (f"{name} does not answer {query} on this table: the engine's "
+                           f"own language cannot express it, declared by the adapter "
+                           f"rather than left blank ({reason}).")}
             if rec not in _DECLARED_ABSENCES[table_id]:
                 _DECLARED_ABSENCES[table_id].append(rec)
+        for reason, qs in by_reason.items():
+            phrase = _queries_phrase(qs)
+            notes.append(_gen(f"{name} cannot express {phrase} on this table: the adapter "
+                              f"declared them not expressible rather than leaving them blank "
+                              f"({reason}).", name, phrase, reason))
     return notes
 
 

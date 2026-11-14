@@ -2759,8 +2759,9 @@
         "These are not LDBC Benchmark Results. This table is derived from the LDBC Social Network Benchmark and credits the Linked Data Benchmark Council (LDBC) under CC BY 4.0; we ran it ourselves, it was not audited by an LDBC-approved auditor, and LDBC has not endorsed it.",
         "How this differs from the LDBC standard: the data is the full SF1 network of LDBC's published Interactive datasets, not a Business Intelligence dataset; the nine pattern-matching counts are LSQB's (the Labelled Subgraph Query Benchmark, which LDBC hosts), taken nearly verbatim from its published Cypher, with the friends-of-friends pair excluded at this size, and the other queries are our own; there is no LDBC Business Intelligence workload, driver, update microbatch, power or throughput test, no audit and no price/performance figure; the harness is our own Python code, and the engines are embedded in that process or served from containers under one fixed CPU set and memory cap.",
         "The Graph Analytical View is a copy of the graph that ArcadeDB builds in memory, laid out for questions that sweep the whole graph rather than follow a few links. Rows labelled GAV ran with it built, once, before any query was timed, and the view build column is what that took.",
+        "Each pair of rows labelled with and without GAV (ArcadeDB (embedded, JVM build) and ArcadeDB (embedded, GAV, JVM build); ArcadeDB (embedded, native build) and ArcadeDB (embedded, GAV, native build); ArcadeDB (server, JVM build) and ArcadeDB (server, GAV, JVM build); ArcadeDB (server, native build) and ArcadeDB (server, GAV, native build)) is the same engine on the same data, differing only in whether that view is built; the answer check confirms both return the same answers.",
         "ArcadeDB's served rows time every call through the benchmark's own minimal HTTP client, lean_http (http.client, keep-alive) (source: experiments/lean_http.py), which keeps one persistent http.client connection per host. The other engines are measured through their vendors' own Python clients, so client weight differs between the served engines.",
-        "ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: Neo4j's 13.81 GiB here is about 115 per cent of its 12g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory. ArcadeDB (embedded, JVM build) and ArcadeDB (embedded, native build) run on a JVM too, but they start with no initial heap size, so their column follows what the work needed and not the heap the JVM was allowed to grow into.",
+        "ArcadeDB (server, GAV, JVM build), ArcadeDB (server, GAV, native build), ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: Neo4j's 13.81 GiB here is about 115 per cent of its 12g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory. ArcadeDB (embedded, GAV, JVM build), ArcadeDB (embedded, GAV, native build), ArcadeDB (embedded, JVM build), and ArcadeDB (embedded, native build) run on a JVM too, but they start with no initial heap size, so their column follows what the work needed and not the heap the JVM was allowed to grow into.",
         "Each repetition runs every query 100 times; the p50 and p99 are over those runs.",
         "ArcadeDB's indexes on the `id` of Country, City, Forum, Post, Comment, Tag, and TagClass are hash indexes (`UNIQUE_HASH`), because the benchmark never ranges over or orders by those ids. A hash index keeps no key order: an equality lookup goes straight to its bucket instead of walking a sorted tree, and building it can cost more than building a sorted index when the ids arrive in ascending order, which is the order this loader sends them. Any such cost is in ArcadeDB's ingest and index times on this table.",
         "SurrealDB (server) at SF1FULL (10k people, 181k friendships): the analytics cell exceeded its 2 hour budget, the same budget every engine on this table had, on its first attempt and was not retried; there is no row. It was still in query lsqb_q1 when the budget ran out.",
@@ -2793,6 +2794,7 @@
         "LSQB Q7 p50 ms",
         "LSQB Q8 p50 ms",
         "cold first query ms",
+        "view build s",
         "ingest vertices+edges/s",
         "ingest total s",
         "peak memory GiB",
@@ -2938,6 +2940,146 @@
           }
         },
         {
+          "backend": "ArcadeDB (embedded, GAV, native build)",
+          "build": "native",
+          "backend_key": "arcadedb_graph_embedded",
+          "is_arcadedb": true,
+          "precision": null,
+          "scale": "sf1full",
+          "scale_label": "SF1FULL (10k people, 181k friendships)",
+          "workload": "olap",
+          "n_docs": null,
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": null,
+          "metrics": {
+            "average friend age p50 ms": {
+              "median": 96.16,
+              "min": 95.8,
+              "max": 96.47,
+              "n": 3
+            },
+            "average friend age p99 ms": {
+              "median": 97.64,
+              "min": 97.22,
+              "max": 98.75,
+              "n": 3
+            },
+            "friends in same city p50 ms": {
+              "median": 88.44,
+              "min": 88.35,
+              "max": 88.54,
+              "n": 3
+            },
+            "most friends p50 ms": {
+              "median": 16.21,
+              "min": 16.15,
+              "max": 16.53,
+              "n": 3
+            },
+            "degree distribution p50 ms": {
+              "median": 105.35,
+              "min": 105.31,
+              "max": 105.61,
+              "n": 3
+            },
+            "triangle count p50 ms": {
+              "median": 98.37,
+              "min": 98.05,
+              "max": 98.59,
+              "n": 3
+            },
+            "LSQB Q1 p50 ms": {
+              "median": 283.51,
+              "min": 282.76,
+              "max": 284.08,
+              "n": 3
+            },
+            "LSQB Q2 p50 ms": {
+              "median": 233.58,
+              "min": 233.39,
+              "max": 234.56,
+              "n": 3
+            },
+            "LSQB Q3 p50 ms": {
+              "median": 147.26,
+              "min": 147.09,
+              "max": 147.4,
+              "n": 3
+            },
+            "LSQB Q4 p50 ms": {
+              "median": 167.66,
+              "min": 167.23,
+              "max": 179.88,
+              "n": 3
+            },
+            "LSQB Q5 p50 ms": {
+              "median": 419.91,
+              "min": 417.4,
+              "max": 465.3,
+              "n": 3
+            },
+            "LSQB Q7 p50 ms": {
+              "median": 167.08,
+              "min": 166.36,
+              "max": 167.21,
+              "n": 3
+            },
+            "LSQB Q8 p50 ms": {
+              "median": 213.94,
+              "min": 213.93,
+              "max": 213.97,
+              "n": 3
+            },
+            "cold first query ms": {
+              "median": 38.6,
+              "min": 35.7,
+              "max": 43.39,
+              "n": 3
+            },
+            "ingest vertices+edges/s": {
+              "median": 1157.0205,
+              "min": 1140.945,
+              "max": 1160.2619,
+              "n": 3
+            },
+            "ingest total s": {
+              "median": 164.66,
+              "min": 164.2,
+              "max": 166.98,
+              "n": 3
+            },
+            "view build s": {
+              "median": 22.155,
+              "min": 22.058,
+              "max": 23.054,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 2.5941,
+              "min": 2.5652,
+              "max": 2.6122,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 1.6218,
+              "min": 1.6218,
+              "max": 1.6227,
+              "n": 3
+            },
+            "owned memory after queries GiB": {
+              "median": 2.1023,
+              "min": 2.0982,
+              "max": 2.1568,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "16g"
+            }
+          }
+        },
+        {
           "backend": "ArcadeDB (embedded, JVM build)",
           "build": "jvm",
           "backend_key": "arcadedb_graph_embedded",
@@ -3064,6 +3206,146 @@
               "median": 4.2039,
               "min": 4.1684,
               "max": 4.2187,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "16g"
+            }
+          }
+        },
+        {
+          "backend": "ArcadeDB (embedded, GAV, JVM build)",
+          "build": "jvm",
+          "backend_key": "arcadedb_graph_embedded",
+          "is_arcadedb": true,
+          "precision": null,
+          "scale": "sf1full",
+          "scale_label": "SF1FULL (10k people, 181k friendships)",
+          "workload": "olap",
+          "n_docs": null,
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": null,
+          "metrics": {
+            "average friend age p50 ms": {
+              "median": 64.79,
+              "min": 63.71,
+              "max": 66.9,
+              "n": 3
+            },
+            "average friend age p99 ms": {
+              "median": 95.39,
+              "min": 94.57,
+              "max": 98.12,
+              "n": 3
+            },
+            "friends in same city p50 ms": {
+              "median": 57.61,
+              "min": 53.66,
+              "max": 58.22,
+              "n": 3
+            },
+            "most friends p50 ms": {
+              "median": 12.03,
+              "min": 11.96,
+              "max": 12.31,
+              "n": 3
+            },
+            "degree distribution p50 ms": {
+              "median": 60.09,
+              "min": 58.97,
+              "max": 60.16,
+              "n": 3
+            },
+            "triangle count p50 ms": {
+              "median": 56.27,
+              "min": 55.25,
+              "max": 57.4,
+              "n": 3
+            },
+            "LSQB Q1 p50 ms": {
+              "median": 235.18,
+              "min": 233.84,
+              "max": 237.78,
+              "n": 3
+            },
+            "LSQB Q2 p50 ms": {
+              "median": 202.34,
+              "min": 198.91,
+              "max": 204.07,
+              "n": 3
+            },
+            "LSQB Q3 p50 ms": {
+              "median": 107.8,
+              "min": 101.14,
+              "max": 107.83,
+              "n": 3
+            },
+            "LSQB Q4 p50 ms": {
+              "median": 100.08,
+              "min": 99.84,
+              "max": 100.85,
+              "n": 3
+            },
+            "LSQB Q5 p50 ms": {
+              "median": 316.2,
+              "min": 314.19,
+              "max": 316.98,
+              "n": 3
+            },
+            "LSQB Q7 p50 ms": {
+              "median": 106.07,
+              "min": 105.43,
+              "max": 106.07,
+              "n": 3
+            },
+            "LSQB Q8 p50 ms": {
+              "median": 169.72,
+              "min": 169.08,
+              "max": 170.96,
+              "n": 3
+            },
+            "cold first query ms": {
+              "median": 246.84,
+              "min": 227.01,
+              "max": 266.39,
+              "n": 3
+            },
+            "ingest vertices+edges/s": {
+              "median": 1615.4922,
+              "min": 1615.3553,
+              "max": 1627.9159,
+              "n": 3
+            },
+            "ingest total s": {
+              "median": 117.93,
+              "min": 117.03,
+              "max": 117.94,
+              "n": 3
+            },
+            "view build s": {
+              "median": 18.103,
+              "min": 17.078,
+              "max": 18.122,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 15.2345,
+              "min": 14.6602,
+              "max": 15.3474,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 1.6224,
+              "min": 1.622,
+              "max": 1.6226,
+              "n": 3
+            },
+            "owned memory after queries GiB": {
+              "median": 10.5578,
+              "min": 10.1397,
+              "max": 11.047,
               "n": 3
             },
             "JVM heap": {
@@ -3206,6 +3488,146 @@
           }
         },
         {
+          "backend": "ArcadeDB (server, GAV, native build)",
+          "build": "native",
+          "backend_key": "arcadedb_graph_server",
+          "is_arcadedb": true,
+          "precision": null,
+          "scale": "sf1full",
+          "scale_label": "SF1FULL (10k people, 181k friendships)",
+          "workload": "olap",
+          "n_docs": null,
+          "deployment": "server",
+          "image": "arcadedata/arcadedb@sha256:2a8460b1a02a802f4599147364d94b0b8ef8846c8e1471c0a342eb7e31af836d",
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": null,
+          "metrics": {
+            "average friend age p50 ms": {
+              "median": 134.68,
+              "min": 134.58,
+              "max": 137.68,
+              "n": 3
+            },
+            "average friend age p99 ms": {
+              "median": 140.85,
+              "min": 140.14,
+              "max": 158.54,
+              "n": 3
+            },
+            "friends in same city p50 ms": {
+              "median": 109.09,
+              "min": 108.99,
+              "max": 109.3,
+              "n": 3
+            },
+            "most friends p50 ms": {
+              "median": 21.94,
+              "min": 21.77,
+              "max": 25.61,
+              "n": 3
+            },
+            "degree distribution p50 ms": {
+              "median": 127.36,
+              "min": 126.9,
+              "max": 137.45,
+              "n": 3
+            },
+            "triangle count p50 ms": {
+              "median": 103.56,
+              "min": 103.49,
+              "max": 103.91,
+              "n": 3
+            },
+            "LSQB Q1 p50 ms": {
+              "median": 295.15,
+              "min": 294.73,
+              "max": 295.89,
+              "n": 3
+            },
+            "LSQB Q2 p50 ms": {
+              "median": 258.09,
+              "min": 256.8,
+              "max": 258.36,
+              "n": 3
+            },
+            "LSQB Q3 p50 ms": {
+              "median": 159.3,
+              "min": 159.18,
+              "max": 159.48,
+              "n": 3
+            },
+            "LSQB Q4 p50 ms": {
+              "median": 195.02,
+              "min": 194.79,
+              "max": 195.54,
+              "n": 3
+            },
+            "LSQB Q5 p50 ms": {
+              "median": 444.81,
+              "min": 444.1,
+              "max": 446.47,
+              "n": 3
+            },
+            "LSQB Q7 p50 ms": {
+              "median": 194.91,
+              "min": 194.67,
+              "max": 195.25,
+              "n": 3
+            },
+            "LSQB Q8 p50 ms": {
+              "median": 234.6,
+              "min": 234.52,
+              "max": 235.73,
+              "n": 3
+            },
+            "cold first query ms": {
+              "median": 32.43,
+              "min": 28.1,
+              "max": 50.51,
+              "n": 3
+            },
+            "ingest vertices+edges/s": {
+              "median": 880.6277,
+              "min": 828.0021,
+              "max": 999.2919,
+              "n": 3
+            },
+            "ingest total s": {
+              "median": 216.34,
+              "min": 190.65,
+              "max": 230.09,
+              "n": 3
+            },
+            "view build s": {
+              "median": 30.628,
+              "min": 29.063,
+              "max": 31.703,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 3.5432,
+              "min": 3.5084,
+              "max": 3.8281,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 1.0593,
+              "min": 1.0591,
+              "max": 1.0594,
+              "n": 3
+            },
+            "owned memory after queries GiB": {
+              "median": 1.9144,
+              "min": 1.8567,
+              "max": 1.9611,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "16g"
+            }
+          }
+        },
+        {
           "backend": "ArcadeDB (server, JVM build)",
           "build": "jvm",
           "backend_key": "arcadedb_graph_server",
@@ -3332,6 +3754,146 @@
               "median": 4.3966,
               "min": 4.2463,
               "max": 4.4029,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "16g"
+            }
+          }
+        },
+        {
+          "backend": "ArcadeDB (server, GAV, JVM build)",
+          "build": "jvm",
+          "backend_key": "arcadedb_graph_server",
+          "is_arcadedb": true,
+          "precision": null,
+          "scale": "sf1full",
+          "scale_label": "SF1FULL (10k people, 181k friendships)",
+          "workload": "olap",
+          "n_docs": null,
+          "deployment": "server",
+          "image": "arcadedb-c25:a3a5d1245",
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": null,
+          "metrics": {
+            "average friend age p50 ms": {
+              "median": 63.1,
+              "min": 58.99,
+              "max": 64.01,
+              "n": 3
+            },
+            "average friend age p99 ms": {
+              "median": 124.54,
+              "min": 93.44,
+              "max": 180.59,
+              "n": 3
+            },
+            "friends in same city p50 ms": {
+              "median": 58.94,
+              "min": 55.26,
+              "max": 59.6,
+              "n": 3
+            },
+            "most friends p50 ms": {
+              "median": 13.18,
+              "min": 12.81,
+              "max": 14.37,
+              "n": 3
+            },
+            "degree distribution p50 ms": {
+              "median": 60.7,
+              "min": 60.56,
+              "max": 60.85,
+              "n": 3
+            },
+            "triangle count p50 ms": {
+              "median": 56.29,
+              "min": 55.96,
+              "max": 59.27,
+              "n": 3
+            },
+            "LSQB Q1 p50 ms": {
+              "median": 220.6,
+              "min": 174.66,
+              "max": 226.22,
+              "n": 3
+            },
+            "LSQB Q2 p50 ms": {
+              "median": 216.25,
+              "min": 186.46,
+              "max": 218.14,
+              "n": 3
+            },
+            "LSQB Q3 p50 ms": {
+              "median": 114.37,
+              "min": 111.13,
+              "max": 116.8,
+              "n": 3
+            },
+            "LSQB Q4 p50 ms": {
+              "median": 100.74,
+              "min": 95.75,
+              "max": 101.25,
+              "n": 3
+            },
+            "LSQB Q5 p50 ms": {
+              "median": 314.77,
+              "min": 310.31,
+              "max": 326.08,
+              "n": 3
+            },
+            "LSQB Q7 p50 ms": {
+              "median": 102.36,
+              "min": 99.53,
+              "max": 106.1,
+              "n": 3
+            },
+            "LSQB Q8 p50 ms": {
+              "median": 166.99,
+              "min": 166.44,
+              "max": 169.83,
+              "n": 3
+            },
+            "cold first query ms": {
+              "median": 97.89,
+              "min": 92.56,
+              "max": 101.2,
+              "n": 3
+            },
+            "ingest vertices+edges/s": {
+              "median": 1337.135,
+              "min": 1329.9476,
+              "max": 1376.6529,
+              "n": 3
+            },
+            "ingest total s": {
+              "median": 142.48,
+              "min": 138.39,
+              "max": 143.25,
+              "n": 3
+            },
+            "view build s": {
+              "median": 18.104,
+              "min": 17.124,
+              "max": 18.12,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 15.2229,
+              "min": 15.1951,
+              "max": 16.6907,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 1.0592,
+              "min": 1.0592,
+              "max": 1.0595,
+              "n": 3
+            },
+            "owned memory after queries GiB": {
+              "median": 8.9628,
+              "min": 6.9205,
+              "max": 9.1795,
               "n": 3
             },
             "JVM heap": {
@@ -4444,6 +5006,7 @@
         "LSQB Q7 p50 ms": "down",
         "LSQB Q8 p50 ms": "down",
         "cold first query ms": "down",
+        "view build s": "down",
         "ingest vertices+edges/s": "up",
         "ingest total s": "down",
         "peak memory GiB": "down",
@@ -4488,6 +5051,30 @@
           "why": "LSQB Q9 was not run at this size, for any engine."
         },
         {
+          "backend": "ArcadeDB (embedded, GAV, JVM build)",
+          "column": "LSQB Q6 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q6 was not run at this size, for any engine."
+        },
+        {
+          "backend": "ArcadeDB (embedded, GAV, JVM build)",
+          "column": "LSQB Q9 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q9 was not run at this size, for any engine."
+        },
+        {
+          "backend": "ArcadeDB (embedded, GAV, native build)",
+          "column": "LSQB Q6 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q6 was not run at this size, for any engine."
+        },
+        {
+          "backend": "ArcadeDB (embedded, GAV, native build)",
+          "column": "LSQB Q9 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q9 was not run at this size, for any engine."
+        },
+        {
           "backend": "ArcadeDB (server, JVM build)",
           "column": "LSQB Q6 p50 ms",
           "kind": "not measured",
@@ -4507,6 +5094,30 @@
         },
         {
           "backend": "ArcadeDB (server, native build)",
+          "column": "LSQB Q9 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q9 was not run at this size, for any engine."
+        },
+        {
+          "backend": "ArcadeDB (server, GAV, JVM build)",
+          "column": "LSQB Q6 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q6 was not run at this size, for any engine."
+        },
+        {
+          "backend": "ArcadeDB (server, GAV, JVM build)",
+          "column": "LSQB Q9 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q9 was not run at this size, for any engine."
+        },
+        {
+          "backend": "ArcadeDB (server, GAV, native build)",
+          "column": "LSQB Q6 p50 ms",
+          "kind": "not measured",
+          "why": "LSQB Q6 was not run at this size, for any engine."
+        },
+        {
+          "backend": "ArcadeDB (server, GAV, native build)",
           "column": "LSQB Q9 p50 ms",
           "kind": "not measured",
           "why": "LSQB Q9 was not run at this size, for any engine."
@@ -18370,22 +18981,35 @@
         "values": []
       },
       {
-        "text": "ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: Neo4j's 13.81 GiB here is about 115 per cent of its 12g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory.",
+        "text": "Each pair of rows labelled with and without GAV (ArcadeDB (embedded, JVM build) and ArcadeDB (embedded, GAV, JVM build); ArcadeDB (embedded, native build) and ArcadeDB (embedded, GAV, native build); ArcadeDB (server, JVM build) and ArcadeDB (server, GAV, JVM build); ArcadeDB (server, native build) and ArcadeDB (server, GAV, native build)) is the same engine on the same data, differing only in whether that view is built; the answer check confirms both return the same answers.",
         "values": [
-          "ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j",
+          "ArcadeDB (embedded, JVM build)",
+          "ArcadeDB (embedded, GAV, JVM build)",
+          "ArcadeDB (embedded, native build)",
+          "ArcadeDB (embedded, GAV, native build)",
+          "ArcadeDB (server, JVM build)",
+          "ArcadeDB (server, GAV, JVM build)",
+          "ArcadeDB (server, native build)",
+          "ArcadeDB (server, GAV, native build)"
+        ]
+      },
+      {
+        "text": "ArcadeDB (server, GAV, JVM build), ArcadeDB (server, GAV, native build), ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: Neo4j's 13.81 GiB here is about 115 per cent of its 12g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory.",
+        "values": [
+          "ArcadeDB (server, GAV, JVM build), ArcadeDB (server, GAV, native build), ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j",
           "13.81",
           "115",
           "12g"
         ]
       },
       {
-        "text": "ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: Neo4j's 13.81 GiB here is about 115 per cent of its 12g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory. ArcadeDB (embedded, JVM build) and ArcadeDB (embedded, native build) run on a JVM too, but they start with no initial heap size, so their column follows what the work needed and not the heap the JVM was allowed to grow into.",
+        "text": "ArcadeDB (server, GAV, JVM build), ArcadeDB (server, GAV, native build), ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: Neo4j's 13.81 GiB here is about 115 per cent of its 12g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory. ArcadeDB (embedded, GAV, JVM build), ArcadeDB (embedded, GAV, native build), ArcadeDB (embedded, JVM build), and ArcadeDB (embedded, native build) run on a JVM too, but they start with no initial heap size, so their column follows what the work needed and not the heap the JVM was allowed to grow into.",
         "values": [
-          "ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j",
+          "ArcadeDB (server, GAV, JVM build), ArcadeDB (server, GAV, native build), ArcadeDB (server, JVM build), ArcadeDB (server, native build), and Neo4j",
           "13.81",
           "115",
           "12g",
-          "ArcadeDB (embedded, JVM build) and ArcadeDB (embedded, native build)"
+          "ArcadeDB (embedded, GAV, JVM build), ArcadeDB (embedded, GAV, native build), ArcadeDB (embedded, JVM build), and ArcadeDB (embedded, native build)"
         ]
       },
       {

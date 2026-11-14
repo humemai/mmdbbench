@@ -50,7 +50,7 @@ def test_the_roster_gate_passes_both_arms_and_names_short_cells_and_orphans():
 
 def test_the_committed_roster_is_the_stage_generators_and_names_both_gav_arms():
     doc = G.load_roster()
-    assert doc["cells"] == G.roster_cells() and doc["cells_sha256"]
+    assert (doc["cells"], doc["outside_cells"]) == G.roster_cells() and doc["cells_sha256"]
     arms = {(c["backend"], c["arm"]) for c in doc["cells"] if c["lane"] == "l2" and c["workload"] == "olap"}
     assert ("arcadedb_graph_embedded", "") in arms and ("arcadedb_graph_embedded", "nogav") in arms and ("arcadedb_graph_server", "nogav") in arms
 
@@ -97,6 +97,45 @@ def test_an_arm_that_export_web_keeps_off_the_page_is_not_owed_by_the_page_gate(
     rows = [dict(row(i), lane="l1tpc", backend="postgres_tuned", workload="oltp", scale="tpch1", run_id=f"x{i}") for i in (1, 2, 3)]
     roster = {"cells": [dict(lane="l1tpc", scale="tpch1", workload="oltp", backend="postgres_tuned", cls="relaxed", arm="")]}
     assert G.page_problems({"tables": [{"id": "docs_oltp", "entries": []}]}, rows, roster) == []
+
+
+def test_the_roster_carries_the_arms_outside_the_profile_with_their_source_line():
+    """neo4j_e2, falkordb and the other arms of make_2611_stages.OUTSIDE are registered but not in the paper pass: no stage mentions them. They are not staged cells (the gate does not
+    fail on them) and are printed in their own section with the source line."""
+    doc = G.load_roster()
+    assert {c["backend"] for c in doc["outside_cells"]} >= {"neo4j_e2", "falkordb_graph"}
+    assert not [c for c in doc["cells"] if c["backend"].startswith(("neo4j_e2", "falkordb"))]
+    assert doc["outside"]["prefixes"] == ["neo4j_e2", "falkordb", "milvus", "elasticsearch", "chroma", "lancedb", "questdb"]
+    assert doc["outside"]["source"].startswith("experiments/make_2611_stages.py:") and doc["outside"]["source"].split(":")[1].isdigit()
+    text = "\n".join(G.outside_section(doc))
+    assert "outside the profile (by design, source: experiments/make_2611_stages.py:" in text and "neo4j_e2" in text
+
+
+PEND = {"cell": "l2/sf10/oltp/pgage_graph/relaxed", "reason": "not run: censored at sf1, so censored here too (cap rule); the sf1 failure was the harness's fault and was rerun clean",
+        "ref": "DECISIONS #188", "since": "pending rerun after the PG+AGE sf1 fix, 2026-11-14"}
+
+
+def _pend_roster():
+    return {"cells": [dict(lane="l2", scale="sf10", workload="oltp", backend="pgage_graph", cls="relaxed", arm="")]}
+
+
+def test_a_pending_cell_is_printed_not_failed_and_a_stale_entry_is_refused():
+    roster = _pend_roster()
+    assert G.roster_problems([], roster)[0] == ["MISSING l2/sf10/oltp/pgage_graph/relaxed: staged, no row"]
+    probs, summ = G.roster_problems([], roster, pending=[PEND])
+    assert probs == [] and summ["pending"] == [PEND["cell"]] and summ["unexplained"] == 0
+    rows = [dict(row(i), lane="l2", backend="pgage_graph", workload="oltp", scale="sf10", engine_backend=None, run_id=f"pg{i}") for i in (1, 2, 3)]
+    probs, summ = G.roster_problems(rows, roster, pending=[PEND])
+    assert len(probs) == 1 and probs[0].startswith("STALE PENDING l2/sf10/oltp/pgage_graph/relaxed") and "remove it" in probs[0], probs     # the cell has rows now
+    probs, _ = G.roster_problems([], roster, pending=[dict(PEND, cell="l2/sf10/oltp/nosuch/relaxed")])
+    assert any(p.startswith("UNKNOWN PENDING") for p in probs), probs                                    # an entry that names no staged cell
+
+
+def test_the_committed_pending_list_names_staged_cells_and_carries_a_reason_a_reference_and_a_date():
+    pending = G.load_pending()
+    cells = {f"{c['lane']}/{c['scale']}/{c['workload']}/{c['backend']}/{c['cls']}" + (f"/{c['arm']}" if c["arm"] else "") for c in G.load_roster()["cells"]}
+    assert {p["cell"] for p in pending} == {"l2/sf10/oltp/pgage_graph/relaxed", "l2/sf10/oltp/pgage_graph/strict"}
+    assert all(p["cell"] in cells and p["reason"] and p["ref"] and p["since"] for p in pending)
 
 
 def _w(d, name, rows):

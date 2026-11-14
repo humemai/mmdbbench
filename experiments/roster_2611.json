@@ -74,14 +74,6 @@
   },
   {
    "arm": "",
-   "backend": "neo4j_e2",
-   "cls": "relaxed",
-   "lane": "e2",
-   "scale": "e2",
-   "workload": "atomicity"
-  },
-  {
-   "arm": "",
    "backend": "pg_age_e2",
    "cls": "relaxed",
    "lane": "e2",
@@ -250,22 +242,6 @@
   },
   {
    "arm": "",
-   "backend": "neo4j_e2",
-   "cls": "relaxed",
-   "lane": "e2",
-   "scale": "e2",
-   "workload": "hybrid"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_e2",
-   "cls": "strict",
-   "lane": "e2",
-   "scale": "e2",
-   "workload": "hybrid"
-  },
-  {
-   "arm": "",
    "backend": "pg_age_e2",
    "cls": "relaxed",
    "lane": "e2",
@@ -379,14 +355,6 @@
   {
    "arm": "",
    "backend": "mongodb_e2",
-   "cls": "relaxed",
-   "lane": "e2",
-   "scale": "e2_500k",
-   "workload": "atomicity"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_e2",
    "cls": "relaxed",
    "lane": "e2",
    "scale": "e2_500k",
@@ -555,22 +523,6 @@
   {
    "arm": "",
    "backend": "mongodb_e2",
-   "cls": "strict",
-   "lane": "e2",
-   "scale": "e2_500k",
-   "workload": "hybrid"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_e2",
-   "cls": "relaxed",
-   "lane": "e2",
-   "scale": "e2_500k",
-   "workload": "hybrid"
-  },
-  {
-   "arm": "",
-   "backend": "neo4j_e2",
    "cls": "strict",
    "lane": "e2",
    "scale": "e2_500k",
@@ -1218,22 +1170,6 @@
   },
   {
    "arm": "",
-   "backend": "falkordb_graph",
-   "cls": "relaxed",
-   "lane": "l2",
-   "scale": "sf1",
-   "workload": "oltp"
-  },
-  {
-   "arm": "",
-   "backend": "falkordb_graph",
-   "cls": "strict",
-   "lane": "l2",
-   "scale": "sf1",
-   "workload": "oltp"
-  },
-  {
-   "arm": "",
    "backend": "ladybug_graph",
    "cls": "relaxed",
    "lane": "l2",
@@ -1403,22 +1339,6 @@
   {
    "arm": "",
    "backend": "duckpgq_graph",
-   "cls": "strict",
-   "lane": "l2",
-   "scale": "sf10",
-   "workload": "oltp"
-  },
-  {
-   "arm": "",
-   "backend": "falkordb_graph",
-   "cls": "relaxed",
-   "lane": "l2",
-   "scale": "sf10",
-   "workload": "oltp"
-  },
-  {
-   "arm": "",
-   "backend": "falkordb_graph",
    "cls": "strict",
    "lane": "l2",
    "scale": "sf10",
@@ -1586,14 +1506,6 @@
   },
   {
    "arm": "",
-   "backend": "falkordb_graph",
-   "cls": "relaxed",
-   "lane": "l2",
-   "scale": "sf1full",
-   "workload": "olap"
-  },
-  {
-   "arm": "",
    "backend": "ladybug_graph",
    "cls": "relaxed",
    "lane": "l2",
@@ -1698,14 +1610,6 @@
   },
   {
    "arm": "",
-   "backend": "chroma_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "cratedb_dense",
    "cls": "relaxed",
    "lane": "l3d",
@@ -1722,47 +1626,7 @@
   },
   {
    "arm": "",
-   "backend": "elasticsearch_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "elasticsearch_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "falkordb_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "ladybug_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "lancedb_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "lancedb_dense_fp32",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "deep10m",
@@ -1779,22 +1643,6 @@
   {
    "arm": "",
    "backend": "memgraph_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "milvus_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "deep10m",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "milvus_dense_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "deep10m",
@@ -1946,14 +1794,6 @@
   },
   {
    "arm": "",
-   "backend": "chroma_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "cratedb_dense",
    "cls": "relaxed",
    "lane": "l3d",
@@ -1970,47 +1810,7 @@
   },
   {
    "arm": "",
-   "backend": "elasticsearch_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "elasticsearch_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "falkordb_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "ladybug_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "lancedb_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "lancedb_dense_fp32",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "small",
@@ -2027,22 +1827,6 @@
   {
    "arm": "",
    "backend": "memgraph_dense_int8",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "milvus_dense",
-   "cls": "relaxed",
-   "lane": "l3d",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "milvus_dense_int8",
    "cls": "relaxed",
    "lane": "l3d",
    "scale": "small",
@@ -2186,22 +1970,6 @@
   },
   {
    "arm": "",
-   "backend": "elasticsearch_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "milvus_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "medium",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "pgvector_sparse",
    "cls": "relaxed",
    "lane": "l3s",
@@ -2266,22 +2034,6 @@
   },
   {
    "arm": "",
-   "backend": "elasticsearch_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "milvus_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "small",
-   "workload": "search"
-  },
-  {
-   "arm": "",
    "backend": "pgvector_sparse",
    "cls": "relaxed",
    "lane": "l3s",
@@ -2339,22 +2091,6 @@
   {
    "arm": "",
    "backend": "arcadedb_sparse_server_fp32",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "elasticsearch_sparse",
-   "cls": "relaxed",
-   "lane": "l3s",
-   "scale": "tiny",
-   "workload": "search"
-  },
-  {
-   "arm": "",
-   "backend": "milvus_sparse",
    "cls": "relaxed",
    "lane": "l3s",
    "scale": "tiny",
@@ -2451,14 +2187,6 @@
   {
    "arm": "",
    "backend": "postgres_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts100",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "questdb",
    "cls": "relaxed",
    "lane": "l4",
    "scale": "ts100",
@@ -2571,14 +2299,6 @@
   {
    "arm": "",
    "backend": "postgres_ts",
-   "cls": "relaxed",
-   "lane": "l4",
-   "scale": "ts1000",
-   "workload": "ingest"
-  },
-  {
-   "arm": "",
-   "backend": "questdb",
    "cls": "relaxed",
    "lane": "l4",
    "scale": "ts1000",
@@ -3393,6 +3113,301 @@
    "workload": "vector"
   }
  ],
- "cells_sha256": "55d7b7cef232e2212b6bb1a1f1d377db2b3988847cf9f1739628e6155b58e4e0",
- "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells)"
+ "cells_sha256": "8380ad4a5b8b01f9b6e0ed5618f8450bb62938e13ffb9a8aa46a236edc8ca2df",
+ "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells)",
+ "outside": {
+  "prefixes": [
+   "neo4j_e2",
+   "falkordb",
+   "milvus",
+   "elasticsearch",
+   "chroma",
+   "lancedb",
+   "questdb"
+  ],
+  "rule": "registered arms that are not in the subset of the paper pass (make_2611_stages.OUTSIDE)",
+  "source": "experiments/make_2611_stages.py:431"
+ },
+ "outside_cells": [
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "atomicity"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "relaxed",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "neo4j_e2",
+   "cls": "strict",
+   "lane": "e2",
+   "scale": "e2_500k",
+   "workload": "hybrid"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf1",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "strict",
+   "lane": "l2",
+   "scale": "sf10",
+   "workload": "oltp"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_graph",
+   "cls": "relaxed",
+   "lane": "l2",
+   "scale": "sf1full",
+   "workload": "olap"
+  },
+  {
+   "arm": "",
+   "backend": "chroma_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense_fp32",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "deep10m",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "chroma_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "falkordb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "lancedb_dense_fp32",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_dense_int8",
+   "cls": "relaxed",
+   "lane": "l3d",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "medium",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "small",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "elasticsearch_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "milvus_sparse",
+   "cls": "relaxed",
+   "lane": "l3s",
+   "scale": "tiny",
+   "workload": "search"
+  },
+  {
+   "arm": "",
+   "backend": "questdb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts100",
+   "workload": "ingest"
+  },
+  {
+   "arm": "",
+   "backend": "questdb",
+   "cls": "relaxed",
+   "lane": "l4",
+   "scale": "ts1000",
+   "workload": "ingest"
+  }
+ ]
 }

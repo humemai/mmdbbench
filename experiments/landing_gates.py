@@ -26,6 +26,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROSTER = HERE / "roster_2611.json"
+PENDING = HERE / "roster_pending.json"
 IDENTITY_FIELDS = ("gav", "backend_arm", "arcadedb_http_client", "arcadedb_client_wire", "durability_class", "engine_backend", "scale", "workload")
 COARSE_KEY = ("lane", "backend", "workload", "scale", "rep", "engine_backend", "run_id")
 ARM_FIELDS = ("gav", "backend_arm")
@@ -122,24 +123,51 @@ def collision_problems(rows):
 
 # ------------------------------------------------------------------------------------------------ G1
 def roster_cells():
+    """(cells, outside_cells): the staged cells of the paper pass, and the cells of the registered arms the pass leaves out by design (make_2611_stages.OUTSIDE:
+    no stage script mentions them and the mini holds no row for them)."""
     import make_2611_stages as M
-    cells = set()
+    inside, outside = set(), set()
     for spec in M.STAGES:
         for c in M.stage_cells(spec):
             if c.kind == "lane":
-                cells.add((c.lane, c.scale, c.workload, c.backend, c.cls, c.arm))
-    return [dict(zip(("lane", "scale", "workload", "backend", "cls", "arm"), c)) for c in sorted(cells)]
+                (outside if M.is_outside(c.backend) else inside).add((c.lane, c.scale, c.workload, c.backend, c.cls, c.arm))
+    f = lambda cs: [dict(zip(("lane", "scale", "workload", "backend", "cls", "arm"), c)) for c in sorted(cs)]
+    return f(inside), f(outside)
+
+
+def _outside_rule():
+    import ast
+    import make_2611_stages as M
+    line = next(n.lineno for n in ast.walk(ast.parse(Path(M.__file__).read_text(encoding="utf-8")))
+                if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "OUTSIDE" for t in n.targets))
+    return {"rule": "registered arms that are not in the subset of the paper pass (make_2611_stages.OUTSIDE)", "prefixes": list(M.OUTSIDE),
+            "source": f"experiments/make_2611_stages.py:{line}"}
+
+
+def _sha(cells, outside):
+    return hashlib.sha256(json.dumps({"cells": cells, "outside_cells": outside}, sort_keys=True).encode()).hexdigest()
 
 
 def roster_doc():
-    cells = roster_cells()
-    return {"cells": cells, "cells_sha256": hashlib.sha256(json.dumps(cells, sort_keys=True).encode()).hexdigest(),
+    cells, outside = roster_cells()
+    return {"cells": cells, "outside": _outside_rule(), "outside_cells": outside, "cells_sha256": _sha(cells, outside),
             "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells)"}
+
+
+def outside_section(roster):
+    """Lines for the cells outside the profile by design: printed, never a failure."""
+    out = roster["outside"]
+    by = collections.Counter(c["backend"] for c in roster["outside_cells"])
+    return [f"  outside the profile (by design, source: {out['source']}): {len(roster['outside_cells'])} cell(s) of " + ", ".join(f"{b} {n}" for b, n in sorted(by.items()))]
+
+
+def load_pending(path=PENDING):
+    return json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else []
 
 
 def load_roster(path=ROSTER):
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if hashlib.sha256(json.dumps(doc["cells"], sort_keys=True).encode()).hexdigest() != doc["cells_sha256"]:
+    if _sha(doc["cells"], doc["outside_cells"]) != doc["cells_sha256"]:
         raise SystemExit(f"REFUSING: {path} does not match its own sha256; regenerate it with landing_gates.py roster-gen")
     return doc
 
@@ -168,7 +196,7 @@ def declared_by_page(payload, c):
     return False
 
 
-def roster_problems(rows, roster, lanes=None, need=3, payload=None):
+def roster_problems(rows, roster, lanes=None, need=3, payload=None, pending=None):
     """(problems, summary): MISSING and SHORT staged cells (unexplained) and ORPHAN cells (rows that are in no roster cell). With the page's payload, a cell the page
     declares absent (declared_by_page) is explained."""
     import arm_identity as AI
@@ -183,7 +211,22 @@ def roster_problems(rows, roster, lanes=None, need=3, payload=None):
     max_rep = max([_rep(r) or 0 for r in rows] or [0])
     need = min(need, max_rep) if max_rep else need
     probs, ok, short_explained, in_roster = [], 0, 0, set()
+    # PENDING (roster_pending.json): a staged cell that was skipped, not run, and is waiting for a rerun. Printed, not a failure, and refused once a row exists for it, so the
+    # entry cannot go stale; an entry that names no staged cell is refused too.
+    names = {f"{c['lane']}/{c['scale']}/{c['workload']}/{c['backend']}/{c['cls']}" + (f"/{c['arm']}" if c["arm"] else ""): c for c in cells}
+    pend = {p["cell"]: p for p in pending or []}
+    pending_now = []
+    for name in sorted(pend):
+        c = names.get(name)
+        if c is None:
+            probs.append(f"UNKNOWN PENDING {name}: roster_pending.json names a cell that is not a staged cell of the roster")
+        elif any(k[:6] == (c["lane"], c["scale"], c["workload"], c["backend"], c["cls"], c["arm"]) for k in have):
+            probs.append(f"STALE PENDING {name}: a row exists for the cell now ({pend[name].get('since')}); remove it from roster_pending.json")
+        else:
+            pending_now.append(name)
     for c in cells:
+        if f"{c['lane']}/{c['scale']}/{c['workload']}/{c['backend']}/{c['cls']}" + (f"/{c['arm']}" if c["arm"] else "") in pending_now:
+            continue
         bs = builds if c["backend"].startswith("arcadedb") and AI.built({"backend": c["backend"]}) else [None]
         for b in bs:
             key = (c["lane"], c["scale"], c["workload"], c["backend"], c["cls"], c["arm"], b)
@@ -202,7 +245,7 @@ def roster_problems(rows, roster, lanes=None, need=3, payload=None):
             else:
                 probs.append(f"SHORT {label}: {len(reps)} clean repetition(s) of {need}, no row says why")
     orphans = sorted({k for k in have if k not in in_roster})
-    summary = {"roster_cells": len(cells), "complete": ok, "explained_short": short_explained, "unexplained": len(probs), "orphan_cells": len(orphans), "orphans": orphans}
+    summary = {"roster_cells": len(cells), "complete": ok, "explained_short": short_explained, "unexplained": len(probs), "pending": pending_now, "orphan_cells": len(orphans), "orphans": orphans}
     return probs, summary
 
 
@@ -255,12 +298,17 @@ def main(argv=None):
     rows = M.load_canonical()
     exported = Path(M.RESULTS) / "web_benchmarks.json"
     payload = json.load(open(exported, encoding="utf-8")) if exported.exists() else None
-    probs, summ = roster_problems(rows, roster, lanes, payload=payload)
+    pending = load_pending()
+    probs, summ = roster_problems(rows, roster, lanes, payload=payload, pending=pending)
     cprobs, kinds = collision_problems(rows)
     for p in probs + cprobs:
         print("  " + p)
+    for name in summ["pending"]:
+        pe = next(p for p in pending if p["cell"] == name)
+        print(f"  PENDING {name}: {pe['reason']} ({pe['ref']}; {pe['since']})")
+    print("\n".join(outside_section(roster)))
     print(f"  roster {roster['cells_sha256'][:12]}: {summ['roster_cells']} staged cells, {summ['complete']} complete, {summ['explained_short']} short with a stated reason, "
-          f"{summ['unexplained']} unexplained, {summ['orphan_cells']} orphan cell(s); collisions {kinds or 'none'}")
+          f"{summ['unexplained']} unexplained, {len(summ['pending'])} pending, {summ['orphan_cells']} orphan cell(s); collisions {kinds or 'none'}")
     return 1 if probs or cprobs else 0
 
 

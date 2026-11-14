@@ -79,7 +79,7 @@ def check_citations():
     developer with only the public tree cannot be asked to verify a file they
     do not have.
     """
-    notes = Path(HERE).parent.parent / ".notes" / "bench"
+    notes = Path(HERE).parent / ".notes" / "bench"
     if not notes.is_dir():
         print("  citations    skipped (.notes not checked out)")
         return []

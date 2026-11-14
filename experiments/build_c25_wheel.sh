@@ -6,8 +6,10 @@ set -euo pipefail
 # the main checkout, so run from a worktree it built from, wrote into, and verified against main's
 # bindings/python/dist and .venv: the pair it reported was another tree's. BENCH_PRINT_REPO=1 prints the
 # tree and exits (test_pair_scripts.py holds this).
-REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 [ -z "${BENCH_PRINT_REPO:-}" ] || { echo "REPO=$REPO"; exit 0; }
+# The engine bindings (bindings/python: scripts/build.sh and dist/) are not in this repository: BINDINGS_REPO names the checkout that holds them.
+BINDINGS_REPO="${BINDINGS_REPO:?set BINDINGS_REPO to the checkout that holds bindings/python (its scripts/build.sh and dist/)}"
 WORK="${C25_WORK:-$HOME/engine-builds/c25}"   # where build_matched_pair.sh put the assembly
 LIB=$WORK/ctx/arcadedb-assembly/lib
 DEST=$WORK
@@ -20,12 +22,12 @@ say "building from $(ls "$LIB"/*.jar | wc -l) upstream jars"
 
 # THIRD POSITIONAL, ABSOLUTE. As an env var it is silently ignored and the build
 # falls through to jars from a moving upstream tag while still reporting success.
-bash "$REPO/bindings/python/scripts/build.sh" "" "3.12" "$LIB" > "$DEST/wheel.log" 2>&1 \
+bash "$BINDINGS_REPO/bindings/python/scripts/build.sh" "" "3.12" "$LIB" > "$DEST/wheel.log" 2>&1 \
   || { tail -25 "$DEST/wheel.log"; say "ABORT: wheel build failed"; exit 1; }
 grep -q "Using provided JAR directory\|pre-staged" "$DEST/wheel.log" \
   || { say "ABORT: build.sh did not take the local jars"; grep -m1 "JARs from" "$DEST/wheel.log"; exit 1; }
 
-W=$(ls -t "$REPO"/bindings/python/dist/*.whl | head -1)
+W=$(ls -t "$BINDINGS_REPO"/bindings/python/dist/*.whl | head -1)
 say "wheel $W"
 
 # V0: the wheel must carry the SAME commit as the image, or the pair is not a pair.

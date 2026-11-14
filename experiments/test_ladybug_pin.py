@@ -35,6 +35,8 @@ def test_client_and_dense_images_pin_the_same_ladybug_with_a_hard_equals():
 
 def test_the_documents_name_the_pin_and_no_other_current_one():
     for name in ("COMPARATORS.md", "CAMPAIGN.md", "QUANTIZATION.md"):
+        if not (HERE / name).exists():     # CAMPAIGN.md, the benchmark host's runbook, is not part of the public copy
+            continue
         text = (HERE / name).read_text()
         stale = [l[:100] for l in text.splitlines() if re.search(r"ladybug==0\.2[01]\.\d+", l) and "0.22.0" not in l]
         assert not stale, (name, stale)

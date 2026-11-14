@@ -444,6 +444,8 @@ def test_the_page_gate_declares_the_row_field():
 
 
 def test_campaign_section_7_has_row_73_and_names_the_measurement():
+    if not (HERE / "CAMPAIGN.md").exists():
+        pytest.skip("CAMPAIGN.md is the benchmark host's runbook and is not part of the public copy")
     text = (HERE / "CAMPAIGN.md").read_text()
     row = next(l for l in text.splitlines() if l.startswith("| 73 |"))
     assert "JPype is pinned to 1.7.1 in the benchmark images and recorded per row" in row

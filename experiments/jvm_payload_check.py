@@ -54,7 +54,7 @@ DB_RECEIVERS = {"db", "database", "_db", "jdb"}
 SETTERS = {"set"}
 
 DEFAULT_PATHS = (
-    "benchmarks/experiments",
+    "experiments",
     "bindings/python/src",
     "bindings/python/examples",
     "bindings/python/tests",
@@ -311,7 +311,7 @@ def main(argv):
         return selftest()
 
     here = os.path.dirname(os.path.abspath(__file__))
-    repo = os.path.abspath(os.path.join(here, "..", ".."))
+    repo = os.path.abspath(os.path.join(here, ".."))
     paths = argv[1:] or [os.path.join(repo, p) for p in DEFAULT_PATHS]
     paths = [p for p in paths if os.path.exists(p)]
 

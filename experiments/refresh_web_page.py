@@ -38,8 +38,8 @@ from pathlib import Path
 from publish_instrument import PUBLISH_INSTRUMENT, results_dir
 
 HERE = Path(__file__).resolve().parent
-# repos are siblings: .../humemai/arcadedb-embedded-python and .../humemai/humem.ai
-DEFAULT_SITE = HERE.parents[2] / "humem.ai"
+# repos are siblings: .../humemai/mmdbbench and .../humemai/humem.ai
+DEFAULT_SITE = HERE.parents[1] / "humem.ai"
 
 # One target: the DBBench lane pages. The payload is synced to PAGE_DATA and
 # the tables the lane pages ask for are read from PAGE_SOURCE.
@@ -240,11 +240,11 @@ def main() -> int:
     step(1, "Regenerate tables and figures from the frozen rows")
     # make_paper_figures refuses to emit a figure no .tex includes, so this
     # step is also what fails if a retired figure is still being drawn.
-    run(py + [str(HERE / "make_paper_tables.py")], cwd=HERE.parents[1])
-    run(py + [str(HERE / "make_paper_figures.py")], cwd=HERE.parents[1])
+    run(py + [str(HERE / "make_paper_tables.py")], cwd=HERE.parent)
+    run(py + [str(HERE / "make_paper_figures.py")], cwd=HERE.parent)
 
     step(2, "Export the page data")
-    run(py + [str(HERE / "export_web.py")], cwd=HERE.parents[1])
+    run(py + [str(HERE / "export_web.py")], cwd=HERE.parent)
     # This path is what step 4 copies to the site and what step 3's gates read,
     # so it must name the file the exporter just wrote and not the one before it.
     exported = results_dir() / "web_benchmarks.json"
@@ -254,7 +254,7 @@ def main() -> int:
     step(3, "Gates: nothing is published until every gate agrees")
     for gate in GATES:
         proc = subprocess.run(py + [str(HERE / f"{gate}.py")],
-                              cwd=HERE.parents[1], capture_output=True,
+                              cwd=HERE.parent, capture_output=True,
                               text=True)
         tail = (proc.stdout or proc.stderr).strip().splitlines()[-1:]
         print(f"  {gate:<18} {'ok  ' if proc.returncode == 0 else 'FAIL'} "

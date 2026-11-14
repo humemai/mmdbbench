@@ -37,7 +37,7 @@ from pathlib import Path
 from publish_instrument import PUBLISH_INSTRUMENT, results_dir
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
+REPO = HERE.parent
 DOCS = REPO / "bindings" / "python" / "docs"
 
 # Prose that a re-pin can invalidate, by pattern rather than by file, so a
@@ -88,7 +88,7 @@ def main() -> int:
         print(f"  tables: {len(doc.get('tables', []))}")
 
     step(2, "what still names the old pin")
-    out = sh(["git", "grep", "-l", args.old_pin, "--", ".", ":!benchmarks/experiments/results"], cwd=REPO).stdout
+    out = sh(["git", "grep", "-l", args.old_pin, "--", ".", ":!experiments/results"], cwd=REPO).stdout
     files = [f for f in out.splitlines() if f.strip()]
     for f in files:
         print(f"  {f}")

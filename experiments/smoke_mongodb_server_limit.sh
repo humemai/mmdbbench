@@ -29,7 +29,7 @@ docker run -d --name "$NAME" --cpuset-cpus "$CORES" --memory "$MEM" -p "$PORT:27
 for _ in $(seq 1 60); do docker logs "$NAME" 2>&1 | grep -q "Waiting for connections" && break; sleep 1; done
 docker logs "$NAME" 2>&1 | grep -q "Waiting for connections" || { echo "SMOKE FAIL: server not ready"; exit 1; }
 EXP=$PWD PORT=$PORT LIMIT=$LIMIT SLACK=$SLACK \
-  nice -n 19 taskset -c "$CORES" uv run --directory ../.. --with pymongo==4.18.1 python -I - <<'PY' || exit 1
+  nice -n 19 taskset -c "$CORES" uv run --directory .. --with pymongo==4.18.1 python -I - <<'PY' || exit 1
 import os, sys, time
 sys.path.insert(0, os.environ["EXP"])
 import pymongo

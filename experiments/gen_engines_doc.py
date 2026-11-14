@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the DBBench "Engines" documentation page from the benchmark's own rows.
 
-    uv run python benchmarks/experiments/gen_engines_doc.py <path>      # from the repo root
-    uv run python benchmarks/experiments/gen_engines_doc.py --check <path>
+    uv run python experiments/gen_engines_doc.py <path>      # from the repo root
+    uv run python experiments/gen_engines_doc.py --check <path>
 
 WHY A SCRIPT. The page says what we run: the version, the image, the durability
 classes, the tiers, the settings, and every override of an engine's default with

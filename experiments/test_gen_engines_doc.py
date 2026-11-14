@@ -1,6 +1,6 @@
 """gen_engines_doc.py: the DBBench Engines page, generated from rows and the override registry.
 
-Run with `uv run pytest benchmarks/experiments/test_gen_engines_doc.py -q` from the repo root.
+Run with `uv run pytest experiments/test_gen_engines_doc.py -q` from the repo root.
 
 What each test protects:
   * an arm with an override gets the registry's sentence, built from ITS rows; one without gets none;

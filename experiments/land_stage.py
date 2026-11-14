@@ -6,7 +6,7 @@ the freeze, and a raw directory committed so every queued script aborts at its
 pull. One script, one order, refuses by default.
 
     python land_stage.py --exclude-backends surrealdb_tpc,surrealdb_graph \\
-        --message "Neo4j vector index joins the dense table (qDK)" [--apply]
+        --message "Neo4j vector index joins the dense table (qDK)" [--apply --branch NAME]
 
 Steps, in order:
   1. pull results/runs_page_<pin>_2611.jsonl from the bench host (and, with
@@ -23,23 +23,28 @@ Steps, in order:
      stop unless every gate passed;
   5. show which page tables changed and how many rows each gained;
   6. build the site, commit the site and the bindings repo (frozen CSV,
-     payload, generated tables, PAGE-SPEC inventory), push both.
+     payload, generated tables, PAGE-SPEC inventory) on a NEW branch named by
+     --branch, and push that branch of both (never `main`). Rows land through a
+     pull request per repo, merged on green.
 
 Without --apply the script stops after step 5 and reverts the site payload,
-so the merge and the diff can be read first. Raw directories (results/runs.jsonl,
+so the merge and the diff can be read first. --apply without --branch is
+refused before anything is pulled. Raw directories (results/runs.jsonl,
 dense_mp5_*, sparse_mp_*) are never added to git: they are the bench host's
 own output and a tracked copy breaks its pull.
 """
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
+REPO = HERE.parent
 # BENCH_LAND_SITE moves the site checkout, the way BENCH_LAND_HOST moves the bench host: a rehearsal on a scratch clone must not
 # write the real checkout's payload. Step 4 hands the same path to refresh_web_page (--site), so the two cannot disagree.
 SITE = Path(os.environ.get("BENCH_LAND_SITE") or REPO.parent / "humem.ai")
@@ -70,6 +75,7 @@ REMOTE = os.environ.get("BENCH_LAND_REMOTE",
 # is the repository's own).
 PY = os.environ.get("BENCH_LAND_PY") or str(REPO / ".venv" / "bin" / "python")
 SCRATCH = Path(os.environ.get("BENCH_LAND_SCRATCH", "/tmp/claude-1000/land_stage"))
+PROTECTED_BRANCHES = ("main", "master")
 TRAILER = ("\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n"
            "Claude-Session: https://claude.ai/code/session_01Ubz3m6QXHESerCkehC1qgi")
 
@@ -188,7 +194,7 @@ def _warn_rows_predate_lane_changes(lanes, pin):
         if not spec:
             continue
         out = sh(["git", "log", f"--since={newest[lane]}", "--format=%h %cI %s",
-                  "--", f"benchmarks/experiments/{spec[0]}"],
+                  "--", f"experiments/{spec[0]}"],
                  cwd=REPO, check=False, capture=True, quiet=True).stdout.strip()
         commits = [l for l in out.splitlines() if l.strip()]
         if not commits:
@@ -293,7 +299,7 @@ def _dirty_results():
     """
     # PAGE-SPEC.md rides along: refresh_web_page regenerates its "Published tables" block on every publish (before the gates),
     # so a rehearsal or a refused landing rewrote a tracked file the restore never knew about.
-    out = sh(["git", "status", "--porcelain", "--", "benchmarks/experiments/results", "benchmarks/experiments/PAGE-SPEC.md"],
+    out = sh(["git", "status", "--porcelain", "--", "experiments/results", "experiments/PAGE-SPEC.md"],
              cwd=REPO, check=False, capture=True, quiet=True)
     got = set()
     for line in (out.stdout or "").splitlines():
@@ -381,6 +387,56 @@ def replaced_by_repair(row, u):
             and str(row.get("workload")) == workload and str(row.get(field)) != value)
 
 
+def publish_branch(branch, message, site_files, tracked):
+    """Step 6: build the site, commit `site_files` in the site repo and `tracked` in the bindings repo, each on the NEW branch `branch`,
+    and push that branch of both. Never pushes `main`. Returns the exit code.
+
+    Both repos are switched to the branch BEFORE anything is pushed, so a branch that already exists fails here, not after the site push."""
+    sh(["npm", "run", "build"], cwd=SITE, env=dict(os.environ, NEXT_DIST_DIR=".next-gate"))
+    # The gate build writes to its own dist directory (next.config.ts distDir),
+    # so it never replaces what a running dev server in the checkout serves from.
+    sh(["git", "switch", "-c", branch], cwd=SITE)
+    sh(["git", "switch", "-c", branch], cwd=REPO)
+    sh(["git", "add"] + site_files, cwd=SITE)
+    sh(["git", "commit", "-q", "-m", f"dbbench: {message}{TRAILER}"], cwd=SITE, check=False)
+    sh(["git", "push", "-q", "-u", "origin", branch], cwd=SITE)
+    # THE COMMIT MUST BE VERIFIED, NOT ASSUMED (BUGS F56): the
+    # pre-commit hook rewrote a staged JSON file, git aborted the commit, this
+    # script printed LANDED and pushed nothing, and the frozen rows sat staged
+    # and uncommitted while the site had already moved. A hook that rewrites a
+    # file aborts the commit; the fix is to re-add and commit once more, and
+    # to refuse the PUSHED line unless HEAD actually moved.
+    before_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, text=True,
+                                 capture_output=True).stdout.strip()
+    for attempt in (1, 2):
+        sh(["git", "add"] + tracked, cwd=REPO)
+        rc = sh(["git", "commit", "-q", "-m", f"results: {message}{TRAILER}"],
+                cwd=REPO, check=False).returncode
+        after_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, text=True,
+                                    capture_output=True).stdout.strip()
+        if after_head != before_head:
+            break
+        dirty = subprocess.run(["git", "status", "--short"] + tracked, cwd=REPO, text=True,
+                               capture_output=True).stdout.strip()
+        if not dirty:
+            print("  nothing to commit in the bindings repo (rows unchanged)")
+            break
+        print(f"  commit attempt {attempt} did not move HEAD (rc={rc}); a hook rewrote a staged file, retrying")
+    else:
+        print(f"\nREFUSED: the bindings commit did not land after two attempts; the site branch {branch} is pushed "
+              "but the frozen rows are not. Commit them by hand on the same branch before anything else.")
+        return 1
+    sh(["git", "push", "-q", "-u", "origin", branch], cwd=REPO)
+    pushed = subprocess.run(["git", "rev-parse", f"origin/{branch}"], cwd=REPO, text=True,
+                            capture_output=True).stdout.strip()
+    if pushed != after_head:
+        print(f"\nREFUSED: push did not land (origin/{branch} {pushed[:10]} != HEAD {after_head[:10]}).")
+        return 1
+    print(f"\nPUSHED branch {branch} in the bindings repo ({after_head[:10]}) and in the site. Open one pull request per repo "
+          f"from `{branch}` (`Closes #N`) and merge on green; nothing is on main yet.")
+    return 0
+
+
 def main():
     # RUN UNDER THE REPOSITORY'S ENVIRONMENT, whatever interpreter started us.
     # Every step this script shells out to already uses PY; the one piece that
@@ -413,11 +469,26 @@ def main():
                     help="dense multipass arm token to pull at both sizes (e.g. neo4jvec, pgvector)")
     ap.add_argument("--message", required=True, help="one-line commit subject for both repos")
     ap.add_argument("--apply", action="store_true", help="build, commit and push; default stops after the diff")
+    ap.add_argument("--post-tag", default="post1", metavar="postN", help="the rerun whose rows file --post1-reps pulls: runs_page_<pin>_2611_<postN>.jsonl (default post1)")
+    ap.add_argument("--post1-reps", type=int, default=0, metavar="N",
+                    help="also pull runs_page_<pin>_2611_post1.jsonl (the wheels-only rerun) and land, per cell, the rows of ONE wheel "
+                         "(post1_rows.resolve at N repetitions); exits nonzero on a cell that would mix wheels or is short of repetitions. Off by default")
+    ap.add_argument("--branch", default="",
+                    help="with --apply: commit both repos (the bindings repo and the site) on a NEW branch of this name and push THAT "
+                         "branch, never `main`; then open one pull request per repo and merge on green. Required with --apply: rows "
+                         "land through a pull request, and `main` of the bindings repo stays frozen until the comparator pass ends")
     ap.add_argument("--dry-run", action="store_true",
                     help="pull and filter, then STOP before the merge. Without this, "
                          "a run with no --apply still merges: --apply governs the "
                          "publish, not the merge.")
     args = ap.parse_args()
+
+    # A LANDING PUSHES A BRANCH, NEVER `main`. The refusal comes before the pull, so a forgotten flag costs nothing: the first version of
+    # this check sat at step 6, after the merge into the store, the gates and the site build.
+    if args.apply and not args.branch:
+        sys.exit("REFUSING: --apply needs --branch NAME. Rows land from a new branch through a pull request per repo, never by a push to main.")
+    if args.branch in PROTECTED_BRANCHES:
+        sys.exit(f"REFUSING: --branch {args.branch}: a landing never pushes {'/'.join(PROTECTED_BRANCHES)}; name a new branch.")
 
     # Step 1 pulls `runs_page_<pin>_2611.jsonl` by exact name, so a landing with no pin would fetch nothing, and a
     # guessed one would fetch another build's rows. Refuse instead of guessing.
@@ -467,7 +538,17 @@ def main():
         env["BENCH_ONLY_LANES"] = ",".join(sorted(_lanes))
     step(1, f"pull {host_name('runs_page', args.pin, '.jsonl')} from {HOST}")
     pulled = SCRATCH / "runs_page_host.jsonl"
-    sh(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('runs_page', args.pin, '.jsonl')}", str(pulled)])
+    # BENCH_LAND_PULLED_FILE: the rows were pulled and merged outside this script (the four-arm chains write into several
+    # results directories, so no single scp has them all). Set and present: copy it in place of the scp. Set and absent:
+    # stop, never fall back to the host. Unset: the scp below, unchanged.
+    _pulled_file = os.environ.get("BENCH_LAND_PULLED_FILE")
+    if _pulled_file:
+        if not Path(_pulled_file).is_file():
+            sys.exit(f"BENCH_LAND_PULLED_FILE is set to {_pulled_file}, which is not a file; refusing to fall back "
+                     f"to pulling from {HOST}. Unset it to pull from the host.")
+        shutil.copyfile(_pulled_file, pulled)
+    else:
+        sh(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('runs_page', args.pin, '.jsonl')}", str(pulled)])
     for arm in args.overlay:
         for d in (f"dense_mp5_{args.pin}", f"dense_mp5_small_{args.pin}"):
             (RESULTS / d).mkdir(exist_ok=True)
@@ -523,6 +604,24 @@ def main():
     excl = {b.strip() for b in args.exclude_backends.split(",") if b.strip()}
     lanes = {l.strip() for l in args.only_lanes.split(",") if l.strip()}
     rows = [json.loads(l) for l in pulled.read_text().splitlines() if l.strip()]
+    if args.post1_reps:
+        import post1_rows
+        if not re.fullmatch(r"post\d+", args.post_tag):
+            sys.exit(f"REFUSING: --post-tag {args.post_tag!r} must look like post2")
+        _p1 = SCRATCH / f"runs_page_host_{args.post_tag}.jsonl"
+        sh(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('runs_page', args.pin, '_' + args.post_tag + '.jsonl')}", str(_p1)])
+        rows, _dec, _prob = post1_rows.resolve(rows + post1_rows.load_jsonl(str(_p1)), args.post1_reps)
+        for _d in _dec:
+            print("  post1: " + _d)
+        if _prob:
+            sys.exit("REFUSING: the post1 rows do not resolve to one wheel per cell, nothing was merged:\n  " + "\n  ".join(_prob))
+        pulled = SCRATCH / "runs_page_host_resolved.jsonl"
+        pulled.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    # A BUILD-ONLY ROW IS NOT A CELL (post1_rows.py): it has no timed figure, and the canonical rule (newest ts_utc per key) would let it
+    # shadow a full row. It reaches the freeze only merged into a full row by --post1-reps; any other way is refused.
+    _bo = [r for r in rows if r.get("row_kind") == "build_only"]
+    if _bo:
+        sys.exit(f"REFUSING: {len(_bo)} build-only row(s) in the pulled rows; land them with --post1-reps N (post1_rows.py), never as cells")
     # Before the --exclude filters and before any merge: the whole file is one instrument at one pin or it is not landed.
     screen_pulled_rows(rows, args.pin, host_name("runs_page", args.pin, ".jsonl") + f" on {HOST}")
     unless = [parse_drop_unless(x) for x in args.drop_unless]
@@ -714,57 +813,18 @@ def main():
         print("\nDRY RUN: stopping before build and commit; site payload restored. Re-run with --apply to publish.")
         return 0
 
-    step(6, "build the site, commit both repos, push")
-    # The gate build writes to its own dist directory (next.config.ts distDir),
-    # so it never replaces what a running dev server in the checkout serves from.
-    sh(["npm", "run", "build"], cwd=SITE, env=dict(os.environ, NEXT_DIST_DIR=".next-gate"))
-    sh(["git", "add"] + site_files, cwd=SITE)
-    sh(["git", "commit", "-q", "-m", f"dbbench: {args.message}{TRAILER}"], cwd=SITE, check=False)
-    sh(["git", "push", "-q", "origin", "main"], cwd=SITE)
+    step(6, "build the site, commit both repos on a branch, push the branch")
     # COMMIT THE ARTIFACTS THIS PUBLISH WROTE: the freeze, the payload and the
     # generated tables, so the page never serves numbers whose frozen rows are in
     # no commit. results/generated is allowlisted in .gitignore; under the
     # allowlist an unnamed path is ignored and `git add` on it commits NOTHING,
     # silently.
     tracked = ([str(_pycost.relative_to(REPO))] if _pycost else []) + [
-               "benchmarks/experiments/results/runs_paper.csv",
-               "benchmarks/experiments/results/web_benchmarks.json",
-               "benchmarks/experiments/results/generated",
-               "benchmarks/experiments/PAGE-SPEC.md"]
-    # THE COMMIT MUST BE VERIFIED, NOT ASSUMED (BUGS F56): the
-    # pre-commit hook rewrote a staged JSON file, git aborted the commit, this
-    # script printed LANDED and pushed nothing, and the frozen rows sat staged
-    # and uncommitted while the site had already moved. A hook that rewrites a
-    # file aborts the commit; the fix is to re-add and commit once more, and
-    # to refuse the LANDED line unless HEAD actually moved.
-    before_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, text=True,
-                                 capture_output=True).stdout.strip()
-    for attempt in (1, 2):
-        sh(["git", "add"] + tracked, cwd=REPO)
-        rc = sh(["git", "commit", "-q", "-m", f"results: {args.message}{TRAILER}"],
-                cwd=REPO, check=False).returncode
-        after_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, text=True,
-                                    capture_output=True).stdout.strip()
-        if after_head != before_head:
-            break
-        dirty = subprocess.run(["git", "status", "--short"] + tracked, cwd=REPO, text=True,
-                               capture_output=True).stdout.strip()
-        if not dirty:
-            print("  nothing to commit in the bindings repo (rows unchanged)")
-            break
-        print(f"  commit attempt {attempt} did not move HEAD (rc={rc}); a hook rewrote a staged file, retrying")
-    else:
-        print("\nREFUSED: the bindings commit did not land after two attempts; the site is pushed "
-              "but the frozen rows are not. Commit them by hand before anything else.")
-        return 1
-    sh(["git", "push", "-q", "origin", "main"], cwd=REPO)
-    pushed = subprocess.run(["git", "rev-parse", "origin/main"], cwd=REPO, text=True,
-                            capture_output=True).stdout.strip()
-    if pushed != after_head:
-        print(f"\nREFUSED: push did not land (origin/main {pushed[:10]} != HEAD {after_head[:10]}).")
-        return 1
-    print(f"\nLANDED. bindings {after_head[:10]}")
-    return 0
+               "experiments/results/runs_paper.csv",
+               "experiments/results/web_benchmarks.json",
+               "experiments/results/generated",
+               "experiments/PAGE-SPEC.md"]
+    return publish_branch(args.branch, args.message, site_files, tracked)
 
 
 if __name__ == "__main__":

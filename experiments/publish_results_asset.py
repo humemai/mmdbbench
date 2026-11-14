@@ -28,7 +28,7 @@ from publish_instrument import PUBLISH_INSTRUMENT, refuse_other_instruments, res
 
 HERE = Path(__file__).resolve().parent
 RESULTS = results_dir()
-REPO = HERE.parents[1]
+REPO = HERE.parent
 
 # This bundles the one set the lane pages are built from: results/runs_paper.csv,
 # results/web_benchmarks.json and the gate status beside the generated tables.
@@ -98,16 +98,16 @@ def main() -> int:
     if not args.publish:
         print("dry run: pass --publish to attach it to the release")
         return 0
-    have = subprocess.run(["gh", "release", "view", args.tag, "--repo", "humemai/arcadedb-embedded-python"],
+    have = subprocess.run(["gh", "release", "view", args.tag, "--repo", "humemai/mmdbbench"],
                           capture_output=True, text=True).returncode == 0
     if not have:
-        subprocess.run(["gh", "release", "create", args.tag, "--repo", "humemai/arcadedb-embedded-python",
+        subprocess.run(["gh", "release", "create", args.tag, "--repo", "humemai/mmdbbench",
                         "--title", f"Benchmark results {args.tag}", "--notes",
                         "The rows and the payload behind the tables at https://humem.ai/research/dbbench, "
                         "with the pins and the gate status they were published under."],
                        check=True)
     subprocess.run(["gh", "release", "upload", args.tag, str(bundle), "--clobber",
-                    "--repo", "humemai/arcadedb-embedded-python"], check=True)
+                    "--repo", "humemai/mmdbbench"], check=True)
     print(f"attached to release {args.tag}")
     return 0
 

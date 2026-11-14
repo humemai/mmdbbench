@@ -21,8 +21,10 @@ IMG="${PAIR_IMAGE:-arcadedb-c25:${SHORT}}"
 # the main checkout, so run from a worktree it built from, wrote into, and verified against main's
 # bindings/python/dist and .venv: the pair it reported was another tree's. BENCH_PRINT_REPO=1 prints the
 # tree and exits (test_pair_scripts.py holds this).
-REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 [ -z "${BENCH_PRINT_REPO:-}" ] || { echo "REPO=$REPO"; exit 0; }
+# The engine bindings (bindings/python: scripts/build.sh and dist/) are not in this repository: BINDINGS_REPO names the checkout that holds them.
+BINDINGS_REPO="${BINDINGS_REPO:?set BINDINGS_REPO to the checkout that holds bindings/python (its scripts/build.sh and dist/)}"
 # The image the embedded arm runs: dbbench:arcadedb-<version> (build_images.sh tags it with the wheel's version; there is no floating tag).
 EMBEDDED_IMAGE="${EMBEDDED_IMAGE:-}"
 fail() { echo "PAIR UNVERIFIED: $*"; exit 1; }
@@ -30,7 +32,7 @@ fail() { echo "PAIR UNVERIFIED: $*"; exit 1; }
 command -v docker >/dev/null || fail "no docker"
 docker image inspect "$IMG" >/dev/null 2>&1 || fail "no image $IMG"
 
-W=$(ls -t "$REPO"/bindings/python/dist/*.whl 2>/dev/null | head -1)
+W=$(ls -t "$BINDINGS_REPO"/bindings/python/dist/*.whl 2>/dev/null | head -1)
 [ -n "$W" ] || fail "no wheel in bindings/python/dist"
 [ -n "$EMBEDDED_IMAGE" ] || EMBEDDED_IMAGE="dbbench:arcadedb-$(basename "$W" | cut -d- -f2)"
 
@@ -57,7 +59,7 @@ print(next(l.split('=',1)[1].strip() for l in p.splitlines() if l.strip().starts
 IJ=$(docker run --rm --entrypoint sh "$IMG" -c 'java -version 2>&1' | head -1 | grep -oE '"[0-9]+' | tr -d '"')
 # The venv's JRE when this checkout has one (the bench host does); otherwise the JRE inside the
 # embedded image, which is the JVM the embedded arm actually runs (a worktree has no .venv).
-VENV_JAVA="$REPO/.venv/lib/python3.12/site-packages/arcadedb_embedded/jre/bin/java"
+VENV_JAVA="$BINDINGS_REPO/.venv/lib/python3.12/site-packages/arcadedb_embedded/jre/bin/java"
 if [ -x "$VENV_JAVA" ]; then
   EJ=$("$VENV_JAVA" -version 2>&1 | head -1 | grep -oE '"[0-9]+' | tr -d '"')
 else
@@ -102,4 +104,4 @@ WANT_J=$(sed -n 's/^ARG JPYPE_VERSION=//p' "$HERE/Dockerfile.bench")
 HAVE_J=$(docker run --rm --entrypoint python3 "$EMBEDDED_IMAGE" -c 'import jpype; print(jpype.__version__)' 2>/dev/null | tr -dc '0-9a-zA-Z.-')
 [ "$HAVE_J" = "$WANT_J" ] || fail "$EMBEDDED_IMAGE runs JPype '$HAVE_J', the pin is $WANT_J (rebuild it: ./build_images.sh arcadedb)"
 
-echo "PAIR VERIFIED $SHORT  jars=image+wheel+embedded-image  jvm=$IJ  jpype=$HAVE_J  image=$IMG  embedded=$EMBEDDED_IMAGE  repo=$REPO  wheel=$W"
+echo "PAIR VERIFIED $SHORT  jars=image+wheel+embedded-image  jvm=$IJ  jpype=$HAVE_J  image=$IMG  embedded=$EMBEDDED_IMAGE  repo=$REPO bindings=$BINDINGS_REPO  wheel=$W"

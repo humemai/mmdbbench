@@ -17,7 +17,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = ("build_c25_wheel.sh", "build_matched_pair.sh", "verify_pair_c25.sh")
-MAIN = "/home/tk/repos/humemai/arcadedb-embedded-python"
+MAIN = str(Path.home() / "repos" / "humemai" / "arcadedb-embedded-python")
 
 
 def _print_repo(script, cwd=None):
@@ -38,9 +38,9 @@ def test_no_script_names_the_main_checkout(name):
 
 @pytest.mark.parametrize("name", SCRIPTS)
 def test_repo_is_the_tree_the_script_lives_in(name, tmp_path):
-    """A copy of the script in another tree's benchmarks/experiments reports that tree, wherever it is
+    """A copy of the script in another tree's experiments/ reports that tree, wherever it is
     run from, and through a symlink too."""
-    tree = tmp_path / "some-worktree" / "benchmarks" / "experiments"
+    tree = tmp_path / "some-worktree" / "experiments"
     tree.mkdir(parents=True)
     shutil.copy(HERE / name, tree / name)
     want = f"REPO={tmp_path / 'some-worktree'}"
@@ -55,7 +55,7 @@ def test_repo_is_the_tree_the_script_lives_in(name, tmp_path):
 
 @pytest.mark.parametrize("name", SCRIPTS)
 def test_this_checkouts_scripts_report_this_checkout(name):
-    assert _print_repo(HERE / name, cwd="/") == f"REPO={HERE.parents[1]}"
+    assert _print_repo(HERE / name, cwd="/") == f"REPO={HERE.parent}"
 
 
 def test_the_wheel_script_takes_its_work_directory_from_the_environment():
@@ -65,3 +65,13 @@ def test_the_wheel_script_takes_its_work_directory_from_the_environment():
     # the matched-pair builder deletes its work directory: it must refuse an empty or root one
     pair = (HERE / "build_matched_pair.sh").read_text()
     assert 'rm -rf "$WORK"' in pair and '[ "$WORK" != / ]' in pair
+
+
+@pytest.mark.parametrize("name", ("build_c25_wheel.sh", "verify_pair_c25.sh"))
+def test_the_bindings_tree_is_named_by_BINDINGS_REPO(name):
+    """The engine bindings are not in this repository. A script that needs them refuses to run without BINDINGS_REPO and
+    never reaches for bindings/python under REPO (BENCH_PRINT_REPO=1 still works without it)."""
+    text = (HERE / name).read_text()
+    code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+    assert 'BINDINGS_REPO="${BINDINGS_REPO:?' in text
+    assert "$REPO/bindings" not in code and '"$REPO"/bindings' not in code and "$REPO/.venv" not in code

@@ -11,7 +11,11 @@ The benchmark harness was developed in [humemai/arcadedb-embedded-python](https:
 | `README.md`, this file | written here | | 1 |
 | `PROTOCOL.md`, `FAIRNESS.md`, `COMPARATORS.md`, `PAGE-SPEC.md`, `PUBLISHING.md`, `READING-RESULTS.md`, `QUANTIZATION.md` (verbatim) | `4272386cfa` (2026-11-06) | `main` | 1 |
 | the rest of `benchmarks/experiments/` at that commit (verbatim): runners, lanes, generators, gates, tests, fixtures, Dockerfiles, small tracked results | `4272386cfa` (2026-11-06) | `main` | 2 |
-| path and layout edits, a test CI, `land_stage.py` pushing a branch | edits of the step 2 files; the `land_stage.py` change is `f5f42f3228` (2026-11-14) | `bench/landing-fixes-2611` | 3 |
+| `land_stage.py`, `test_land_stage_branch.py` (taken whole: `land_stage.py` pushes a branch and never `main`) and the two sentences of `PUBLISHING.md` that name its flag and the pulled-file knob | `f5f42f3228` (2026-11-14) | `bench/landing-fixes-2611` | 3 |
+| layout and path edits of the step 2 files (root lookups, `BINDINGS_REPO`, links, skips without the runbook) | written here, on `4272386cfa` | | 3 |
+| `test_moved_paths.py`, `.github/workflows/test-experiments.yml`, the hook exclusions of `.pre-commit-config.yaml` | written here | | 3 |
+
+`f5f42f3228` is a descendant of `4272386cfa` that also holds the commits of origin PRs 554 and 584, so its `land_stage.py` carries their options too (`--post1-reps`, `--post-tag`, `BENCH_LAND_PULLED_FILE`); `post1_rows.py`, which `--post1-reps` imports, arrives with those PRs.
 
 `4272386cfa` is the base of the copy because it is the commit the comparator reruns were cut from. Work that is on other branches of the origin and that some rows depend on is not copied yet, and is listed in the next section.
 

@@ -1008,29 +1008,35 @@ def display_name(backend: str) -> str:
     return backend.replace("_", " ")
 
 
-REPO = "https://github.com/humemai/arcadedb-embedded-python/blob/main"
+REPO = "https://github.com/humemai/mmdbbench/blob/main"
+# benchmarks/python-bindings is the artifact of another paper and stays in the repository this harness came from
+OLD_REPO = "https://github.com/humemai/arcadedb-embedded-python/blob/main"
+
+
+def _source_url(path):
+    return f"{OLD_REPO if path.startswith('benchmarks/python-bindings/') else REPO}/{path}"
 
 # Where each table's numbers physically come from. Published per table so a
 # reader can open the rows rather than take the page's word for them, which is
 # the whole point of generating these from data in the first place.
 SOURCES = {
-    "l3s": f"benchmarks/experiments/results/{FROZEN_NAME}",
+    "l3s": f"experiments/results/{FROZEN_NAME}",
     # Two tiers, two artifacts: small comes from the campaign's frozen rows,
     # DEEP-10M from the matched multipass overlay. Both are published.
-    "l3d": [f"benchmarks/experiments/results/{FROZEN_NAME}",
-            "benchmarks/experiments/results/dense_mp5_<pin>"],   # resolved in _dense_overlay_entries
-    "l2": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "l1tpc": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "e2": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "l4": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "e4": "benchmarks/experiments/results/e4decomp_" + (os.environ.get("BENCH_ENGINE_COMMIT", "").strip() or "UNPINNED"),
-    "l2olap": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "e2atom": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "lifecycle": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "restart": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "docs_oltp": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "docs_olap": f"benchmarks/experiments/results/{FROZEN_NAME}",
-    "multimodel": f"benchmarks/experiments/results/{FROZEN_NAME}",
+    "l3d": [f"experiments/results/{FROZEN_NAME}",
+            "experiments/results/dense_mp5_<pin>"],   # resolved in _dense_overlay_entries
+    "l2": f"experiments/results/{FROZEN_NAME}",
+    "l1tpc": f"experiments/results/{FROZEN_NAME}",
+    "e2": f"experiments/results/{FROZEN_NAME}",
+    "l4": f"experiments/results/{FROZEN_NAME}",
+    "e4": "experiments/results/e4decomp_" + (os.environ.get("BENCH_ENGINE_COMMIT", "").strip() or "UNPINNED"),
+    "l2olap": f"experiments/results/{FROZEN_NAME}",
+    "e2atom": f"experiments/results/{FROZEN_NAME}",
+    "lifecycle": f"experiments/results/{FROZEN_NAME}",
+    "restart": f"experiments/results/{FROZEN_NAME}",
+    "docs_oltp": f"experiments/results/{FROZEN_NAME}",
+    "docs_olap": f"experiments/results/{FROZEN_NAME}",
+    "multimodel": f"experiments/results/{FROZEN_NAME}",
     "pycost": "benchmarks/python-bindings/jpype_overhead/results/mini_results.csv",
     "pyb_tabular": "benchmarks/python-bindings/results/runs_paper.csv",
     "pyb_graph": "benchmarks/python-bindings/results/runs_paper.csv",
@@ -2802,8 +2808,8 @@ def _sparse_multipass_table():
         "columns": ["cold p50 ms", "cold p99 ms", "warm p50 ms", "warm p99 ms", "gain"],
         "withheld_scales": [],
         "withheld_reason": None,
-        "source_paths": ["benchmarks/experiments/results/sparse_mp_<pin>"],   # _pinned_dir reads the pinned name
-        "source_urls": [f"{REPO}/benchmarks/experiments/results/sparse_mp"],
+        "source_paths": ["experiments/results/sparse_mp_<pin>"],   # _pinned_dir reads the pinned name
+        "source_urls": [f"{REPO}/experiments/results/sparse_mp"],
         "entries": entries,
     }
 
@@ -3047,10 +3053,10 @@ def _lifecycle_table(all_rows, twin_rows=()):
         "withheld_scales": [],
         "withheld_reason": None,
         "entries": entries,
-        "source_paths": [f"benchmarks/experiments/results/{FROZEN_NAME}"],
-        "source_urls": ["https://github.com/humemai/arcadedb-embedded-python/blob/main/benchmarks/experiments/results/runs_paper.csv"],
-        "source_path": f"benchmarks/experiments/results/{FROZEN_NAME}",
-        "source_url": "https://github.com/humemai/arcadedb-embedded-python/blob/main/benchmarks/experiments/results/runs_paper.csv",
+        "source_paths": [f"experiments/results/{FROZEN_NAME}"],
+        "source_urls": ["https://github.com/humemai/mmdbbench/blob/main/experiments/results/runs_paper.csv"],
+        "source_path": f"experiments/results/{FROZEN_NAME}",
+        "source_url": "https://github.com/humemai/mmdbbench/blob/main/experiments/results/runs_paper.csv",
     }
 
 
@@ -3399,8 +3405,8 @@ def _durability_table(all_rows):
         "withheld_scales": [],
         "withheld_reason": None,
         "entries": entries,
-        "source_paths": [f"benchmarks/experiments/results/{FROZEN_NAME}"],
-        "source_path": f"benchmarks/experiments/results/{FROZEN_NAME}",
+        "source_paths": [f"experiments/results/{FROZEN_NAME}"],
+        "source_path": f"experiments/results/{FROZEN_NAME}",
     }
 
 
@@ -3593,8 +3599,8 @@ def _multimodel_table(finished):
         "withheld_reason": None,
         "declared_absences": [],
         "entries": entries,
-        "source_paths": [f"benchmarks/experiments/results/{FROZEN_NAME}"],
-        "source_path": f"benchmarks/experiments/results/{FROZEN_NAME}",
+        "source_paths": [f"experiments/results/{FROZEN_NAME}"],
+        "source_path": f"experiments/results/{FROZEN_NAME}",
     }
 
 
@@ -7615,8 +7621,8 @@ def main() -> int:
             if _note not in _t["conditions"]:
                 _t["conditions"].append(_note)
     payload = {
-        "source": f"benchmarks/experiments/results/{FROZEN_NAME}",
-        "generator": "benchmarks/experiments/export_web.py",
+        "source": f"experiments/results/{FROZEN_NAME}",
+        "generator": "experiments/export_web.py",
         # Always present and false: this tooling publishes measured rows only, and a reader tests a field that always
         # exists rather than an absence that could mean "old file".
         "skeleton": False,
@@ -7716,11 +7722,11 @@ def main() -> int:
         rel = SOURCES.get(table["id"])
         paths = [rel] if isinstance(rel, str) else list(rel or [])
         table["source_paths"] = paths
-        table["source_urls"] = [f"{REPO}/{p}" for p in paths]
+        table["source_urls"] = [_source_url(p) for p in paths]
         # Kept so an older page build still renders something true: the first
         # entry, never a silently-wrong one.
         table["source_path"] = paths[0] if paths else None
-        table["source_url"] = f"{REPO}/{paths[0]}" if paths else None
+        table["source_url"] = _source_url(paths[0]) if paths else None
 
     # WHICH SENTENCES WERE GENERATED, with the strings they inserted, so
     # page_check can hold every other sentence to the registry. Recorded after _finish_table, which is where

@@ -20,7 +20,7 @@ Flags: `--site <path>` if humem.ai is not a sibling checkout; `--no-build` to sk
 
 ## The Engines documentation page
 
-The Engines page of the documentation site (humemai/dbbench, `docs/engines.md`) is generated, never edited: `uv run python benchmarks/experiments/gen_engines_doc.py <path to docs/engines.md>` from the repo root. It reads the frozen 2026-11 rows (`make_paper_tables.load_canonical`), the arm names (`export_web.py`) and the override sentences (`override_registry.py`), so nothing on it is typed. Regenerate it at every landing and commit the result in humemai/dbbench; `--check <path>` exits 1 when it is out of date. Lanes and arms without rows yet are on its gap list.
+The Engines page of the documentation site (humemai/dbbench, `docs/engines.md`) is generated, never edited: `uv run python experiments/gen_engines_doc.py <path to docs/engines.md>` from the repo root. It reads the frozen 2026-11 rows (`make_paper_tables.load_canonical`), the arm names (`export_web.py`) and the override sentences (`override_registry.py`), so nothing on it is typed. Regenerate it at every landing and commit the result in humemai/dbbench; `--check <path>` exits 1 when it is out of date. Lanes and arms without rows yet are on its gap list.
 
 ## Which rows publish
 
@@ -78,7 +78,7 @@ A disagreement that has been reproduced, understood, and filed upstream prints a
 
 ## What is in `results/` and who reads it
 
-> **Which host.** This describes `results/` **on the bench host (mini)**, where the campaigns write. A developer checkout does not have the same tree: everything under `results/` is ignored by the allowlist at the end of the repo-root `.gitignore` (from `benchmarks/experiments/results/**`), which names the tracked artifacts one by one. Two consequences:
+> **Which host.** This describes `results/` **on the bench host (mini)**, where the campaigns write. A developer checkout does not have the same tree: everything under `results/` is ignored by the allowlist at the end of the repo-root `.gitignore` (from `experiments/results/**`), which names the tracked artifacts one by one. Two consequences:
 >
 > 1. A path listed here may be absent from your checkout. That is expected, not a missing file. Check on mini before concluding anything is lost.
 > 2. **Committing a path that exists untracked on mini makes mini's `git pull` fail.** Every queue script opens with `git pull -q --ff-only || abort` and has no clean-tree check, so the pull aborts the waiting stage. A modified tracked file does the same. An untracked file aborts the pull only once a commit adds that same path (git refuses to overwrite it); an ignored file at that path does not refuse, which is why the allowlist exists. Before committing anything under `results/`, check the incoming paths against mini's untracked files. A new tracked artifact needs `git add -f` and a line in the allowlist. Never `git add` a raw directory (`results/runs.jsonl`, `dense_mp5_*`, `sparse_mp_*`) and never `git add -A`: sweeping raw results into a commit is the other failure the allowlist closes.
@@ -94,7 +94,7 @@ A `runs_*_<pin>.jsonl` is the only copy of its data until it is merged. Archivin
 3. `export_web.py`: into `web_benchmarks.json`
 4. only then archive the campaign files, and only after confirming their rows are in `runs.jsonl` by `engine_commit`
 
-`land_stage.py` performs steps 1 to 3 in one run (see "Landing a finished queue stage"); archive only after it reports LANDED. A campaign file that shows "no reader" when you grep the publishing scripts is a file whose step 1 has not run yet, not a dead file.
+`land_stage.py` performs steps 1 to 3 in one run (see "Landing a finished queue stage"); archive only after its pull requests are merged (it ends at PUSHED: `--apply` needs `--branch NAME`, pushes that branch of the bindings repo and of the site, never `main`, and prints the branch to open the pull requests from). A campaign file that shows "no reader" when you grep the publishing scripts is a file whose step 1 has not run yet, not a dead file.
 
 The canonical store keys on `(lane, scale, n_docs, workload, backend, gav, rep, durability_class)` with the latest `ts_utc` winning, so a re-measured row supersedes the old one on merge. **Do not hand-edit the frozen CSV**; re-freeze after the campaign.
 
@@ -169,7 +169,7 @@ Every other directory under `results/` is evidence, quarantine, or output; nothi
 One command, the same order every time, refuses by default:
 
 ```
-.venv/bin/python benchmarks/experiments/land_stage.py \
+.venv/bin/python experiments/land_stage.py \
     --only-lanes <lanes the stage measured, comma list> \
     --exclude-backends <backends still running on mini, comma list> \
     [--overlay neo4jvec] [--exclude-since <stage ALL-DONE timestamp>] \
@@ -186,6 +186,8 @@ It pulls `runs_page_<pin>_2611.jsonl` (and, with `--overlay`, an arm's dense mul
 **`--apply` governs the PUBLISH, not the merge, and `--dry-run` is the flag that writes nothing.** A run without `--apply` still performs steps 2 and 3, and step 3 merges. `--dry-run` pulls, filters, and stops: it prints how many rows WOULD merge and which of them carry errors, and leaves `runs.jsonl` byte-identical. It is also the mode a pre-campaign rehearsal wants.
 
 **The pulled file is screened before it is merged, and a rehearsal can run on scratch copies.** `screen_pulled_rows` refuses the whole file, before `--exclude-*` and before the merge (so `--dry-run` shows the refusal too), when any row is not stamped `2026-11` (a retired 2026-10 file, a mixed file, an unstamped row) or names an engine commit other than `--pin` (prefix either way); nothing reaches `results/runs.jsonl`. The first landing creates the store. Failed cells (`rc != 0` or an error) are reported and merged as failures, and the freeze skips them; censored queries are reported and keep their flag. `BENCH_LAND_SITE` moves the humem.ai checkout (the landing passes it to `refresh_web_page.py --site`), `BENCH_LAND_PY` the interpreter every step runs under, `BENCH_LAND_HOST`/`BENCH_LAND_REMOTE` the bench host and `BENCH_LAND_SCRATCH` the pull directory, so a rehearsal never writes the real site checkout. A landing scoped away from e4 does not need `e4decomp_<pin>`.
+
+**`BENCH_LAND_PULLED_FILE` lands rows that were pulled elsewhere.** The four-arm chains write their rows into several results directories on the bench host, so no single `scp` has them all. Set the variable to a merged rows file and step 1 copies it in place of the `scp`; the screen, the filters, the merge and the gates then run on it as on any pulled file. A path that is not a file ends the run, it never falls back to the host. Unset, the landing pulls from the host as before.
 
 **`--pin` defaults to `BENCH_ENGINE_COMMIT`.** Step 1 pulls the stage's rows file by exact name, so a wrong pin fetches the wrong rows and fails much later, with the merge already done; pass `--pin <commit>` or set `BENCH_ENGINE_COMMIT` on every landing.
 

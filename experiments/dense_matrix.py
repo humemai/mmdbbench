@@ -27,7 +27,7 @@ arm), so it cannot distinguish a fast rep from a slow one. The cache is 1.53 GiB
 against a 28 GiB anon peak, well inside this column's noise.
 """
 import json, pathlib, re
-R = pathlib.Path("/home/tk/repos/humemai/arcadedb-embedded-python/benchmarks/experiments/results")
+R = pathlib.Path(__file__).resolve().parent / "results"
 RAW = R / "raw"
 def rows_from(fn):
     p = R / fn

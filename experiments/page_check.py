@@ -126,7 +126,7 @@ class _PageCells:
 # The site checkout holds the payload the DBBench lane pages serve. BENCH_SITE_DIR wins, because the repos are only
 # siblings in a clone and a worktree is not; refresh_web_page exports the checkout it is publishing to.
 _SITE = Path(os.environ.get("BENCH_SITE_DIR")
-             or Path(__file__).resolve().parents[2].parent / "humem.ai")
+             or Path(__file__).resolve().parents[1].parent / "humem.ai")
 LIVE_JSON = _SITE / "src" / "data" / "dbbench-benchmarks.json"
 
 

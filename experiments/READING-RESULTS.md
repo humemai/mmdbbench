@@ -1,0 +1,139 @@
+# Reading the results without misreading them
+
+PROTOCOL.md says how a run is produced. FAIRNESS.md says what makes a comparison legitimate. This file says how to read what came out.
+
+The single rule, from which most of the rest follows:
+
+> **The tracker is history. The artifact is state.**
+>
+> Task notes, issue titles and old summaries describe what was true when they were written. They are not refreshed when the thing is fixed. Read the data before repeating what a note says about it.
+
+## Before believing any number you did not just measure
+
+1. **Open the file.** Not the task, not the summary, not last week's message.
+2. **Print the whole record**, not the fields you expect. `settle_s: 0.0` is the evidence that no engine settled; a filter that drops falsy values hides it and makes symmetry look like absence.
+3. **Check which arm you have.** Several files hold multiple arms of the same experiment, distinguished by flags rather than by name.
+4. **Check which file you have.** Several lanes split one comparison across two files.
+5. **If it contradicts the generated tables or the page, suspect yourself first.** A disagreement is far more likely to be a misread field than a wrong table.
+
+## Field traps, specifically
+
+**The 12-hour aggregation is `q_global_ms`, not `q_range_ms`.** `q_global_ms` returns 12 rows, one per hour; `q_range_ms` is a 60-row range query. Both look like plausible "aggregation" numbers, and reading the second as the first makes the page appear wrong.
+
+**Last-point is one field.** Every l4 lane row records `q_last_ms` (unbounded); `q_last_unbounded_ms` exists only in the retired probe files.
+
+**ArcadeDB has two time-series arms, both lane rows.** Embedded and served, backends `arcadedb_ts_native`, `arcadedb_ts_doc`, and their `_server` twins; the page prints all four.
+
+**`engine_version` is deliberately null for non-ArcadeDB rows in L4.** Use `backend_version`. `run_conditions()` stamps `engine_version` from the installed wheel, which is right for the ArcadeDB row and wrong for DuckDB and QuestDB, so `l4_tsbs.py` asks each backend for its own version instead. A wrong version that passes a provenance audit is worse than none.
+
+**Arms are selected by flag, not by filename.** `claims_check.ts_arm()` takes `primitive=` and `numpy_cols=` because the published row is one specific arm. Assert the flags rather than globbing the directory.
+
+**A comparator row's version and digest are read from the row** (`server_image`, `engine_version`); `runner.BACKENDS` describes future rows only (BUGS.md F32).
+
+**An ArangoDB dense row's `recall_at_10` is a calibrated operating point, not a knob.** The IVF `nProbe` is chosen in the cell (`ivf_nprobe`) as the smallest value whose held-out recall reaches the frozen ArcadeDB fp32 median; `ivf_calibration_recall`, `ivf_recall_target` and `ivf_recall_target_source` say how and against what, and the calibration queries are never the timed set. Read the timed `recall_at_10` as the outcome of that match (FAIRNESS.md F7).
+
+**`disk_data_mb` and `server_disk_mb` are megabytes on the row and gibibytes on the page.** The exporter divides at load (`_UNIT_DIVISOR`, through `unit_field` when the metric is a callable, BUGS.md F40); a value that looks a thousand times too large under a "disk GiB" header is the divisor being skipped, not a real footprint. `page_check` bounds every disk median at 200 GiB for that reason.
+
+**A served row's page disk value is the server container alone.** `disk_data_mb` on the row still holds server plus client; `export_web._disk_data` subtracts the client for the page (BUGS.md F38).
+
+**A timed-out row records where it died.** `timeout_client_disk_mb` and `timeout_cpu_mem` are written on the timeout path, and the cell log carries the lane's `PHASE` markers (BUGS.md F41). Read them before recording a DNF.
+
+**An envelope failure is not a timeout.** A cell with `rc=137` and `oom_killed` true was killed by the kernel at the tier's memory cap; it did not run out of time, and the `error` string is not `timeout_after_*`. `oom_killed` is the CLIENT container's state, so a served cell whose SERVER was killed says so in `server_oom_killed`; its `error` is whatever the client hit next, often a failed reconnect. An older served row has no such field, and `export_web._server_hit_envelope` reads it as an envelope failure when the cell failed with the server's anonymous memory at 99% of its cap or more. Read it as "this engine did not fit the envelope every engine on this tier was given", which is a fact about the engine's memory behaviour at that size and evidence for nothing about its latency. The exporter words it differently from a censored cell for that reason. An engine that stops itself with its own out-of-memory error inside the envelope (rc 1 with DuckDB's `OutOfMemoryException`, a JVM's `java.lang.OutOfMemoryError`, PostgreSQL's SQLSTATE 53200) is the same outcome and prints `OOM`, the same for every engine (`export_web.ENGINE_OOM_SIGNATURES`). `rc=137` WITHOUT `oom_killed` is a third thing, a container that exited on a signal for some other reason, and it is investigated before it is recorded.
+
+**A censored note names the phase the cap interrupted, when the row can say.** "Exceeded its budget" alone cannot tell an engine that spent its whole budget ingesting from one that reached the queries and stalled on the ninth. `runner.py` records the cell's last PHASE markers in `timeout_phase_hint`, and `export_web._timeout_phase` reads the last one into a phrase: a query phase names its query ("query lsqb_q9"), a build, ingest, connect or close phase names itself. When the hint cannot be read the clause is omitted rather than guessed, so its absence means "we do not know", never "no phase".
+
+**`host` is recorded on the sparse and dense lanes only; `bench_host` on every row.** The other lanes record the container but not the machine. Every row carries `bench_host`, written by the runner and refused at paper tier when unset (DECISIONS #74). Do not imply a uniform environment from rows that cannot prove one.
+
+**The page's memory column is `peak_owned_mib_sum`, not `peak_anon_mib_sum`.** Both are summed over every container of the cell. Owned memory is the anonymous peak plus the shared-memory peak (`peak_shmem_mib_sum`), so an engine that keeps its buffer pool in POSIX shared memory (PostgreSQL, pgvector, PG+AGE, TimescaleDB) shows what it holds. The kernel's file cache is in neither, for every engine alike. The per-container fields (`client_peak_anon_mib`, `server_peak_shmem_mib`, and so on) are the parts the sums are made of.
+
+**`instrument` names the query set, timers, and durability rule a row ran under.** The publish side renders rows stamped `2026-11` and refuses any other value, or none, before it renders anything (`publish_instrument.refuse_other_instruments`). Read a document OLTP row's `oltp_ops_per_s` as new-order and payment together (`oltp_ops` says how many).
+
+**`durability` is what the engine ran at commit, read from the engine where it can be read.** PostgreSQL-family rows carry the server's own `SHOW synchronous_commit` answer; a value ending "(NOT the #81 setting)" means the server was not started with the flag and the row fails F10. Strings starting "fsync at commit" are the named exceptions (Neo4j, LadybugDB, DuckDB), and "unverified" is a class no engine is in now (`fairness_check.UNVERIFIED_ALLOWED` is empty).
+
+**A digest is of the canonical answer, not of the raw rows.** The digest is taken after the answer is put in canonical form: sorted unless the query defines an order, floats rounded to a fixed precision, engine-specific row wrappers and column ordering gone. Two engines whose digests match did not return identical result objects, and hashing what a driver handed back instead will disagree on every engine pair for reasons that are not about the answer.
+
+**A measure is compared as a number; a count and an identifier are compared exactly.** A summed or averaged column is declared numeric once per query, so an engine returning an integer and one returning a double agree. A count is never declared that way, because the float side rounds to six significant digits and two counts that differ by one would agree.
+
+**The revenue total and the revenue by month carry a row count in the answer.** It is compared exactly and is not a page column (DECISIONS #94): at the campaign's largest tier a single lost row moves either sum by less than the digest's rounding.
+
+**A withheld cell is not a missing measurement.** A disagreement that has been reproduced and filed upstream prints as KNOWN and its cell is withheld (`equivalence_check.KNOWN_DISAGREEMENTS`, `export_web.WITHHELD_CELLS`). `KNOWN_DISAGREEMENTS` holds PostgreSQL + AGE's CRUD read-backs (apache/age#2587), whose cells publish with a note.
+
+**Every row says how hot the machine was.** `host_temp_c_start` and `_end`, `host_throttle_count_start` and `_end`, and `host_throttled_ms` (BUGS.md F45). The power mode is unchanged by decision, and rows from different stages are compared with those fields read rather than assumed equal. Since the 2026-11 pass was restarted on 2026-10-26 every timed cell also starts behind a pre-cell temperature gate (the stage waits until the package is at or below 70 C, polls every 10 s, caps at 15 min, then starts anyway) and its row says what the gate did: `precell_gate_temp_c`, `precell_gate_wait_s`, `precell_gate_ok` (false: the cap passed with the package still above the limit) and `precell_gate_max_c`. Rows from before the gate carry none of these four. Compare engines within one pass: the host's speed drifts between passes, so a 2026-11 number over an October one is neither an engine effect nor a version effect (PROTOCOL.md section 2, host condition).
+
+**"Unexpressible" is a declaration, not a failure.** An engine whose adapter declares an operation absent has said so deliberately (DECISIONS #88); `equivalence_check` names it and the table prints a dash with the reason in its condition. It is not a crashed cell, a timeout, or a gap to be filled, and it is not evidence that the engine is slow. A silently missing answer is the failure, and that is what the gate exists to tell apart from this.
+
+**`ingest_s` and `index_s` are present only where the engine has the boundary** (on the dense lane every arm except those `fairness_check.PHASE_SPLIT_DECLARED` names, which index while they load; on the document, time-series, and cross-model lanes every arm, through `bench_common.index_split`, with `index_before_load` true where the index was defined before the load and its work sits inside `ingest_s`; the page prints a sentence naming those arms under the table, including the arms export_web lists because their adapters do not set the flag); `build_s` is still the whole timer and the two do not sum to it exactly (schema creation and Milvus's compaction sit outside them). Milvus's `index_s` is its post-build wait, flush through load.
+
+**The graph write pass has a partner.** `delete_p50_ms` and `delete_p99_ms` come from deleting, in order, the persons the write pass created (with their edge), one transaction each; `hop3f_*` is the 3-hop read filtered on the far end.
+
+**`q_groupby_rows` and `q_high_rows` are data-dependent shapes.** The time-series lane records them instead of asserting them, and F10 refuses a table whose engines disagree; the other three queries keep their asserted shapes (1, 60, 12 rows).
+
+**A row says two things about durability, and they can disagree.** `durability`
+is what the ENGINE reported, read back out of it wherever it can be asked;
+`durability_class` is what the CELL asked for (DECISIONS #90). They agree on a
+healthy row. A row where they differ is a flag that did not take -- an
+environment variable the server ignores, a JVM property that never reached the
+JVM -- and `fairness_check` fails it rather than publishing the asserted value.
+`durability_no_setting` marks the three engines with no knob (Neo4j, DuckDB,
+LadybugDB); they run once and the page prints that one number in both columns. `durability_server_flags` says what the runner
+changed on a server container for the class, and is blank for an embedded arm.
+
+**A strict cell is a different cell, not a different column.** The strict arm of
+a write cell carries the same lane, scale, workload, backend and rep as the
+relaxed one and is told apart only by `durability_class`, which is why that
+field is part of the canonical key and why the run_id carries a `_dstrict`
+suffix. Reads and bulk ingests exist in the relaxed class only.
+
+**`res_<query>_digest` is the ANSWER, not a checksum of the row.** Every timed query whose answer is deterministic carries three fields: `res_<q>_digest` (sixteen hex characters over the canonical answer), `res_<q>_sample` (the first few canonical rows, readable), and `res_<q>_n` (the row count). A digest that reads `unexpressible: <reason>` means the engine cannot ask that question and the reason is the adapter's own (DECISIONS #88). Two engines with the same digest gave the same answer; two with different digests did not, and the samples say how. Do not compare digests across scales or across queries: the declared column names and the ordering flags are hashed with the rows, so a digest identifies an answer to one question at one size.
+
+**A write's digest is the state it left, not what it returned.** `res_crud_insert_*`, `res_crud_update_*` and `res_crud_delete_*` are untimed read-backs of the whole CRUD table after each phase; `res_neworder_*` and `res_payment_*` are the orders table after each loop; `res_graph_insert/update/delete_*` are the persons the graph writes created. `res_crud_read_*` is the only one of the set that digests what the timed calls actually returned.
+
+**The two vector lanes record no digests, on purpose.** Their answers come from an approximate index, where two correct engines legitimately differ; they are checked by recall against exact ground truth instead, and `equivalence_check` lists them as declared. The cross-model read paths use both: `recall_retrieval` and `recall_filtered` judge the vector half, `res_retrieval_docs_*` and `res_filtered_candidates_*` the graph and document halves.
+
+**`recall_filtered` near zero is a capability, not a bug.** `filtered_mode` says how the arm ran the graph-filtered vector search. An arm that pre-filters ranks the candidate set directly and should reach 1.0; an arm that post-filters searches globally to `filtered_overfetch` and then drops non-neighbours, and its recall is bounded by how many of the candidates fall in that global top-N. Both ArcadeDB arms pre-filter (BUGS F112), and `filtered_mode` on the row says which regime produced it. Read `filtered_candset_match` first: it is the fraction of queries where the engine's own traversal found the same candidate set the harness derives from the generated edges, and a recall means nothing if that is not 1.0.
+
+**`mutate_*` exists only where the mutation phase ran.** `mutate_ran` and `mutate_reason` are on every dense row and say which of the three cases applied: the one-million tier, forced on by `BENCH_DENSE_MUTATE=1`, or not this tier. `mutate_deleted_hits` must be zero; a non-zero value is an index still returning records the engine said it deleted, which is a correctness failure and not a latency one.
+
+**The page's cold column is `cold_first_query_ms`, one per cell.** It is the
+first query the cell ran after the database opened, named by
+`cold_first_query_name`, and on the two vector lanes that is a warmup query
+rather than the first timed one -- which is why it is the cold one (#89 as
+amended). The per-query `cold_<q>_ms` fields are still on the row and are still
+true; they are simply more than the page prints. `cold_first_query_na` carries
+the reason where the cell times no query at all.
+
+**No table prints an aggregate across its queries.** No mean, no median, no
+geometric mean: the per-query columns are the report (#89 as amended). A row
+that looks like it should have one does not.
+
+**`cold_<q>_ms` / `warm_<q>_p50_ms` / `warm_<q>_p99_ms` are the same three questions in every lane.** The cold number is the first iteration after the database was opened; the warm numbers are the rest. A lane's own older field names still exist and still mean what they did: `q1_ms` on the document lane pools cold and warm, and the graph lane's unprefixed read fields ARE the cold pass, with `cold_point_p50_ms` and friends added as aliases so a table need not know which lane it is reading. `cold_warm_na` carries the reason where the split does not apply, and a blank there means nobody has said why.
+
+
+## Publishing traps
+
+**An absent row makes a claim.** If comparators appear at a tier and we do not, a reader concludes we could not do that tier. `export_web.py` publishes only scales where our engine also has a row, and names what it withheld.
+
+**Real numbers can compose a false impression.** A table can be accurate in every cell and wrong as a whole. Ask what a reader concludes, not only whether each figure is right.
+
+**Negative numbers can be the finding.** E4's process-boundary term goes negative at the four smallest sizes. That is the boundary sitting below the design's resolution, which is the evidence for "co-locating costs nothing measurable". Publish it with the explanation rather than clamping to zero; `claims_check` pins the count of negative sizes at 4 so it cannot be quietly tidied away.
+
+## Gates
+
+They answer different questions. `refresh_web_page.py` runs all of them (`refresh_web_page.GATES`); run them by hand after touching results or tables:
+
+    BENCH_ENGINE_COMMIT=<pin> python provenance_check.py    # does a cell trace to a run
+    BENCH_ENGINE_COMMIT=<pin> python fairness_check.py      # F1 to F15
+    BENCH_ENGINE_COMMIT=<pin> python page_check.py          # page cells vs generated tables, prose vs pins
+    BENCH_ENGINE_COMMIT=<pin> python equivalence_check.py   # do the engines of a table agree on the answer
+    BENCH_ENGINE_COMMIT=<pin> python version_consistency_check.py   # one engine, one version string, across the page
+    python version_pin_check.py                             # code and COMPARATORS.md agree on every pin; reads no rows
+
+`equivalence_check.py` holds the rows to each other: every lane of the 2026-11 instrument records its digests (DECISIONS #88).
+
+`structure_check.py` (2026-09-21) is the list counterpart to `prose_check`: where that one asks whether a NUMBER in prose traces to a pinned claim, this asks whether a LIST a document spells out is the list the code holds -- the gates PAGE-SPEC names against `refresh_web_page.GATES`. It is not a publish gate on purpose: a typo in a campaign document does not make the page wrong, and a publish gate that blocks on one only teaches people to switch it off. Run the whole thing by hand before campaign prep; it is instant and has no known false findings.
+
+`jvm_payload_check.py` asks one question of the adapters rather than of a document: does a Python list ever reach something that crosses into the JVM? JPype copies a NumPy array across in one crossing and marshals a list element by element, and the bulk path declines a list **silently**. It is narrow on purpose: the same `.tolist()` is CORRECT on the way to Qdrant, Milvus, Chroma, MongoDB or Neo4j, which have no Java array to be handed, so it fires only on the sinks that cross the boundary. **Run `--selftest` before trusting a clean result**: it asserts the real pre-fix shapes are still found and the legitimate comparator patterns still ignored. Unlike the checkers above it runs in CI as `bindings/python/tests/test_jvm_payload.py`, through the bindings test workflow.
+
+`claims_check.py` is a helper library `page_check` imports, not a gate. Running it by hand is still the only thing that checks the claims in PROTOCOL.md section 4. `prose_check.py` and `comparator_pins_check.py` are hand-run too. **Read `comparator_pins_check` output with BUGS F91 in hand**: it maps each backend to the pypi package whose pin governs it, which is true of an embedded engine and false of a served one, so it reports STALE on `neo4j_graph` whatever was measured. What guards served pins is `version_pin_check --runtime`, which reads the versions back out of the built images before cell 1.
+
+Publishing to the DBBench page is one command; PUBLISHING.md says which one and why it is a command rather than a checklist.

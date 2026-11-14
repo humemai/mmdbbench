@@ -122,17 +122,49 @@ def collision_problems(rows):
 
 
 # ------------------------------------------------------------------------------------------------ G1
-def roster_cells():
-    """(cells, outside_cells): the staged cells of the paper pass, and the cells of the registered arms the pass leaves out by design (make_2611_stages.OUTSIDE:
-    no stage script mentions them and the mini holds no row for them)."""
+_CELL_KEYS = ("lane", "scale", "workload", "backend", "cls", "arm")
+
+
+def _roster_split():
+    """(inside, outside, dropped): the cells of make_2611_stages.STAGES split by the generator's own rules. OUTSIDE arms are not in the subset at all; the arms the paper-2611
+    PROFILE drops (drop_reason: quantized dense arms, Neo4j and Memgraph dense, the second list) are in the subset and left out of the pass in the open, with a reason each."""
     import make_2611_stages as M
-    inside, outside = set(), set()
+    inside, outside, dropped = set(), set(), {}
     for spec in M.STAGES:
         for c in M.stage_cells(spec):
-            if c.kind == "lane":
-                (outside if M.is_outside(c.backend) else inside).add((c.lane, c.scale, c.workload, c.backend, c.cls, c.arm))
-    f = lambda cs: [dict(zip(("lane", "scale", "workload", "backend", "cls", "arm"), c)) for c in sorted(cs)]
+            if c.kind != "lane":
+                continue
+            key = (c.lane, c.scale, c.workload, c.backend, c.cls, c.arm)
+            why = M.drop_reason(M.DEFAULT_PROFILE, c.lane, c.backend)
+            if M.is_outside(c.backend):
+                outside.add(key)
+            elif why:
+                dropped[key] = why
+            else:
+                inside.add(key)
+    return inside, outside, dropped
+
+
+def roster_cells():
+    """(cells, outside_cells): the staged cells of the paper pass, and the cells of the registered arms the pass leaves out by design (make_2611_stages.OUTSIDE:
+    no stage script mentions them and the mini holds no row for them). The cells the paper-2611 profile drops are neither: see roster_dropped."""
+    inside, outside, _dropped = _roster_split()
+    f = lambda cs: [dict(zip(_CELL_KEYS, c)) for c in sorted(cs)]
     return f(inside), f(outside)
+
+
+def roster_dropped():
+    """The cells the default profile (make_2611_stages.DEFAULT_PROFILE) drops, DERIVED from the generator (drop_reason), each with its reason, and the rule behind each reason with
+    its source line. They are not staged cells of the paper pass, so the gate does not owe them a row."""
+    import ast
+    import make_2611_stages as M
+    _inside, _outside, dropped = _roster_split()
+    line = next(n.lineno for n in ast.walk(ast.parse(Path(M.__file__).read_text(encoding="utf-8")))
+                if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "DROP_WHY" for t in n.targets))
+    reasons = sorted(set(dropped.values()))
+    return {"profile": M.DEFAULT_PROFILE,
+            "rules": {w: {"why": M.DROP_WHY[w], "source": f"experiments/make_2611_stages.py:{line}"} for w in reasons},
+            "cells": [dict(zip(_CELL_KEYS, k), reason=dropped[k]) for k in sorted(dropped)]}
 
 
 def _outside_rule():
@@ -144,14 +176,18 @@ def _outside_rule():
             "source": f"experiments/make_2611_stages.py:{line}"}
 
 
-def _sha(cells, outside):
-    return hashlib.sha256(json.dumps({"cells": cells, "outside_cells": outside}, sort_keys=True).encode()).hexdigest()
+def _sha(cells, outside, dropped=None):
+    doc = {"cells": cells, "outside_cells": outside}
+    if dropped:
+        doc["profile_dropped"] = dropped
+    return hashlib.sha256(json.dumps(doc, sort_keys=True).encode()).hexdigest()
 
 
 def roster_doc():
     cells, outside = roster_cells()
-    return {"cells": cells, "outside": _outside_rule(), "outside_cells": outside, "cells_sha256": _sha(cells, outside),
-            "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells)"}
+    dropped = roster_dropped()
+    return {"cells": cells, "outside": _outside_rule(), "outside_cells": outside, "profile_dropped": dropped, "cells_sha256": _sha(cells, outside, dropped),
+            "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells, drop_reason)"}
 
 
 def outside_section(roster):
@@ -161,13 +197,51 @@ def outside_section(roster):
     return [f"  outside the profile (by design, source: {out['source']}): {len(roster['outside_cells'])} cell(s) of " + ", ".join(f"{b} {n}" for b, n in sorted(by.items()))]
 
 
+def dropped_section(roster):
+    """Lines for the cells the paper-2611 profile drops: printed with their reason and source line, never a failure."""
+    d = roster.get("profile_dropped") or {}
+    out = []
+    for why, rule in sorted((d.get("rules") or {}).items()):
+        cs = [c for c in d.get("cells", []) if c["reason"] == why]
+        out.append(f"  dropped by the {d.get('profile')} profile ({why}; source: {rule['source']}): {len(cs)} cell(s) of " + ", ".join(sorted({c["backend"] for c in cs})))
+    return out
+
+
+def load_error_rows(results, lanes=None):
+    """The rows of the store (results/runs.jsonl) of the publishing instrument that are NOT clean (an error, a timeout, a non-zero rc): the freeze skips failed cells, so the frozen
+    rows cannot say why a staged cell has none. Empty when the store is absent."""
+    import publish_instrument
+    path = Path(results) / "runs.jsonl"
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if str(r.get("instrument") or "") == publish_instrument.PUBLISH_INSTRUMENT and not _clean(r) and (not lanes or r.get("lane") in lanes):
+            out.append(r)
+    return out
+
+
+def _cap_rule_skip(lane, scale, workload, backend, cls, arm, b, errs):
+    """The scale below, in the lane's chain, at which the arm-cell timed out: the cap rule (DECISIONS #188) censors the arm at every larger scale and does not run it there."""
+    import cap_rule
+    for small in cap_rule.smaller_scales(lane, scale):
+        for r in errs.get((lane, small, workload, backend, cls, arm, b), []):
+            if str(r.get("error") or "").startswith("timeout"):
+                return small
+    return None
+
+
 def load_pending(path=PENDING):
     return json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else []
 
 
 def load_roster(path=ROSTER):
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if _sha(doc["cells"], doc["outside_cells"]) != doc["cells_sha256"]:
+    if _sha(doc["cells"], doc["outside_cells"], doc.get("profile_dropped")) != doc["cells_sha256"]:
         raise SystemExit(f"REFUSING: {path} does not match its own sha256; regenerate it with landing_gates.py roster-gen")
     return doc
 
@@ -196,7 +270,7 @@ def declared_by_page(payload, c):
     return False
 
 
-def roster_problems(rows, roster, lanes=None, need=3, payload=None, pending=None):
+def roster_problems(rows, roster, lanes=None, need=3, payload=None, pending=None, errors=None):
     """(problems, summary): MISSING and SHORT staged cells (unexplained) and ORPHAN cells (rows that are in no roster cell). With the page's payload, a cell the page
     declares absent (declared_by_page) is explained."""
     import arm_identity as AI
@@ -210,6 +284,10 @@ def roster_problems(rows, roster, lanes=None, need=3, payload=None, pending=None
                   "nogav" if _gav_off(r) else "", r.get("engine_backend") or None)].append(r)
     max_rep = max([_rep(r) or 0 for r in rows] or [0])
     need = min(need, max_rep) if max_rep else need
+    errs = collections.defaultdict(list)       # the store's error rows by cell key: a stated reason, never a repetition
+    for r in errors or []:
+        errs[(r.get("lane"), str(r.get("scale")), r.get("workload"), r.get("backend"), str(r.get("durability_class") or "relaxed"),
+              "nogav" if _gav_off(r) else "", r.get("engine_backend") or None)].append(r)
     probs, ok, short_explained, in_roster = [], 0, 0, set()
     # PENDING (roster_pending.json): a staged cell that was skipped, not run, and is waiting for a rerun. Printed, not a failure, and refused once a row exists for it, so the
     # entry cannot go stale; an entry that names no staged cell is refused too.
@@ -236,7 +314,9 @@ def roster_problems(rows, roster, lanes=None, need=3, payload=None, pending=None
             label = f"{c['lane']}/{c['scale']}/{c['workload']}/{c['backend']}/{c['cls']}" + (f"/{c['arm']}" if c["arm"] else "") + (f"/{b}" if b else "")
             if len(reps) >= need:
                 ok += 1
-            elif any(_explains(r) for r in rs):
+            elif any(_explains(r) for r in rs) or errs.get(key):
+                short_explained += 1
+            elif _cap_rule_skip(*key, errs):
                 short_explained += 1
             elif payload is not None and declared_by_page(payload, c):
                 short_explained += 1
@@ -299,7 +379,8 @@ def main(argv=None):
     exported = Path(M.RESULTS) / "web_benchmarks.json"
     payload = json.load(open(exported, encoding="utf-8")) if exported.exists() else None
     pending = load_pending()
-    probs, summ = roster_problems(rows, roster, lanes, payload=payload, pending=pending)
+    errors = load_error_rows(M.RESULTS, lanes)
+    probs, summ = roster_problems(rows, roster, lanes, payload=payload, pending=pending, errors=errors)
     cprobs, kinds = collision_problems(rows)
     for p in probs + cprobs:
         print("  " + p)
@@ -307,6 +388,8 @@ def main(argv=None):
         pe = next(p for p in pending if p["cell"] == name)
         print(f"  PENDING {name}: {pe['reason']} ({pe['ref']}; {pe['since']})")
     print("\n".join(outside_section(roster)))
+    for line in dropped_section(roster):
+        print(line)
     print(f"  roster {roster['cells_sha256'][:12]}: {summ['roster_cells']} staged cells, {summ['complete']} complete, {summ['explained_short']} short with a stated reason, "
           f"{summ['unexplained']} unexplained, {len(summ['pending'])} pending, {summ['orphan_cells']} orphan cell(s); collisions {kinds or 'none'}")
     return 1 if probs or cprobs else 0

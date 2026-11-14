@@ -473,6 +473,14 @@ def apply_mp_builds(n):
     os.environ["BENCH_MP_BUILDS"] = str(n)
 
 
+def apply_mp_arms(spec):
+    """--mp-arms a,b,c: the arms the dense overlay of this landing holds (humemai/mmdbbench#27). Like apply_mp_builds it only writes the
+    variable; make_paper_tables.mp_required() reads and validates it. An empty flag leaves the environment alone."""
+    if not spec.strip():
+        return
+    os.environ["BENCH_MP_ARMS"] = ",".join(x.strip() for x in spec.split(","))
+
+
 def main():
     # RUN UNDER THE REPOSITORY'S ENVIRONMENT, whatever interpreter started us.
     # Every step this script shells out to already uses PY; the one piece that
@@ -521,6 +529,9 @@ def main():
     ap.add_argument("--mp-builds", type=int, default=0, metavar="N",
                     help="builds per arm of the dense overlay this landing holds: sets BENCH_MP_BUILDS for the steps below "
                          "(make_paper_tables.mp_builds(); humemai/mmdbbench#27). Default: BENCH_MP_BUILDS from the environment, else 3")
+    ap.add_argument("--mp-arms", default="", metavar="A,B,C",
+                    help="the arms the dense overlay of this landing holds: sets BENCH_MP_ARMS (make_paper_tables.mp_required(); "
+                         "humemai/mmdbbench#27). Default: BENCH_MP_ARMS from the environment, else the 13 arms of the plan")
     ap.add_argument("--branch", default="",
                     help="with --apply: commit both repos (the bindings repo and the site) on a NEW branch of this name and push THAT "
                          "branch, never `main`; then open one pull request per repo and merge on green. Required with --apply: rows "
@@ -531,6 +542,7 @@ def main():
                          "publish, not the merge.")
     args = ap.parse_args()
     apply_mp_builds(args.mp_builds)
+    apply_mp_arms(args.mp_arms)
 
     # A LANDING PUSHES A BRANCH, NEVER `main`. The refusal comes before the pull, so a forgotten flag costs nothing: the first version of
     # this check sat at step 6, after the merge into the store, the gates and the site build.

@@ -998,6 +998,23 @@ MP_ARMS_OPTIONAL = ("neo4jvec", "pgvector", "surreal", "surrealsrv", "arango", "
 MP_ARMS_SMALL_OPTIONAL = ("milvus_int8", "qdrant_int8", "sqlitevec_int8")
 
 
+def mp_required(base):
+    """The arms a dense overlay of this landing must hold: `base` (MP_ARMS or MP_ARMS_SMALL), or the list the landing names in
+    BENCH_MP_ARMS (land_stage --mp-arms; humemai/mmdbbench#27). The n=3 campaign ran fewer arms than the 13 of the n=5 plan and two
+    the lists do not know, so a landing says which arms it holds. The overlay is still complete, absent or refused: a named arm with
+    fewer than mp_builds() files refuses, and unset keeps `base` unchanged."""
+    raw = os.environ.get("BENCH_MP_ARMS", "")
+    if not raw.strip():
+        return base
+    named = tuple(x.strip() for x in raw.split(","))
+    if not all(re.fullmatch(r"[a-z0-9_]+", x) for x in named):
+        raise SystemExit(f"BENCH_MP_ARMS={raw!r}: a comma-separated list of arm names (lower case letters, digits, underscore), no blanks")
+    dup = sorted({x for x in named if named.count(x) > 1})
+    if dup:
+        raise SystemExit(f"BENCH_MP_ARMS={raw!r}: {', '.join(dup)} named twice")
+    return named
+
+
 def _optional_arms_present(cand, label, arms=MP_ARMS_OPTIONAL):
     n = mp_builds()
     present = []
@@ -1016,15 +1033,15 @@ def mp_arms_present(small=False):
     plus every optional arm whose files are complete."""
     if small:
         cand = dense_mp_small_dir()
-        base = MP_ARMS_SMALL
+        base = mp_required(MP_ARMS_SMALL)
         optional = MP_ARMS_OPTIONAL + MP_ARMS_SMALL_OPTIONAL
     else:
         cand = dense_mp_dir()
-        base = MP_ARMS
+        base = mp_required(MP_ARMS)
         optional = MP_ARMS_OPTIONAL
     if not os.path.isdir(cand):
         return base
-    return base + _optional_arms_present(cand, os.path.basename(cand), optional)
+    return base + _optional_arms_present(cand, os.path.basename(cand), tuple(a for a in optional if a not in base))
 
 
 # The in-process ArcadeDB arms of the dense overlay (the others are served or comparators, which have no native build).
@@ -1035,6 +1052,7 @@ def _refuse_partial_native(cand, label, arms=MP_INPROCESS_ARMS, prefix="mp"):
     """The native build's overlay files (mp_<arm>_native_b<k>.json) are all there or none: a partial native run is a run in progress,
     and publishing it beside a complete JVM overlay would print a native arm built from fewer builds than its twin."""
     n = mp_builds()
+    arms = tuple(a for a in arms if a in mp_required(MP_ARMS))     # only the arms this landing holds have a twin to be complete
     have = {a: [b for b in range(1, n + 1) if os.path.isfile(os.path.join(cand, f"{prefix}_{a}_native_b{b}.json"))]
             for a in arms}
     if any(have.values()) and any(len(v) != n for v in have.values()):
@@ -1068,10 +1086,11 @@ def dense_mp_dir():
     # thing they should ever have differed in.
     if not os.path.isdir(cand):
         return cand
-    missing = [f"mp_{a}_b{b}.json" for a in MP_ARMS for b in range(1, n + 1)
+    required = mp_required(MP_ARMS)
+    missing = [f"mp_{a}_b{b}.json" for a in required for b in range(1, n + 1)
                if not os.path.isfile(os.path.join(cand, f"mp_{a}_b{b}.json"))]
     if missing:
-        raise SystemExit(f"dense_mp5_{pin}: {len(missing)} of {len(MP_ARMS) * n} files missing "
+        raise SystemExit(f"dense_mp5_{pin}: {len(missing)} of {len(required) * n} files missing "
                          f"(e.g. {missing[0]}) at {n} builds per arm (BENCH_MP_BUILDS, default {MP_BUILDS_DEFAULT}); no fallback, re-run the arm")
     _refuse_partial_native(cand, f"dense_mp5_{pin}")
     return cand
@@ -1088,10 +1107,11 @@ def dense_mp_small_dir():
     cand = os.path.join(RESULTS, f"dense_mp5_small_{pin}")
     if not os.path.isdir(cand):
         return cand
-    missing = [f"mp_{a}_b{b}.json" for a in MP_ARMS_SMALL for b in range(1, n + 1)
+    required = mp_required(MP_ARMS_SMALL)
+    missing = [f"mp_{a}_b{b}.json" for a in required for b in range(1, n + 1)
                if not os.path.isfile(os.path.join(cand, f"mp_{a}_b{b}.json"))]
     if missing:
-        raise SystemExit(f"dense_mp5_small_{pin}: {len(missing)} of {len(MP_ARMS_SMALL) * n} files missing "
+        raise SystemExit(f"dense_mp5_small_{pin}: {len(missing)} of {len(required) * n} files missing "
                          f"(e.g. {missing[0]}) at {n} builds per arm (BENCH_MP_BUILDS, default {MP_BUILDS_DEFAULT}); no fallback, re-run the arm")
     return cand
 

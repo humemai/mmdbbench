@@ -143,9 +143,14 @@ def check(rows):
                 flags.append(Flag("NEGATIVE", key, r.get("backend"), "disk", round(d, 1),
                                   f"rep {r.get('rep')}" + (f"; {note}" if note else "")))
             if "server_pre_disk" in r and "rc=0" not in str(r.get("server_pre_disk")):
-                flags.append(Flag("PRE_DISK", key, r.get("backend"), "disk", d if d is None else round(d, 1),
-                                  f"rep {r.get('rep')}, pre-disk step: {str(r.get('server_pre_disk'))[:80]!r}"
-                                  + (f"; {note}" if note else "")))
+                if str(r.get("server_disk_settled")) == "False" and d is None:
+                    # The freeze blanked this row's disk reading on purpose (PAGE-SPEC 4a rule 3) and, with it, every field named *disk*,
+                    # `server_pre_disk` included; there is no reading left for the pre-disk step to vouch for (humemai/mmdbbench#65).
+                    not_checked["the disk reading was blanked as unsettled by the freeze (its pre-disk step is blanked with it)"] += 1
+                else:
+                    flags.append(Flag("PRE_DISK", key, r.get("backend"), "disk", d if d is None else round(d, 1),
+                                      f"rep {r.get('rep')}, pre-disk step: {str(r.get('server_pre_disk'))[:80]!r}"
+                                      + (f"; {note}" if note else "")))
     for key, bes in groups.items():
         for metric, fn in (("disk", disk), ("memory", memory)):
             if metric in SKIP_LANES.get(key[0], ()):

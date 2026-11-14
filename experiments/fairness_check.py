@@ -1508,7 +1508,8 @@ def check_overrides(rows):
     """
     import override_registry as OV
     print("=== F15: every disclosed override is stamped on the rows that ran it ===")
-    bad_list, judged = OV.stamp_findings(rows)
+    allowed = []
+    bad_list, judged = OV.stamp_findings(rows, allowed=allowed)
     if not judged:
         print("  no 2026-11 row of an arm that runs a registered override; nothing to check yet")
         return 0
@@ -1520,6 +1521,10 @@ def check_overrides(rows):
     for _group, fs in sorted(groups.items()):
         more = f"  (+{len(fs) - 1} more row(s) like it)" if len(fs) > 1 else ""
         print(f"  FAIL {fs[0]['text']}{more}")
+    for exc in OV.STAMP_EXCEPTIONS:
+        n = sum(1 for _r, e in allowed if e is exc)
+        if n:
+            print(f"  ALLOWED {n} row(s) of {exc.lane} {exc.backend} ({exc.engine_backend}): {exc.reason}")
     if not bad_list:
         print(f"  ok: {judged} row-override pair(s) judged, each stamped with the value its sentence claims")
     return len(bad_list)

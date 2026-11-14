@@ -98,7 +98,7 @@ def test_the_module_imports_and_its_root_constants_point_here(name, isolated_imp
 @pytest.mark.parametrize("name", MODULES + TESTS + TOOL_SOURCES)
 def test_every_file_a_module_names_exists(name):
     tree = ast.parse((HERE / f"{name}.py").read_text(encoding="utf-8"))
-    base = {"HERE": HERE, "REPO": ROOT}
+    base = {"HERE": HERE / "tools" if name.startswith("tools/") else HERE, "REPO": ROOT}     # a tool or its test finds its neighbours in tools/
     missing, checked = [], 0
     for node in ast.walk(tree):
         c = _chain(node)

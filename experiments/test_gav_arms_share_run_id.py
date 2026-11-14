@@ -50,12 +50,12 @@ def test_the_freeze_keeps_both_arms_and_a_post_row_replaces_only_its_own_arm():
     d = Path(tempfile.mkdtemp(prefix="gav-freeze-"))
     rows = [on(q=1), off(q=2), on(ts="2026-11-13T01:00:00+00:00", q=3, **POST2)]
     (d / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    old = M.RESULTS
+    old = (M.RESULTS, M._ONLY_LANES)            # _ONLY_LANES is read from BENCH_ONLY_LANES at import: a test module imported earlier in one session fixes it for all
     try:
-        M.RESULTS = str(d)
+        M.RESULTS, M._ONLY_LANES = str(d), set()
         got = [r for r in M.load_canonical() if r.get("lane") == "l2" and r.get("workload") == "olap"]
     finally:
-        M.RESULTS = old
+        M.RESULTS, M._ONLY_LANES = old
     assert sorted((str(r.get("gav")), r.get("q")) for r in got) == [("False", 2), ("True", 3)], got
     assert {r["engine_version"] for r in got if r.get("gav") is not False} <= {"26.11.1", "26.11.1.post2"}
     assert [r["gav"] for r in got].count(False) == 1 and any(r.get("backend_arm") == "nogav" for r in got if r.get("gav") is False)

@@ -693,6 +693,30 @@ def _field_of_declared_query(field, stems):
     return any(f"_{s}_" in padded for s in stems)
 
 
+_NPROBE = re.compile(r"^nprobe\d+_")
+_MATCHED = re.compile(r"^matched_r(\d{3})_")
+
+
+def _stem(field):
+    """`nprobe152_query_p50_ms` -> `nprobe_query_p50_ms`: the name carries the nprobe a calibration chose, which differs between reps
+    of one cell; the field that is measured is the stem (humemai/mmdbbench#57)."""
+    return _NPROBE.sub("nprobe_", field)
+
+
+def _absent_by_definition(field, row):
+    """True when `field` is a `matched_rNNN_*` operating point (the point where the sweep's recall first reaches NNN/100) and this row's
+    own best recall of the sweep, `beam_max_recall_at_10`, stays below it: the row has no such point to record. A row that reached the
+    threshold, or has no sweep figure to say, is not excused."""
+    m = _MATCHED.match(field)
+    if not m:
+        return False
+    try:
+        best = float(row.get("beam_max_recall_at_10"))
+    except (TypeError, ValueError):
+        return False
+    return best < int(m.group(1)) / 100.0
+
+
 def check_schema_homogeneity(rows):
     """Every row of a (lane, scale) must carry the same measured fields.
 
@@ -721,11 +745,15 @@ def check_schema_homogeneity(rows):
                      # A family split on these is a split in
                      # instrumentation history, not in what was measured.
                      "graph_build_cache", "graph_build_access", "driver_",
+                     # PHASE PROBES added after the first comparator pass: the io, process and JVM memory samplers of the idle and
+                     # queries phases. No table or exporter source reads them, so a cell whose first rep predates them is a split in
+                     # instrumentation history, not in what was measured (the dense landing, 12 cells; humemai/mmdbbench#57).
+                     "io_idle_", "io_queries_", "proc_idle_", "proc_queries_", "jvm_idle_", "jvm_queries_",
                      # PROVENANCE, not a measurement: the harness that wrote the row counted a stacked device once (#555),
                      # so a cell whose reps straddle the fix legitimately splits on it.
                      "io_stat_dedup")
     def measured(r):
-        return {k for k, v in r.items()
+        return {_stem(k) for k, v in r.items()
                 if isinstance(v, (int, float))
                 and not k.startswith(IGNORE_PREFIX)
                 and not k.endswith(DECLARATION_SUFFIXES)}
@@ -773,7 +801,8 @@ def check_schema_homogeneity(rows):
             # beside four numbers is a sampler miss, not a lane measuring a
             # different thing, and the cell's median stands on the rest.
             diff = {f for f in (union - inter) if "disk" not in f
-                    and not all(_field_of_declared_query(f, _declared_stems(r)) for r, s in zip(brs, sets) if f not in s)}
+                    and not all(_field_of_declared_query(f, _declared_stems(r)) or _absent_by_definition(f, r)
+                                for r, s in zip(brs, sets) if f not in s)}
             if diff:
                 bad += 1
                 print(f"  SPLIT SCHEMA {key[0]}/{key[1]}/{key[2]}/{be}: "

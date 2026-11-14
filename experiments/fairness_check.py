@@ -1308,6 +1308,8 @@ PHASE_SPLIT_DECLARED = {
     ("l3d", "sqlite_vec_dense"): "has no separate index: `vec0` is a brute-force table",
     ("l3d", "sqlite_vec_dense_int8"): "has no separate index: `vec0` is a brute-force table",
     ("l3d", "surrealdb_dense"): "defines its index before the load, which builds it as rows arrive",
+    # `RedisDense.build` runs FT.CREATE first and then HSETs every vector; `post_build` waits for the Query Engine's background workers.
+    ("l3d", "redis_dense"): "creates its index before the load (`FT.CREATE`), so the Query Engine indexes every `HSET` as it arrives, and the wait for its background workers to drain is inside the build timer",
     # #131 item 3. Lucene builds a graph per segment while
     # documents are indexed and the force-merge rebuilds it into one.
     ("l3d", "elasticsearch_dense"): "builds its HNSW per segment as documents are indexed, and the refresh and the force-merge into one segment, which rebuilds the graph, are inside the build timer",

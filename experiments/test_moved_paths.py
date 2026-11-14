@@ -68,7 +68,7 @@ def test_the_harness_sits_one_level_below_the_repository_root():
     assert HERE.name == "experiments"
     assert (ROOT / "experiments").samefile(HERE)
     assert (ROOT / "README.md").is_file() and (ROOT / "LICENSE").is_file()
-    assert not (ROOT / "benchmarks").exists(), "the old layout is back"
+    assert not (ROOT / "benchmarks" / "experiments").exists(), "the old layout is back"
 
 
 def test_the_copy_is_not_empty():

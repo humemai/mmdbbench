@@ -34,7 +34,7 @@ uv run --no-project --with pytest --with numpy --with pandas --with pyarrow --wi
 
 The benchmark host runs its stages from a checkout of the repository the harness came from, until its chain ends. Three places name that checkout on purpose and are not changed here:
 
-- the stage scripts that `make_2611_stages.py` writes (and `stage_drafts_2611.sha256`, which pins them) go to that checkout and to its `bindings/python/dist`
+- the stage scripts that `make_2611_stages.py` and `make_post1_rerun_stages.py` write (and `stage_drafts_2611.sha256`, which pins the first ones) go to that checkout and to its `bindings/python/dist`
 - the defaults of `BENCH_LAND_REMOTE` in `land_stage.py` and of `--remote` in `merge_campaign.py`
 - `queue_lint.py` and its test, which match the host's own stage processes by their command line
 

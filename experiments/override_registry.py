@@ -784,11 +784,50 @@ def sentence_findings(tables, lane_of, rows):
 # ---------------------------------------------------------------------------
 # consumer 3: fairness_check
 
-def stamp_findings(rows):
+class StampException(NamedTuple):
+    """Rows that ran an override and could not stamp it, allowed in F15 with the reason beside the exception.
+
+    A row is allowed only when ALL of these hold: it is of `lane`/`backend`/`engine_backend`, its own failed read-back
+    (`*_readback_error`) says `error_contains`, it was measured before `until_ts` (the stamp fix of the issue named in the
+    reason, after which a row carries the field), and the field is absent. A row that stamps a value is judged as usual, so a
+    WRONG value is never hidden; the JVM wheel, the served arm and any other reason stay NOT STAMPED."""
+    key: str
+    lane: str
+    backend: str
+    engine_backend: str
+    error_contains: str
+    until_ts: str
+    reason: str
+
+
+STAMP_EXCEPTIONS = (
+    StampException(
+        key="arcadedb_hierarchy", lane="l3d", backend="arcadedb_dense_embedded", engine_backend="native",
+        error_contains="NotOnNativeYet", until_ts="2026-11-15",
+        reason=("the native wheel cannot read the `addHierarchy` setting back: the harness asked the Java schema object, which "
+                "raises NotOnNativeYet on the native backend by design; the cell's CREATE INDEX statement requested "
+                "`addHierarchy: true`, the three reps are complete and their databases are gone, so the stamp cannot be added "
+                "afterwards (humemai/mmdbbench#31 reads it through SQL for later rows)")),
+)
+
+
+def _stamp_exception(override, carrier, row):
+    """The StampException that allows this row's missing stamp, or None."""
+    err = " ".join(str(row.get(k)) for k in sorted(row) if str(k).endswith("_readback_error") and _present(row.get(k)))
+    for e in STAMP_EXCEPTIONS:
+        if (e.key == override.key and e.lane == carrier.lane and e.backend == carrier.backend
+                and str(row.get("engine_backend") or "") == e.engine_backend and e.error_contains in err
+                and str(row.get("ts_utc") or "") < e.until_ts):
+            return e
+    return None
+
+
+def stamp_findings(rows, allowed=None):
     """Findings for published rows: a row of a carrier arm that lacks the field
     its override stamps, or carries a value the sentence does not claim.
     Returns (findings, how many rows were judged); a finding is a dict with
-    `kind` (NOT STAMPED or WRONG), `key`, `field`, `where`, and `text`."""
+    `kind` (NOT STAMPED or WRONG), `key`, `field`, `where`, and `text`. A missing stamp that a StampException allows is not
+    a finding; with `allowed` a list, each such (row, exception) is appended to it so the check can print it."""
     index = {}
     for o in OVERRIDES:
         for c in o.carriers:
@@ -805,6 +844,11 @@ def stamp_findings(rows):
             where = f"{r.get('lane')} {r.get('scale')} {r.get('workload')} {r.get('backend')}"
             v = r.get(c.field)
             if not _present(v):
+                exc = _stamp_exception(o, c, r)
+                if exc is not None:
+                    if allowed is not None:
+                        allowed.append((r, exc))
+                    continue
                 err = next((r.get(k) for k in sorted(r) if str(k).endswith("_readback_error") and _present(r.get(k))), None)
                 why = f" ({err})" if err else ""
                 bad.append({"kind": "NOT STAMPED", "key": o.key, "field": c.field, "where": where,

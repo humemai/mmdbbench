@@ -616,3 +616,46 @@ def test_the_query_budget_sentence_appears_only_under_a_table_with_a_stamped_row
     assert len(text) == 1 and "12,288 MB" in text[0] and "no speed setting" in text[0]
     assert not [t for t, _v in OV.notes_for_table("t", "l1tpc", keys, [plain]) if "query heap budget" in t]
     assert "—" not in text[0] and "--" not in text[0]
+
+
+# ---------------------------------------------------------------------------
+# F15 exception: native-wheel l3d rows that could not read `addHierarchy` back (humemai/mmdbbench#31)
+def _native_hier_row(**kw):
+    base = dict(lane="l3d", backend="arcadedb_dense_embedded", scale="deep10m", engine_backend="native",
+                ts_utc="2026-11-12T01:00:00+00:00",
+                arcadedb_readback_error="NotOnNativeYet: the Java schema object is not on the native wheel")
+    base.update(kw)
+    return _row(**base)
+
+
+def _hier_findings(rows):
+    allowed = []
+    found, judged = OV.stamp_findings(rows, allowed=allowed)
+    return [f for f in found if f["key"] == "arcadedb_hierarchy"], allowed
+
+
+def test_a_native_row_that_could_not_read_the_setting_back_is_allowed_and_reported():
+    found, allowed = _hier_findings([_native_hier_row()])
+    assert found == [] and len(allowed) == 1
+    assert allowed[0][1].key == "arcadedb_hierarchy" and "NotOnNativeYet" in allowed[0][1].reason
+
+
+def test_the_exception_does_not_reach_the_jvm_wheel_a_server_arm_or_another_reason():
+    for kw in (dict(engine_backend="jvm"), dict(backend="arcadedb_dense_server"),
+               dict(arcadedb_readback_error="ConnectionError: refused"), dict(arcadedb_readback_error=None)):
+        found, allowed = _hier_findings([_native_hier_row(**kw)])
+        assert [f["kind"] for f in found] == ["NOT STAMPED"] and allowed == [], kw
+
+
+def test_the_exception_ends_with_the_stamp_fix_and_never_hides_a_wrong_value():
+    found, allowed = _hier_findings([_native_hier_row(ts_utc="2026-11-15T00:00:00+00:00")])
+    assert [f["kind"] for f in found] == ["NOT STAMPED"] and allowed == []
+    found, allowed = _hier_findings([_native_hier_row(arcadedb_add_hierarchy=False, arcadedb_add_hierarchy_source="read back")])
+    assert [f["kind"] for f in found] == ["WRONG"] and allowed == []
+
+
+def test_every_stamp_exception_names_a_registered_override_and_a_reason():
+    keys = {o.key for o in OV.OVERRIDES}
+    assert OV.STAMP_EXCEPTIONS
+    for e in OV.STAMP_EXCEPTIONS:
+        assert e.key in keys and len(e.reason) > 40 and e.error_contains and e.until_ts

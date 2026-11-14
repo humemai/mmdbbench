@@ -4609,6 +4609,20 @@ def _entry_heaps(e, lane, wl, exact_only=False):
     return heaps
 
 
+def _memory_workload(e, lane, wl):
+    """The workload filter for the rows an entry's memory cell was read from, which is also where its heap is read.
+
+    The document lane runs two workloads over one corpus and main() merges them into one cell, but reads the memory cell from the
+    transactional rows only: `[rows of oltp] or rs`. An arm with no transactional rows at the entry's size (CrateDB in the n=3
+    landing: analytics rows only) keeps the rows it has, so its memory cell is printed. The heap beside that cell must read the same
+    rows, so for the document lane this returns `wl` when the arm has rows of that workload at the size and None (every workload of
+    the lane) when it has none. Another lane returns `wl` unchanged: its memory cell is read from the cell's own rows.
+    """
+    if lane == "l1tpc" and not _entry_rows(e, lane, wl, exact_only=True):
+        return None
+    return wl
+
+
 def _heap_not_pinned(e, lane, wl):
     """True when this table entry's JVM started with far less heap than it may take: embedded ArcadeDB
     (no -Xms in this instrument), or an entry whose every row records `server_jvm_initial_heap_bytes`
@@ -7154,7 +7168,9 @@ def _finish_table(table: dict) -> dict:
     # printed beside it for JVM engines). A JVM engine's peak sits close to the
     # heap it was given, so the setting belongs next to the number. From the
     # rows behind the cell at its own size only; an engine that records no
-    # heap, or a cell whose rows ran two, prints none.
+    # heap, or a cell whose rows ran two, prints none. The rows are the ones
+    # the memory cell was read from (_memory_workload), so an arm that has
+    # no transactional rows still gets the heap of the rows its cell has.
     _lw = _TABLE_LANE.get(table.get("id"))
     if _lw:
         _hl, _hw = _lw
@@ -7164,7 +7180,7 @@ def _finish_table(table: dict) -> dict:
             _pk = (_e.get("metrics") or {}).get("peak memory GiB")
             if _e.get("outcome") or not isinstance(_pk, dict) or _pk.get("median") is None:
                 continue
-            _hs = _entry_heaps(_e, _hl, _hw, exact_only=True)
+            _hs = _entry_heaps(_e, _hl, _memory_workload(_e, _hl, _hw), exact_only=True)
             if len(_hs) == 1:
                 _e["metrics"]["JVM heap"] = {"text": _hs.pop()}
     # Every metric a row carries is a column the page shows. l3smp carried

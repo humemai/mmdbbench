@@ -17,6 +17,7 @@ The benchmark harness was developed in [humemai/arcadedb-embedded-python](https:
 | `benchmarks/python-bindings/` (the frozen artifact of the SciPy 2026 paper, 91 files, byte-identical, never edited here) | `6463877445` (2026-10-06, the last commit that touched it; the tree is the same at `4272386cfa` and at the origin's `main`) | `main` | 3b |
 | origin PR 554 over `4272386cfa`: four ArcadeDB arms (`arcadedb` and `arcadedb-jvm`), PostgreSQL-wire twin, official driver, page and landing code (68 files, `CAMPAIGN.md` left out; `land_stage.py` stays at its step 3 version) | `17be3f686b` (2026-11-09) | `bench/arcadedb-import-26111` | 4 |
 | origin PR 584 (build-only mode, the wheels-only post1 rerun, `post1_rows.py`, `make_post1_rerun_stages.py`, `POST1-RERUN.md`), the post2 names (`--wheel-label postN`, `land_stage --post-tag`) and the `.postN` pair check of `verify_pair_c25.sh`, as three commits on the PR 554 head | `3e9fa32de6`, `a585f03149`, `f24d65aef3` (2026-11-10 to 2026-11-11) | `bench/post3-rerun-harness` | 5 |
+| the PG+AGE harness fix of origin PR 596: visited probe budget, `statement_timeout` analytics limit, tests (the two commits cherry-picked onto `4272386cfa` for the rerun) | `236a4d1296`, `9559b02953` (2026-11-13) | `bench/comparator-reruns-2611-on-4272386` | 6 |
 
 `f5f42f3228` is a descendant of `4272386cfa` that also holds the commits of origin PRs 554 and 584, so its `land_stage.py` carries their options too (`--post1-reps`, `--post-tag`, `BENCH_LAND_PULLED_FILE`); `post1_rows.py`, which `--post1-reps` imports, arrives with those PRs.
 
@@ -29,7 +30,7 @@ The rows carry the engine version, the engine commit and the wheel, but no harne
 | Family of stages | Harness commit that ran | Branch of the origin | Copied here |
 | --- | --- | --- | --- |
 | Comparators, 2611 passes | `main` of the origin at the start of each stage (a stage pulls `main` before it runs); `4272386cfa` is the base of the copy, commits of `main` after it (for example `31fcc9bc7b`, 2026-11-09) are not in the copy | `main` | in part (the base) |
-| PG+AGE reruns (visited probe budget, `statement_timeout` limit) | `9559b02953` (2026-11-13), the two commits of origin PR 596 on `4272386cfa` | `bench/comparator-reruns-2611-on-4272386` | not yet |
+| PG+AGE reruns (visited probe budget, `statement_timeout` limit) | `9559b02953` (2026-11-13), the two commits of origin PR 596 on `4272386cfa` | `bench/comparator-reruns-2611-on-4272386` | yes, step 6 (merged onto the tree of step 5 without a conflict; the rerun ran at `9559b02953`, which has neither PR 554 nor PR 584) |
 | ArcadeDB four arms, JVM and native, 26.11.1 | `eb7c767d97` (2026-11-07), part of origin PR 554 | `bench/arcadedb-import-26111` | yes, step 4 (the tree is `17be3f686b`, which holds `eb7c767d97` and seven later commits of the PR) |
 | PostgreSQL-wire twin and HTTP catch-up cells | `defe8f18ac` (2026-11-08) | `bench/catchup-2611` | not yet |
 | Rerun of the embedded cells with the 26.11.1.post2 wheels | `00f9e7d723` (2026-11-11), origin PR 554 and PR 584 combined, plus two commits | `bench/post2-rerun-on-livepin` | yes, step 5, in the tree of `f24d65aef3`: the same tooling on the PR 554 head with the commits of `main` that `00f9e7d723` lacks (the excluded-windows guard); the `.postN` pair check is the same change as `00f9e7d723` |

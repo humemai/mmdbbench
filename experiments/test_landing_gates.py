@@ -135,8 +135,9 @@ def test_a_pending_cell_is_printed_not_failed_and_a_stale_entry_is_refused():
 def test_the_committed_pending_list_names_staged_cells_and_carries_a_reason_a_reference_and_a_date():
     pending = G.load_pending()
     cells = {f"{c['lane']}/{c['scale']}/{c['workload']}/{c['backend']}/{c['cls']}" + (f"/{c['arm']}" if c["arm"] else "") for c in G.load_roster()["cells"]}
-    assert {p["cell"] for p in pending} == {"l2/sf10/oltp/pgage_graph/relaxed", "l2/sf10/oltp/pgage_graph/strict"}
-    assert all(p["cell"] in cells and p["reason"] and p["ref"] and p["since"] for p in pending)
+    # Not pinned to which cells are owed today: that is data, and it changes with every landing (the list is empty once the owed cells have rows, as after the n=3 landing of
+    # 2026-11-15; the planted-entry test above proves a stale or unknown entry is refused). What must hold for whatever is listed:
+    assert all(p["cell"] in cells and p["reason"] and p["ref"] and p["since"] for p in pending), pending
 
 
 def _merge(store, incoming):

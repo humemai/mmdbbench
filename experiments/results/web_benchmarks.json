@@ -4,6 +4,9 @@
   "skeleton": false,
   "arcadedb_version": null,
   "comparator_versions": {
+    "arangodb_dense": [
+      "arangodb:3.12.12"
+    ],
     "arangodb_e2": [
       "arangodb:3.12.12"
     ],
@@ -28,8 +31,14 @@
     "duckdb_e2": [
       "duckdb:1.5.6 + vss:b833341 + duckpgq:61f5d082"
     ],
+    "duckdb_vss_dense": [
+      "1.5.6"
+    ],
     "duckpgq_graph": [
       "duckdb:1.5.6 + duckpgq:61f5d082"
+    ],
+    "ladybug_dense": [
+      "ladybug:0.22.0"
     ],
     "ladybug_e2": [
       "ladybug:0.22.0"
@@ -46,6 +55,9 @@
     "mongodb": [
       "mongodb 9.0.4"
     ],
+    "mongodb_dense": [
+      "mongodb 9.0.4 + MongoDb Search Community Version 1.70.5 at localhost:27028"
+    ],
     "mongodb_e2": [
       "mongodb 9.0.4 + MongoDb Search Community Version 1.70.5 at localhost:27028"
     ],
@@ -61,17 +73,29 @@
     "pgage_graph": [
       "PostgreSQL 18.6 + age:1.8.0"
     ],
+    "pgvector_dense": [
+      "pgvector:0.8.7 on PostgreSQL 18.6"
+    ],
     "postgres": [
       "PostgreSQL 18.6"
     ],
     "postgres_tuned": [
       "PostgreSQL 18.6"
     ],
+    "qdrant_dense": [
+      "qdrant:1.20.0"
+    ],
+    "redis_dense": [
+      "redis:8.10.2"
+    ],
     "redis_tpc": [
       "redis:8.10.2"
     ],
     "sqlite": [
       "sqlite 3.46.1"
+    ],
+    "sqlite_vec_dense": [
+      "0.1.9"
     ],
     "surrealdb_e2": [
       "surrealdb-embedded:2.3.10 (sdk 2.0.0)"
@@ -111,7 +135,77 @@
     "The server engines that run on a JVM other than ArcadeDB (Elasticsearch and Neo4j) run with the initial heap pinned to the maximum heap, as their documentation recommends, although ArcadeDB's guidance is not to pin it when measuring memory; ArcadeDB, embedded and served, sets only the maximum heap, from the cell's memory budget, as its guidance for a fixed memory budget and its Python bindings document (the image-defaults ArcadeDB row sets none and runs the image's own), and QuestDB keeps its image's heap settings."
   ],
   "provenance_note": "Some benchmarks record which machine they ran on and some record only the container, so that column is filled in where it was measured and left alone where it was not. Everything on this page ran on the same machine; this note reports what each result can actually show rather than what we know to be true of all of them.",
-  "hosts_recorded": [],
+  "hosts_recorded": [
+    "container:01156f232a5d (host unknown)",
+    "container:013a2e05917a (host unknown)",
+    "container:041a99d31655 (host unknown)",
+    "container:0723470a676a (host unknown)",
+    "container:09541c7c68e8 (host unknown)",
+    "container:0ba66880eec4 (host unknown)",
+    "container:0bf559b8f2e3 (host unknown)",
+    "container:11920faf5f4d (host unknown)",
+    "container:11c18aed7b27 (host unknown)",
+    "container:186f7f53e648 (host unknown)",
+    "container:1a48dd6132e5 (host unknown)",
+    "container:1f9b7eeb89c1 (host unknown)",
+    "container:20641aa76f72 (host unknown)",
+    "container:27a74b6a2839 (host unknown)",
+    "container:29eba4e97846 (host unknown)",
+    "container:2a09635ec04b (host unknown)",
+    "container:2c2ac871d6ff (host unknown)",
+    "container:2d5ab3cf5c20 (host unknown)",
+    "container:2eac51cbbd19 (host unknown)",
+    "container:300b5090129b (host unknown)",
+    "container:3c3bedcdb23c (host unknown)",
+    "container:3c8aea421651 (host unknown)",
+    "container:3da2d98cb24d (host unknown)",
+    "container:4446782ef175 (host unknown)",
+    "container:48c079d3440f (host unknown)",
+    "container:498f90127828 (host unknown)",
+    "container:4facdffee628 (host unknown)",
+    "container:5166b5a5c675 (host unknown)",
+    "container:56a0cf0e89cf (host unknown)",
+    "container:5d0814befc2d (host unknown)",
+    "container:5e4fd9ecb136 (host unknown)",
+    "container:5f19b46a1505 (host unknown)",
+    "container:65b006cc5a00 (host unknown)",
+    "container:67ffe31237a5 (host unknown)",
+    "container:681f6f4f9ade (host unknown)",
+    "container:6ae5e1982f52 (host unknown)",
+    "container:73562be6d8eb (host unknown)",
+    "container:79acaebbe1f8 (host unknown)",
+    "container:7a1788c47774 (host unknown)",
+    "container:820881bbe054 (host unknown)",
+    "container:85c63f7064bc (host unknown)",
+    "container:8bf13ecf8583 (host unknown)",
+    "container:8ca85c870477 (host unknown)",
+    "container:8f2e7a9e92da (host unknown)",
+    "container:9e851c66fc39 (host unknown)",
+    "container:a02daaf854ad (host unknown)",
+    "container:a26037f6ab21 (host unknown)",
+    "container:ac0056536899 (host unknown)",
+    "container:af5f45666b04 (host unknown)",
+    "container:b1e157c966e1 (host unknown)",
+    "container:b54c02ca2276 (host unknown)",
+    "container:b7ba44e4adb8 (host unknown)",
+    "container:befbae82c7d6 (host unknown)",
+    "container:c1a6ee27d5c8 (host unknown)",
+    "container:c342c85180e7 (host unknown)",
+    "container:c584b498a06e (host unknown)",
+    "container:c6142a12bc7c (host unknown)",
+    "container:c62d0f4a7f8d (host unknown)",
+    "container:d225ee5bef22 (host unknown)",
+    "container:d52557fd1cde (host unknown)",
+    "container:d6bfa2089a5b (host unknown)",
+    "container:d7598cdfe6ef (host unknown)",
+    "container:da8a068a9fcf (host unknown)",
+    "container:dcc2ba62f3ac (host unknown)",
+    "container:ea88d125aaa9 (host unknown)",
+    "container:ebf6f33b37ec (host unknown)",
+    "container:f17a8667c004 (host unknown)",
+    "container:f3917d7d9866 (host unknown)",
+    "container:f63c714d37f9 (host unknown)"
+  ],
   "setup": {
     "hosts": {
       "benchmark machine": {
@@ -168,12 +262,4315 @@
   },
   "tables": [
     {
+      "id": "l3d",
+      "title": "Dense vector search",
+      "dataset": "DEEP-10M (deep-image-96-angular) and SIFT-1M",
+      "conditions": [
+        "ingest s and index s are two timers where the engine has the boundary: inserting the vectors, then building the index. Qdrant (fp32), Redis (fp32), and sqlite-vec (fp32) record one timer only, because the index is built while ingesting or the adapter times no boundary, so their ingest s and index s are blank. ingest+index total s is one timer around both, and ingest+index vectors/s divides the vector count by it.",
+        "Disk is what the workload left on disk, in GiB: the engine's writable layer plus its volumes after the cell, minus the same engine's empty footprint.",
+        "The insert and delete into a built index, the search after each, and the recall after each are measured at 1M vectors only. At 9.99M vectors those columns are blank because the pass is not run there, not because an engine failed it. These engines do not all maintain an index the same way: ArcadeDB (embedded, fp32) left 1,001 vectors in its delta buffer, to be merged by a later full rebuild this cell does not pay for. A full rebuild touches every vector in the index and an incremental insert touches only the new ones, so the per-vector costs here price different amounts of work and are not a straight speed comparison.",
+        "The native build was not measured for ArcadeDB (server, fp32, native build) at 9.99M vectors, so those rows are absent.",
+        "Both server arms are the official ArcadeDB server images, one built for the JVM and one compiled to a native executable, started with the same server settings, which each server reports back when it starts. The CPU baselines differ: the native server image is native server image: -march=x86-64-v3 and the native wheel (the embedded arm) as native wheel: -march=compatibility, and the JVM server compiles for the CPU it runs on.",
+        "DuckDB is given one thread for each CPU the run may use; left alone it sizes its pool from the machine's cores and not from the CPUs the run was given.",
+        "DuckDB's vector rows keep their HNSW index in the database through a persistence feature that its vector extension still labels experimental and that has to be switched on for the index to be stored at all.",
+        "ArcadeDB's vector index is built as a layered graph, the structure the hnswlib family uses; the engine's own default is a single flat layer.",
+        "The ArcadeDB server is started with the limit on the records or groups that one sorting, grouping, or distinct query may hold in memory fixed at 5,000,000, while the embedded package leaves that limit at the engine's default, which grows with the heap, so the two deployments can run different limits.",
+        "The rows of this table that carry the id-index stamp ran with an index on the vector's id in every engine: ArcadeDB, pgvector, Neo4j, Memgraph, FalkorDB, DuckDB, and LanceDB built one on the empty store before the load, so it is counted in the load time, and the other engines find a record by a key they always index. The delete finds each vector through that index.",
+        "Cold p50 and p99 are the first timed pass over the query set after the index is built; a short untimed warm-up on held-out queries runs before it, so cold means an index that has not yet answered the timed queries, not a process that has done nothing. Warm columns, where present, are the passes after it.",
+        "Every engine searches this corpus with the same distance, squared Euclidean, although the corpus is one whose published neighbours were computed by angle. The two agree here: every vector and every query is scaled to unit length before anything is indexed, and once they are, ordering by Euclidean distance and ordering by angle produce the same list. So the recall column is measured against the dataset's own published neighbours, unchanged, while every engine runs one metric rather than each running its own -- which is what makes the latencies comparable at all.",
+        "ArcadeDB's maxConnections is a Vamana per-layer degree, not hnswlib's M. Matching the parameter names would compare a half-degree graph against a full-degree one, so the graphs are matched by effect instead.",
+        "ArangoDB, ArcadeDB, DuckDB VSS, LadybugDB, MongoDB, Qdrant, Redis, pgvector, and sqlite-vec have an index on the vector id, the key the delete pass finds each vector by, and building it is part of the ingest time.",
+        "ArangoDB's vector index is FAISS IVF (inverted lists over trained centroids), not HNSW, so the degree match above does not apply to it, and its rows record its operating point instead. Its number of lists is four times the square root of the vector count, the low end of the range FAISS's own guidelines give, which makes 4,000 lists at 1M vectors and 12,643 lists at 9.99M vectors. The number of lists each query probes is calibrated, not set: after the build and before any timed pass, the benchmark picks the smallest number whose recall@10 on 200 queries held out from the timed ones reaches the recall target its rows record. At 1M vectors that target is 0.95 and the calibration chose 38 to 47 lists across three builds; At 9.99M vectors that target is 0.95 and the calibration chose 38 to 41 lists across three builds.",
+        "ArcadeDB's served rows time every call through the benchmark's own minimal HTTP client, lean_http (http.client, keep-alive) (source: experiments/lean_http.py), which keeps one persistent http.client connection per host. The other engines are measured through their vendors' own Python clients, so client weight differs between the served engines.",
+        "ArcadeDB (server, fp32, JVM build) and ArcadeDB (server, fp32, native build) run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: ArcadeDB (server, fp32, native build)'s 3.78 GiB at 1M vectors is about 47 per cent of its 8g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory. ArcadeDB (embedded, fp32, JVM build) and ArcadeDB (embedded, fp32, native build) run on a JVM too, but they start with no initial heap size, so their column follows what the work needed and not the heap the JVM was allowed to grow into.",
+        "Each pass answers 1,000 queries; cold is the first pass after the build and warm pools the four passes after it, over three builds.",
+        "`ingest+index total s` is the whole of building this corpus. `ingest s` and `index s` are the two phases timed inside it -- writing the data, then building whatever index the engine was given -- and they are not a division of it: each engine's ingest clock starts after the setup it does first, creating a schema or a collection, which neither phase counts. How much is left over depends on the engine: nothing on some of the ones here, up to about 40 per cent on others. Read the two as what each phase cost, and the total as what the whole of it cost.",
+        "CrateDB (fp32), SurrealDB (embedded, fp32), and SurrealDB (server, fp32) at 1M vectors: the search cell exceeded its 0.5 hour budget, the same budget every engine on this table had, on its first attempt and was not retried; there is no row. It was still in the index build when the budget ran out.",
+        "ArcadeDB (server, fp32, native build) at 9.99M vectors: the search cell failed inside its budget and was not retried, so there is no row. What it reported: lean_http.ConnectionError: POST http://srv-l3d_arcadedb_dense_server_search_deep10m_r1:248",
+        "In the cells: `>30m` means the cell ran past its tier's cap and was not retried. `lost` means the connection dropped mid-query. A dash is an operation the engine cannot express, never a slow one.",
+        "Ingest paths: ArcadeDB embedded loads through the Python package's graph_batch with the WAL on, 10,000 vectors per commit, each vector as one Java float array, then CREATE INDEX ... LSM_VECTOR; served binds 2,000-row INSERT ... CONTENT batches over HTTP with each vector as a JSON array, then the same CREATE INDEX; Chroma add() in batches of 5,000; LanceDB an Arrow table then create_index; Qdrant upserts in batches; Milvus writes Parquet files to its MinIO with the vendor's bulk writer and runs one import job (file preparation, upload and the job are all inside the ingest time); DuckDB VSS and sqlite-vec executemany; pgvector COPY FROM STDIN then CREATE INDEX; Elasticsearch creates its index first and bulk-indexes the vectors in batches of 5,000, then refreshes and force-merges to one segment, all inside the build time; Memgraph loads UNWIND batches of 5,000 over bolt and then creates its vector index, which returns once it holds every node; FalkorDB loads UNWIND batches of 5,000 over the Redis protocol, creates its vector index, and waits until the index reports itself operational, which counts as index time; LadybugDB loads Arrow tables of up to 100,000 vectors with COPY and then builds its vector index; Neo4j loads then builds its vector index; MongoDB insert_many then its vector search index; ArangoDB import_bulk then its FAISS IVF index; SurrealDB inserts through its Python SDK under the HNSW index it defines first; the server builds that index in the background, so the served build time includes waiting until a query probe shows the index has caught up."
+      ],
+      "columns": [
+        "cold p50 ms",
+        "cold p99 ms",
+        "warm p50 ms",
+        "warm p99 ms",
+        "after insert p50 ms",
+        "after delete p50 ms",
+        "insert into index ms/vector",
+        "recall@10 after insert",
+        "delete from index ms/vector",
+        "recall@10 after delete",
+        "p50 ms at recall 0.95",
+        "p99 ms at recall 0.95",
+        "ef or nProbe at recall 0.95",
+        "p50 ms at recall 0.90",
+        "ef or nProbe at recall 0.90",
+        "p50 ms at recall 0.99",
+        "ef or nProbe at recall 0.99",
+        "recall@10",
+        "ingest+index vectors/s",
+        "ingest s",
+        "index s",
+        "ingest+index total s",
+        "peak memory GiB",
+        "JVM heap",
+        "disk GiB"
+      ],
+      "withheld_scales": [],
+      "withheld_reason": null,
+      "entries": [
+        {
+          "backend": "ArcadeDB (embedded, fp32, native build)",
+          "build": "native",
+          "backend_key": "arcadedb_dense_embedded",
+          "is_arcadedb": true,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 2.12,
+              "min": 2.088,
+              "max": 2.127,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 5.795,
+              "min": 5.585,
+              "max": 5.848,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1.0985,
+              "min": 1.087,
+              "max": 1.105,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 1.365,
+              "min": 1.322,
+              "max": 1.444,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9877,
+              "min": 0.9869,
+              "max": 0.9885,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 278.25,
+              "min": 275.51,
+              "max": 281.23,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 22.64,
+              "min": 22.58,
+              "max": 22.77,
+              "n": 3
+            },
+            "index s": {
+              "median": 254.86,
+              "min": 252.25,
+              "max": 257.93,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 3593.9,
+              "min": 3555.8,
+              "max": 3629.6,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 2.6531,
+              "min": 2.6475,
+              "max": 2.6612,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.7548,
+              "min": 0.7548,
+              "max": 0.7548,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 1.104,
+              "min": 1.091,
+              "max": 1.128,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 0.991,
+              "min": 0.99,
+              "max": 0.998,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.043,
+              "min": 0.042,
+              "max": 0.914,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9891,
+              "min": 0.9886,
+              "max": 0.9893,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.129,
+              "min": 0.127,
+              "max": 0.155,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9891,
+              "min": 0.9885,
+              "max": 0.9893,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 0.61,
+              "min": 0.604,
+              "max": 0.618,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 0.745,
+              "min": 0.719,
+              "max": 0.777,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 0.61,
+              "min": 0.604,
+              "max": 0.618,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 1.884,
+              "min": 1.869,
+              "max": 1.906,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "8g"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9596,
+                "p50": 0.61,
+                "p99": 0.745
+              },
+              {
+                "beam": 100,
+                "recall": 0.9884,
+                "p50": 0.987,
+                "p99": 1.16
+              },
+              {
+                "beam": 200,
+                "recall": 0.9965,
+                "p50": 1.884,
+                "p99": 2.566
+              },
+              {
+                "beam": 400,
+                "recall": 0.9988,
+                "p50": 2.996,
+                "p99": 3.776
+              }
+            ]
+          }
+        },
+        {
+          "backend": "ArcadeDB (embedded, fp32, JVM build)",
+          "build": "jvm",
+          "backend_key": "arcadedb_dense_embedded",
+          "is_arcadedb": true,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 2.182,
+              "min": 1.944,
+              "max": 2.206,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 5.037,
+              "min": 4.912,
+              "max": 5.279,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 0.956,
+              "min": 0.939,
+              "max": 0.99,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 1.2075,
+              "min": 1.111,
+              "max": 1.629,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9882,
+              "min": 0.9874,
+              "max": 0.9885,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 153.63,
+              "min": 148.28,
+              "max": 153.64,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 22.53,
+              "min": 22.21,
+              "max": 22.68,
+              "n": 3
+            },
+            "index s": {
+              "median": 129.95,
+              "min": 124.74,
+              "max": 130.38,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 6509.1,
+              "min": 6508.7,
+              "max": 6744.0,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 4.8288,
+              "min": 4.7053,
+              "max": 4.9246,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.7547,
+              "min": 0.7547,
+              "max": 0.7547,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 1.104,
+              "min": 1.091,
+              "max": 1.128,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 0.991,
+              "min": 0.99,
+              "max": 0.998,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.043,
+              "min": 0.042,
+              "max": 0.914,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9891,
+              "min": 0.9886,
+              "max": 0.9893,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.129,
+              "min": 0.127,
+              "max": 0.155,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9891,
+              "min": 0.9885,
+              "max": 0.9893,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 0.61,
+              "min": 0.604,
+              "max": 0.618,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 0.745,
+              "min": 0.719,
+              "max": 0.777,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 0.61,
+              "min": 0.604,
+              "max": 0.618,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 1.884,
+              "min": 1.869,
+              "max": 1.906,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "8g"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9596,
+                "p50": 0.61,
+                "p99": 0.745
+              },
+              {
+                "beam": 100,
+                "recall": 0.9884,
+                "p50": 0.987,
+                "p99": 1.16
+              },
+              {
+                "beam": 200,
+                "recall": 0.9965,
+                "p50": 1.884,
+                "p99": 2.566
+              },
+              {
+                "beam": 400,
+                "recall": 0.9988,
+                "p50": 2.996,
+                "p99": 3.776
+              }
+            ]
+          }
+        },
+        {
+          "backend": "ArcadeDB (server, fp32, native build)",
+          "build": "native",
+          "backend_key": "arcadedb_dense_server",
+          "is_arcadedb": true,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 3.263,
+              "min": 3.204,
+              "max": 3.335,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 7.945,
+              "min": 6.932,
+              "max": 9.378,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1.8465,
+              "min": 1.783,
+              "max": 1.919,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 2.316,
+              "min": 2.228,
+              "max": 2.662,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9888,
+              "min": 0.9869,
+              "max": 0.9891,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 485.29,
+              "min": 447.71,
+              "max": 552.19,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 158.4,
+              "min": 156.77,
+              "max": 163.7,
+              "n": 3
+            },
+            "index s": {
+              "median": 321.78,
+              "min": 281.72,
+              "max": 381.06,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 2060.6,
+              "min": 1811.0,
+              "max": 2233.6,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 3.7766,
+              "min": 3.7024,
+              "max": 3.7838,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.7817,
+              "min": 0.7817,
+              "max": 0.7817,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 2.008,
+              "min": 1.898,
+              "max": 2.013,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 1.828,
+              "min": 1.746,
+              "max": 1.858,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.15,
+              "min": 0.141,
+              "max": 0.151,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9891,
+              "min": 0.9891,
+              "max": 0.9898,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.194,
+              "min": 0.183,
+              "max": 1.28,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9891,
+              "min": 0.989,
+              "max": 0.9898,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 1.232,
+              "min": 1.226,
+              "max": 1.313,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 1.581,
+              "min": 1.472,
+              "max": 1.618,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.232,
+              "min": 1.226,
+              "max": 1.313,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 3.242,
+              "min": 3.074,
+              "max": 3.269,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "8g"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9621,
+                "p50": 1.232,
+                "p99": 1.581
+              },
+              {
+                "beam": 100,
+                "recall": 0.9886,
+                "p50": 1.832,
+                "p99": 2.234
+              },
+              {
+                "beam": 200,
+                "recall": 0.9971,
+                "p50": 3.242,
+                "p99": 6.454
+              },
+              {
+                "beam": 400,
+                "recall": 0.9992,
+                "p50": 5.05,
+                "p99": 7.55
+              }
+            ]
+          }
+        },
+        {
+          "backend": "ArcadeDB (server, fp32, JVM build)",
+          "build": "jvm",
+          "backend_key": "arcadedb_dense_server",
+          "is_arcadedb": true,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 2.743,
+              "min": 2.412,
+              "max": 4.185,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 5.781,
+              "min": 5.19,
+              "max": 20.615,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1.333,
+              "min": 1.211,
+              "max": 2.508,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 1.7485,
+              "min": 1.624,
+              "max": 14.406,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9876,
+              "min": 0.9873,
+              "max": 0.9884,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 208.47,
+              "min": 203.53,
+              "max": 261.54,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 81.9,
+              "min": 80.01,
+              "max": 83.09,
+              "n": 3
+            },
+            "index s": {
+              "median": 125.27,
+              "min": 122.25,
+              "max": 175.42,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 4796.9,
+              "min": 3823.5,
+              "max": 4913.3,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 5.0817,
+              "min": 4.7332,
+              "max": 5.1391,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.7817,
+              "min": 0.7817,
+              "max": 0.7817,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 2.008,
+              "min": 1.898,
+              "max": 2.013,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 1.828,
+              "min": 1.746,
+              "max": 1.858,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.15,
+              "min": 0.141,
+              "max": 0.151,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9891,
+              "min": 0.9891,
+              "max": 0.9898,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.194,
+              "min": 0.183,
+              "max": 1.28,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9891,
+              "min": 0.989,
+              "max": 0.9898,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 1.232,
+              "min": 1.226,
+              "max": 1.313,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 1.581,
+              "min": 1.472,
+              "max": 1.618,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.232,
+              "min": 1.226,
+              "max": 1.313,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 3.242,
+              "min": 3.074,
+              "max": 3.269,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "8g"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9621,
+                "p50": 1.232,
+                "p99": 1.581
+              },
+              {
+                "beam": 100,
+                "recall": 0.9886,
+                "p50": 1.832,
+                "p99": 2.234
+              },
+              {
+                "beam": 200,
+                "recall": 0.9971,
+                "p50": 3.242,
+                "p99": 6.454
+              },
+              {
+                "beam": 400,
+                "recall": 0.9992,
+                "p50": 5.05,
+                "p99": 7.55
+              }
+            ]
+          }
+        },
+        {
+          "backend": "ArangoDB (fp32)",
+          "build": null,
+          "backend_key": "arangodb_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "arangodb 3.12.12",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 4.568,
+              "min": 4.24,
+              "max": 4.735,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 6.098,
+              "min": 5.779,
+              "max": 6.275,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 4.4335,
+              "min": 4.052,
+              "max": 4.548,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 6.019,
+              "min": 5.575,
+              "max": 6.107,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9423,
+              "min": 0.934,
+              "max": 0.9478,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 160.31,
+              "min": 153.52,
+              "max": 164.65,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 41.4,
+              "min": 41.39,
+              "max": 41.41,
+              "n": 3
+            },
+            "index s": {
+              "median": 54.21,
+              "min": 54.19,
+              "max": 57.79,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 6237.9,
+              "min": 6073.5,
+              "max": 6513.8,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 1.7025,
+              "min": 1.4751,
+              "max": 1.7713,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 1.073,
+              "min": 1.0585,
+              "max": 1.1323,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 4.418,
+              "min": 4.293,
+              "max": 5.029,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 4.349,
+              "min": 4.254,
+              "max": 5.012,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.12,
+              "min": 0.12,
+              "max": 0.124,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9456,
+              "min": 0.9323,
+              "max": 0.9512,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.099,
+              "min": 0.099,
+              "max": 0.102,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.949,
+              "min": 0.9373,
+              "max": 0.9543,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 6.929,
+              "min": 4.988,
+              "max": 7.224,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 9.2,
+              "min": 6.766,
+              "max": 9.399,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 76.0,
+              "min": 47.0,
+              "max": 84.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 4.337,
+              "min": 4.173,
+              "max": 4.988,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 42.0,
+              "min": 38.0,
+              "max": 47.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 12.899,
+              "min": 12.359,
+              "max": 15.792,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 168.0,
+              "min": 152.0,
+              "max": 188.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "nprobe",
+            "points": [
+              {
+                "beam": 24,
+                "recall": 0.8812,
+                "p50": 3.374,
+                "p99": 4.527
+              },
+              {
+                "beam": 47,
+                "recall": 0.9513,
+                "p50": 4.988,
+                "p99": 6.766
+              },
+              {
+                "beam": 94,
+                "recall": 0.9838,
+                "p50": 8.584,
+                "p99": 10.985
+              },
+              {
+                "beam": 188,
+                "recall": 0.9965,
+                "p50": 15.792,
+                "p99": 19.167
+              }
+            ]
+          }
+        },
+        {
+          "backend": "CrateDB (fp32)",
+          "build": null,
+          "backend_key": "cratedb_dense",
+          "is_arcadedb": false,
+          "precision": null,
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": null,
+          "deployment": "embedded",
+          "image": null,
+          "version_name": null,
+          "host": null,
+          "outcome": "censored",
+          "metrics": {
+            "cold p50 ms": {
+              "text": ">30m"
+            },
+            "cold p99 ms": {
+              "text": ">30m"
+            },
+            "warm p50 ms": {
+              "text": ">30m"
+            },
+            "warm p99 ms": {
+              "text": ">30m"
+            },
+            "after insert p50 ms": {
+              "text": ">30m"
+            },
+            "after delete p50 ms": {
+              "text": ">30m"
+            },
+            "recall@10": {
+              "text": ">30m"
+            },
+            "insert into index ms/vector": {
+              "text": ">30m"
+            },
+            "recall@10 after insert": {
+              "text": ">30m"
+            },
+            "delete from index ms/vector": {
+              "text": ">30m"
+            },
+            "recall@10 after delete": {
+              "text": ">30m"
+            },
+            "ingest s": {
+              "text": ">30m"
+            },
+            "index s": {
+              "text": ">30m"
+            },
+            "ingest+index vectors/s": {
+              "text": ">30m"
+            },
+            "ingest+index total s": {
+              "text": ">30m"
+            },
+            "peak memory GiB": {
+              "text": ">30m"
+            },
+            "disk GiB": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.95": {
+              "text": ">30m"
+            },
+            "p99 ms at recall 0.95": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.95": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.90": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.90": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.99": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.99": {
+              "text": ">30m"
+            },
+            "owned memory after queries GiB": {
+              "text": ">30m"
+            }
+          }
+        },
+        {
+          "backend": "DuckDB VSS (fp32)",
+          "build": null,
+          "backend_key": "duckdb_vss_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "duckdb vss 1.5.6",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 2.633,
+              "min": 2.618,
+              "max": 2.883,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 4.556,
+              "min": 4.164,
+              "max": 5.158,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 2.676,
+              "min": 2.617,
+              "max": 3.18,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 3.1265,
+              "min": 3.061,
+              "max": 4.126,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9754,
+              "min": 0.9745,
+              "max": 0.9762,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 71.42,
+              "min": 70.64,
+              "max": 73.35,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 5.08,
+              "min": 5.08,
+              "max": 5.08,
+              "n": 3
+            },
+            "index s": {
+              "median": 65.16,
+              "min": 64.4,
+              "max": 67.09,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 14001.7,
+              "min": 13633.3,
+              "max": 14156.3,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 2.704,
+              "min": 2.6725,
+              "max": 2.8676,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 1.4004,
+              "min": 1.4004,
+              "max": 1.4004,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 3.011,
+              "min": 2.997,
+              "max": 3.03,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 3.032,
+              "min": 3.017,
+              "max": 3.037,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 9.262,
+              "min": 9.258,
+              "max": 12.231,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.975,
+              "min": 0.9741,
+              "max": 0.9757,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 3.324,
+              "min": 3.319,
+              "max": 3.329,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9757,
+              "min": 0.9753,
+              "max": 0.977,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 2.669,
+              "min": 2.649,
+              "max": 2.67,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 3.072,
+              "min": 3.01,
+              "max": 3.1,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 2.29,
+              "min": 2.278,
+              "max": 2.295,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 3.325,
+              "min": 3.324,
+              "max": 3.332,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.927,
+                "p50": 2.29,
+                "p99": 2.669
+              },
+              {
+                "beam": 100,
+                "recall": 0.9742,
+                "p50": 2.669,
+                "p99": 3.072
+              },
+              {
+                "beam": 200,
+                "recall": 0.9937,
+                "p50": 3.325,
+                "p99": 3.929
+              },
+              {
+                "beam": 400,
+                "recall": 0.998,
+                "p50": 4.482,
+                "p99": 5.448
+              }
+            ]
+          }
+        },
+        {
+          "backend": "LadybugDB (fp32)",
+          "build": null,
+          "backend_key": "ladybug_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "ladybugdb 0.22.0",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 68.356,
+              "min": 68.313,
+              "max": 84.745,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 86.11,
+              "min": 86.083,
+              "max": 115.65,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 69.7645,
+              "min": 67.694,
+              "max": 88.898,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 88.7585,
+              "min": 84.655,
+              "max": 120.855,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9773,
+              "min": 0.977,
+              "max": 0.9776,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 193.99,
+              "min": 164.32,
+              "max": 225.65,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 58.8,
+              "min": 58.63,
+              "max": 58.84,
+              "n": 3
+            },
+            "index s": {
+              "median": 134.49,
+              "min": 104.87,
+              "max": 166.35,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 5154.9,
+              "min": 4431.6,
+              "max": 6085.7,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 2.723,
+              "min": 2.721,
+              "max": 2.725,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.8156,
+              "min": 0.8153,
+              "max": 0.8186,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 74.556,
+              "min": 74.07,
+              "max": 95.79,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 72.236,
+              "min": 71.317,
+              "max": 95.77,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 71.063,
+              "min": 66.948,
+              "max": 90.682,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9794,
+              "min": 0.9784,
+              "max": 0.9796,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.115,
+              "min": 0.104,
+              "max": 0.14,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9798,
+              "min": 0.9787,
+              "max": 0.9798,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 69.136,
+              "min": 67.779,
+              "max": 82.093,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 89.575,
+              "min": 86.029,
+              "max": 111.035,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 42.369,
+              "min": 41.893,
+              "max": 50.018,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 117.519,
+              "min": 115.37,
+              "max": 145.647,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.937,
+                "p50": 42.369,
+                "p99": 57.973
+              },
+              {
+                "beam": 100,
+                "recall": 0.9784,
+                "p50": 69.136,
+                "p99": 89.575
+              },
+              {
+                "beam": 200,
+                "recall": 0.9928,
+                "p50": 117.519,
+                "p99": 151.735
+              },
+              {
+                "beam": 400,
+                "recall": 0.9979,
+                "p50": 201.303,
+                "p99": 262.334
+              }
+            ]
+          }
+        },
+        {
+          "backend": "MongoDB (fp32)",
+          "build": null,
+          "backend_key": "mongodb_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "mongodb 9.0.4 + MongoDb Search Community Version 1.70.5",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 5.83,
+              "min": 5.329,
+              "max": 6.534,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 10.752,
+              "min": 8.218,
+              "max": 11.468,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 4.6885,
+              "min": 4.307,
+              "max": 5.557,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 5.8755,
+              "min": 5.333,
+              "max": 25.238,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9768,
+              "min": 0.9753,
+              "max": 0.9793,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 90.23,
+              "min": 89.56,
+              "max": 90.96,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 25.22,
+              "min": 25.06,
+              "max": 25.82,
+              "n": 3
+            },
+            "index s": {
+              "median": 62.76,
+              "min": 62.69,
+              "max": 63.18,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 11082.8,
+              "min": 10993.8,
+              "max": 11165.7,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 5.0057,
+              "min": 4.9744,
+              "max": 5.0779,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 2.5578,
+              "min": 2.2195,
+              "max": 2.7316,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 4.719,
+              "min": 4.349,
+              "max": 5.232,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 4.493,
+              "min": 4.454,
+              "max": 4.744,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.568,
+              "min": 0.568,
+              "max": 0.579,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9806,
+              "min": 0.9792,
+              "max": 0.9823,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.04,
+              "min": 0.032,
+              "max": 0.042,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9811,
+              "min": 0.9788,
+              "max": 0.9827,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 4.587,
+              "min": 4.54,
+              "max": 4.612,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 5.528,
+              "min": 5.432,
+              "max": 5.547,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 4.587,
+              "min": 4.54,
+              "max": 4.612,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 5.415,
+              "min": 5.055,
+              "max": 5.607,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 400.0,
+              "min": 200.0,
+              "max": 400.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.96,
+                "p50": 4.587,
+                "p99": 5.528
+              },
+              {
+                "beam": 100,
+                "recall": 0.9802,
+                "p50": 4.659,
+                "p99": 5.583
+              },
+              {
+                "beam": 200,
+                "recall": 0.9889,
+                "p50": 5.033,
+                "p99": 6.057
+              },
+              {
+                "beam": 400,
+                "recall": 0.9964,
+                "p50": 5.607,
+                "p99": 6.817
+              }
+            ]
+          }
+        },
+        {
+          "backend": "pgvector (fp32)",
+          "build": null,
+          "backend_key": "pgvector_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "pgvector 0.8.7",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 2.232,
+              "min": 2.192,
+              "max": 2.249,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 2.826,
+              "min": 2.822,
+              "max": 2.891,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 2.192,
+              "min": 2.168,
+              "max": 2.258,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 2.7995,
+              "min": 2.727,
+              "max": 2.87,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9851,
+              "min": 0.9846,
+              "max": 0.9854,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 95.11,
+              "min": 93.05,
+              "max": 103.78,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 3.2,
+              "min": 3.18,
+              "max": 3.33,
+              "n": 3
+            },
+            "index s": {
+              "median": 91.04,
+              "min": 88.81,
+              "max": 99.7,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 10514.1,
+              "min": 9635.8,
+              "max": 10746.9,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 9.5194,
+              "min": 9.5187,
+              "max": 9.521,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 2.6437,
+              "min": 2.6436,
+              "max": 2.6438,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 2.184,
+              "min": 2.093,
+              "max": 2.198,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 2.145,
+              "min": 2.11,
+              "max": 2.164,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 1.549,
+              "min": 1.514,
+              "max": 1.553,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.986,
+              "min": 0.9855,
+              "max": 0.9862,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.005,
+              "min": 0.005,
+              "max": 0.005,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9866,
+              "min": 0.9861,
+              "max": 0.9868,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 1.283,
+              "min": 1.253,
+              "max": 1.361,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 1.655,
+              "min": 1.579,
+              "max": 1.704,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.283,
+              "min": 1.253,
+              "max": 1.361,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 3.759,
+              "min": 3.668,
+              "max": 3.778,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9547,
+                "p50": 1.283,
+                "p99": 1.655
+              },
+              {
+                "beam": 100,
+                "recall": 0.9858,
+                "p50": 2.132,
+                "p99": 2.616
+              },
+              {
+                "beam": 200,
+                "recall": 0.9964,
+                "p50": 3.759,
+                "p99": 4.738
+              },
+              {
+                "beam": 400,
+                "recall": 0.999,
+                "p50": 6.366,
+                "p99": 8.34
+              }
+            ]
+          }
+        },
+        {
+          "backend": "Qdrant (fp32)",
+          "build": null,
+          "backend_key": "qdrant_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "qdrant 1.20.0",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 1.097,
+              "min": 1.096,
+              "max": 1.125,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 1.381,
+              "min": 1.376,
+              "max": 1.388,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1.0935,
+              "min": 1.069,
+              "max": 1.148,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 1.3505,
+              "min": 1.294,
+              "max": 1.389,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9962,
+              "min": 0.9955,
+              "max": 0.9964,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 58.83,
+              "min": 58.38,
+              "max": 58.89,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 16998.1,
+              "min": 16980.8,
+              "max": 17129.2,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 0.6754,
+              "min": 0.6731,
+              "max": 0.6815,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.5863,
+              "min": 0.5863,
+              "max": 0.5864,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 1.132,
+              "min": 1.105,
+              "max": 1.132,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 1.095,
+              "min": 1.079,
+              "max": 1.103,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.064,
+              "min": 0.056,
+              "max": 0.065,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9957,
+              "min": 0.9949,
+              "max": 0.9965,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.021,
+              "min": 0.015,
+              "max": 0.024,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9959,
+              "min": 0.9951,
+              "max": 0.9967,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 0.918,
+              "min": 0.894,
+              "max": 0.922,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 1.106,
+              "min": 1.062,
+              "max": 1.132,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 0.918,
+              "min": 0.894,
+              "max": 0.922,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 1.077,
+              "min": 1.074,
+              "max": 1.094,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9835,
+                "p50": 0.918,
+                "p99": 1.106
+              },
+              {
+                "beam": 100,
+                "recall": 0.9957,
+                "p50": 1.077,
+                "p99": 1.305
+              },
+              {
+                "beam": 200,
+                "recall": 0.9987,
+                "p50": 1.369,
+                "p99": 1.75
+              },
+              {
+                "beam": 400,
+                "recall": 0.9991,
+                "p50": 1.67,
+                "p99": 2.266
+              }
+            ]
+          }
+        },
+        {
+          "backend": "Redis (fp32)",
+          "build": null,
+          "backend_key": "redis_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "redis 8.10.2",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 0.502,
+              "min": 0.491,
+              "max": 0.508,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 0.753,
+              "min": 0.617,
+              "max": 0.781,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 0.4765,
+              "min": 0.447,
+              "max": 0.495,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 0.6325,
+              "min": 0.596,
+              "max": 0.705,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9745,
+              "min": 0.9735,
+              "max": 0.9748,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 54.94,
+              "min": 54.65,
+              "max": 55.34,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 18201.7,
+              "min": 18070.1,
+              "max": 18298.3,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 2.1505,
+              "min": 2.1328,
+              "max": 2.1877,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.3221,
+              "min": 0.3221,
+              "max": 0.3221,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 0.505,
+              "min": 0.49,
+              "max": 0.506,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 0.518,
+              "min": 0.516,
+              "max": 0.547,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.122,
+              "min": 0.112,
+              "max": 0.29,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9737,
+              "min": 0.9734,
+              "max": 0.9737,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.446,
+              "min": 0.445,
+              "max": 0.508,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9761,
+              "min": 0.9758,
+              "max": 0.9763,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 0.472,
+              "min": 0.466,
+              "max": 0.477,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 0.587,
+              "min": 0.568,
+              "max": 0.627,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 0.3,
+              "min": 0.298,
+              "max": 0.301,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 0.725,
+              "min": 0.707,
+              "max": 0.728,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9298,
+                "p50": 0.3,
+                "p99": 0.391
+              },
+              {
+                "beam": 100,
+                "recall": 0.9743,
+                "p50": 0.472,
+                "p99": 0.587
+              },
+              {
+                "beam": 200,
+                "recall": 0.992,
+                "p50": 0.725,
+                "p99": 0.867
+              },
+              {
+                "beam": 400,
+                "recall": 0.9967,
+                "p50": 1.198,
+                "p99": 1.448
+              }
+            ]
+          }
+        },
+        {
+          "backend": "sqlite-vec (fp32)",
+          "build": null,
+          "backend_key": "sqlite_vec_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": "1,000,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "sqlite-vec 0.1.9",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 222.95,
+              "min": 216.462,
+              "max": 223.434,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 224.443,
+              "min": 218.597,
+              "max": 225.636,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 223.0235,
+              "min": 216.454,
+              "max": 243.327,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 225.399,
+              "min": 219.198,
+              "max": 1873.876,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9991,
+              "min": 0.9991,
+              "max": 0.9991,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 11.86,
+              "min": 11.58,
+              "max": 12.47,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 84317.0,
+              "min": 80192.5,
+              "max": 86355.8,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 0.0485,
+              "min": 0.0456,
+              "max": 0.0486,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.5,
+              "min": 0.5,
+              "max": 0.5,
+              "n": 3
+            },
+            "after insert p50 ms": {
+              "median": 224.389,
+              "min": 216.893,
+              "max": 224.466,
+              "n": 3
+            },
+            "after delete p50 ms": {
+              "median": 224.113,
+              "min": 216.612,
+              "max": 224.178,
+              "n": 3
+            },
+            "insert into index ms/vector": {
+              "median": 0.049,
+              "min": 0.049,
+              "max": 0.049,
+              "n": 3
+            },
+            "recall@10 after insert": {
+              "median": 0.9989,
+              "min": 0.9989,
+              "max": 0.9989,
+              "n": 3
+            },
+            "delete from index ms/vector": {
+              "median": 0.21,
+              "min": 0.199,
+              "max": 0.224,
+              "n": 3
+            },
+            "recall@10 after delete": {
+              "median": 0.9991,
+              "min": 0.9991,
+              "max": 0.9991,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 223.827,
+              "min": 216.381,
+              "max": 223.978,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 224.862,
+              "min": 219.128,
+              "max": 225.789,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 223.827,
+              "min": 216.381,
+              "max": 223.978,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 223.827,
+              "min": 216.381,
+              "max": 223.978,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "none",
+            "na": "exact scan (vec0 brute force): there is no search beam to set, recall is 1.0 by construction"
+          }
+        },
+        {
+          "backend": "SurrealDB (embedded, fp32)",
+          "build": null,
+          "backend_key": "surrealdb_dense",
+          "is_arcadedb": false,
+          "precision": null,
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": null,
+          "deployment": "embedded",
+          "image": null,
+          "version_name": null,
+          "host": null,
+          "outcome": "censored",
+          "metrics": {
+            "cold p50 ms": {
+              "text": ">30m"
+            },
+            "cold p99 ms": {
+              "text": ">30m"
+            },
+            "warm p50 ms": {
+              "text": ">30m"
+            },
+            "warm p99 ms": {
+              "text": ">30m"
+            },
+            "after insert p50 ms": {
+              "text": ">30m"
+            },
+            "after delete p50 ms": {
+              "text": ">30m"
+            },
+            "recall@10": {
+              "text": ">30m"
+            },
+            "insert into index ms/vector": {
+              "text": ">30m"
+            },
+            "recall@10 after insert": {
+              "text": ">30m"
+            },
+            "delete from index ms/vector": {
+              "text": ">30m"
+            },
+            "recall@10 after delete": {
+              "text": ">30m"
+            },
+            "ingest s": {
+              "text": ">30m"
+            },
+            "index s": {
+              "text": ">30m"
+            },
+            "ingest+index vectors/s": {
+              "text": ">30m"
+            },
+            "ingest+index total s": {
+              "text": ">30m"
+            },
+            "peak memory GiB": {
+              "text": ">30m"
+            },
+            "disk GiB": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.95": {
+              "text": ">30m"
+            },
+            "p99 ms at recall 0.95": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.95": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.90": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.90": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.99": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.99": {
+              "text": ">30m"
+            },
+            "owned memory after queries GiB": {
+              "text": ">30m"
+            }
+          }
+        },
+        {
+          "backend": "SurrealDB (server, fp32)",
+          "build": null,
+          "backend_key": "surrealdb_dense_server",
+          "is_arcadedb": false,
+          "precision": null,
+          "scale": "small",
+          "scale_label": "1M vectors",
+          "workload": "search",
+          "n_docs": null,
+          "deployment": "server",
+          "image": null,
+          "version_name": null,
+          "host": null,
+          "outcome": "censored",
+          "metrics": {
+            "cold p50 ms": {
+              "text": ">30m"
+            },
+            "cold p99 ms": {
+              "text": ">30m"
+            },
+            "warm p50 ms": {
+              "text": ">30m"
+            },
+            "warm p99 ms": {
+              "text": ">30m"
+            },
+            "after insert p50 ms": {
+              "text": ">30m"
+            },
+            "after delete p50 ms": {
+              "text": ">30m"
+            },
+            "recall@10": {
+              "text": ">30m"
+            },
+            "insert into index ms/vector": {
+              "text": ">30m"
+            },
+            "recall@10 after insert": {
+              "text": ">30m"
+            },
+            "delete from index ms/vector": {
+              "text": ">30m"
+            },
+            "recall@10 after delete": {
+              "text": ">30m"
+            },
+            "ingest s": {
+              "text": ">30m"
+            },
+            "index s": {
+              "text": ">30m"
+            },
+            "ingest+index vectors/s": {
+              "text": ">30m"
+            },
+            "ingest+index total s": {
+              "text": ">30m"
+            },
+            "peak memory GiB": {
+              "text": ">30m"
+            },
+            "disk GiB": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.95": {
+              "text": ">30m"
+            },
+            "p99 ms at recall 0.95": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.95": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.90": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.90": {
+              "text": ">30m"
+            },
+            "p50 ms at recall 0.99": {
+              "text": ">30m"
+            },
+            "ef or nProbe at recall 0.99": {
+              "text": ">30m"
+            },
+            "owned memory after queries GiB": {
+              "text": ">30m"
+            }
+          }
+        },
+        {
+          "backend": "ArcadeDB (embedded, fp32, native build)",
+          "build": "native",
+          "backend_key": "arcadedb_dense_embedded",
+          "is_arcadedb": true,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 5.344,
+              "min": 5.286,
+              "max": 5.477,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 24.001,
+              "min": 20.604,
+              "max": 26.245,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1.883,
+              "min": 1.837,
+              "max": 2.014,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 2.4685,
+              "min": 2.319,
+              "max": 2.717,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9524,
+              "min": 0.9514,
+              "max": 0.9531,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 5176.22,
+              "min": 4716.09,
+              "max": 5285.76,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 472.48,
+              "min": 472.25,
+              "max": 528.65,
+              "n": 3
+            },
+            "index s": {
+              "median": 4703.14,
+              "min": 4242.71,
+              "max": 4756.28,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 1930.0,
+              "min": 1890.0,
+              "max": 2118.3,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 23.9506,
+              "min": 22.9785,
+              "max": 24.0101,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 6.1794,
+              "min": 6.1794,
+              "max": 6.1794,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 2.005,
+              "min": 1.836,
+              "max": 5.162,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 2.777,
+              "min": 2.552,
+              "max": 7.841,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.2,
+              "min": 1.151,
+              "max": 1.202,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 8.515,
+              "min": 8.492,
+              "max": 8.969,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 400.0,
+              "min": 400.0,
+              "max": 400.0,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "24g"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9039,
+                "p50": 1.2,
+                "p99": 1.596
+              },
+              {
+                "beam": 100,
+                "recall": 0.9516,
+                "p50": 1.836,
+                "p99": 2.552
+              },
+              {
+                "beam": 200,
+                "recall": 0.9788,
+                "p50": 5.162,
+                "p99": 7.841
+              },
+              {
+                "beam": 400,
+                "recall": 0.9907,
+                "p50": 8.515,
+                "p99": 14.904
+              }
+            ]
+          }
+        },
+        {
+          "backend": "ArcadeDB (embedded, fp32, JVM build)",
+          "build": "jvm",
+          "backend_key": "arcadedb_dense_embedded",
+          "is_arcadedb": true,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 4.245,
+              "min": 3.721,
+              "max": 4.297,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 14.135,
+              "min": 14.01,
+              "max": 14.418,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1.5525,
+              "min": 1.505,
+              "max": 1.701,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 2.0505,
+              "min": 1.937,
+              "max": 2.643,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9484,
+              "min": 0.9468,
+              "max": 0.954,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 1926.66,
+              "min": 1915.81,
+              "max": 2208.38,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 307.37,
+              "min": 305.54,
+              "max": 307.62,
+              "n": 3
+            },
+            "index s": {
+              "median": 1617.86,
+              "min": 1607.17,
+              "max": 1901.64,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 5185.1,
+              "min": 4523.7,
+              "max": 5214.5,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 28.3217,
+              "min": 28.3109,
+              "max": 28.3646,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 6.1793,
+              "min": 6.1793,
+              "max": 6.1793,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 2.005,
+              "min": 1.836,
+              "max": 5.162,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 2.777,
+              "min": 2.552,
+              "max": 7.841,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.2,
+              "min": 1.151,
+              "max": 1.202,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 8.515,
+              "min": 8.492,
+              "max": 8.969,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 400.0,
+              "min": 400.0,
+              "max": 400.0,
+              "n": 3
+            },
+            "JVM heap": {
+              "text": "24g"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9039,
+                "p50": 1.2,
+                "p99": 1.596
+              },
+              {
+                "beam": 100,
+                "recall": 0.9516,
+                "p50": 1.836,
+                "p99": 2.552
+              },
+              {
+                "beam": 200,
+                "recall": 0.9788,
+                "p50": 5.162,
+                "p99": 7.841
+              },
+              {
+                "beam": 400,
+                "recall": 0.9907,
+                "p50": 8.515,
+                "p99": 14.904
+              }
+            ]
+          }
+        },
+        {
+          "backend": "ArcadeDB (server, fp32, JVM build)",
+          "build": "jvm",
+          "backend_key": "arcadedb_dense_server",
+          "is_arcadedb": true,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "arcadedb 26.11.1 \u00b7 a3a5d1245",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 5.399,
+              "min": 5.162,
+              "max": 30.858,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 50.971,
+              "min": 15.984,
+              "max": 132.665,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 2.7975,
+              "min": 2.472,
+              "max": 16.184,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 3.684,
+              "min": 3.124,
+              "max": 20.634,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9521,
+              "min": 0.9476,
+              "max": 0.9538,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 3760.02,
+              "min": 3610.86,
+              "max": 4068.8,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 1854.49,
+              "min": 1853.64,
+              "max": 1861.53,
+              "n": 3
+            },
+            "index s": {
+              "median": 1904.02,
+              "min": 1755.89,
+              "max": 2205.93,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 2656.9,
+              "min": 2455.3,
+              "max": 2766.7,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 28.5027,
+              "min": 28.5016,
+              "max": 28.5233,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 6.1791,
+              "min": 6.1791,
+              "max": 6.1792,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 2.487,
+              "min": 2.45,
+              "max": 5.233,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 3.921,
+              "min": 3.14,
+              "max": 7.427,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.774,
+              "min": 1.671,
+              "max": 1.794,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 8.22,
+              "min": 8.22,
+              "max": 8.22,
+              "n": 1
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 400.0,
+              "min": 400.0,
+              "max": 400.0,
+              "n": 1
+            },
+            "JVM heap": {
+              "text": "24g"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9031,
+                "p50": 1.774,
+                "p99": 3.525
+              },
+              {
+                "beam": 100,
+                "recall": 0.9514,
+                "p50": 2.472,
+                "p99": 3.797
+              },
+              {
+                "beam": 200,
+                "recall": 0.9781,
+                "p50": 5.233,
+                "p99": 7.427
+              },
+              {
+                "beam": 400,
+                "recall": 0.9897,
+                "p50": 8.098,
+                "p99": 12.186
+              }
+            ]
+          }
+        },
+        {
+          "backend": "ArcadeDB (server, fp32, native build)",
+          "build": "native",
+          "backend_key": "arcadedb_dense_server",
+          "is_arcadedb": true,
+          "precision": null,
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": null,
+          "deployment": "server",
+          "image": null,
+          "version_name": null,
+          "host": null,
+          "outcome": "failed",
+          "metrics": {
+            "cold p50 ms": {
+              "text": "lost"
+            },
+            "cold p99 ms": {
+              "text": "lost"
+            },
+            "warm p50 ms": {
+              "text": "lost"
+            },
+            "warm p99 ms": {
+              "text": "lost"
+            },
+            "after insert p50 ms": {
+              "text": "lost"
+            },
+            "after delete p50 ms": {
+              "text": "lost"
+            },
+            "recall@10": {
+              "text": "lost"
+            },
+            "insert into index ms/vector": {
+              "text": "lost"
+            },
+            "recall@10 after insert": {
+              "text": "lost"
+            },
+            "delete from index ms/vector": {
+              "text": "lost"
+            },
+            "recall@10 after delete": {
+              "text": "lost"
+            },
+            "ingest s": {
+              "text": "lost"
+            },
+            "index s": {
+              "text": "lost"
+            },
+            "ingest+index vectors/s": {
+              "text": "lost"
+            },
+            "ingest+index total s": {
+              "text": "lost"
+            },
+            "peak memory GiB": {
+              "text": "lost"
+            },
+            "disk GiB": {
+              "text": "lost"
+            },
+            "p50 ms at recall 0.95": {
+              "text": "lost"
+            },
+            "p99 ms at recall 0.95": {
+              "text": "lost"
+            },
+            "ef or nProbe at recall 0.95": {
+              "text": "lost"
+            },
+            "p50 ms at recall 0.90": {
+              "text": "lost"
+            },
+            "ef or nProbe at recall 0.90": {
+              "text": "lost"
+            },
+            "p50 ms at recall 0.99": {
+              "text": "lost"
+            },
+            "ef or nProbe at recall 0.99": {
+              "text": "lost"
+            },
+            "owned memory after queries GiB": {
+              "text": "lost"
+            }
+          }
+        },
+        {
+          "backend": "ArangoDB (fp32)",
+          "build": null,
+          "backend_key": "arangodb_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "arangodb 3.12.12",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 9.495,
+              "min": 8.793,
+              "max": 13.125,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 18.469,
+              "min": 13.393,
+              "max": 48.569,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 9.22,
+              "min": 8.592,
+              "max": 13.432,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 14.1965,
+              "min": 13.063,
+              "max": 127.923,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9434,
+              "min": 0.9392,
+              "max": 0.9455,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 2807.12,
+              "min": 2732.81,
+              "max": 3972.63,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 1097.44,
+              "min": 1096.45,
+              "max": 1234.29,
+              "n": 3
+            },
+            "index s": {
+              "median": 1267.09,
+              "min": 1152.85,
+              "max": 2004.53,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 3558.8,
+              "min": 2514.7,
+              "max": 3655.6,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 10.7799,
+              "min": 9.0226,
+              "max": 10.8769,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 10.1882,
+              "min": 10.1691,
+              "max": 10.2316,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 16.856,
+              "min": 15.598,
+              "max": 21.815,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 24.747,
+              "min": 22.626,
+              "max": 82.204,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 76.0,
+              "min": 76.0,
+              "max": 82.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 9.4,
+              "min": 8.763,
+              "max": 12.693,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 38.0,
+              "min": 38.0,
+              "max": 41.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 28.723,
+              "min": 28.723,
+              "max": 28.723,
+              "n": 1
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 164.0,
+              "min": 164.0,
+              "max": 164.0,
+              "n": 1
+            }
+          },
+          "beam_curve": {
+            "kind": "nprobe",
+            "points": [
+              {
+                "beam": 19,
+                "recall": 0.8779,
+                "p50": 6.6925,
+                "p99": 34.7935
+              },
+              {
+                "beam": 38,
+                "recall": 0.938,
+                "p50": 11.0465,
+                "p99": 18.6155
+              },
+              {
+                "beam": 76,
+                "recall": 0.9721,
+                "p50": 19.3355,
+                "p99": 53.4755
+              },
+              {
+                "beam": 152,
+                "recall": 0.9891,
+                "p50": 35.399,
+                "p99": 58.0905
+              }
+            ]
+          }
+        },
+        {
+          "backend": "DuckDB VSS (fp32)",
+          "build": null,
+          "backend_key": "duckdb_vss_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "duckdb vss 1.5.6",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 3.631,
+              "min": 3.624,
+              "max": 9.755,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 14.551,
+              "min": 12.856,
+              "max": 39.098,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 3.609,
+              "min": 3.591,
+              "max": 7.773,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 4.321,
+              "min": 4.128,
+              "max": 38.685,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9332,
+              "min": 0.9299,
+              "max": 0.9342,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 1321.28,
+              "min": 1314.69,
+              "max": 3026.11,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 34.67,
+              "min": 34.44,
+              "max": 34.87,
+              "n": 3
+            },
+            "index s": {
+              "median": 1283.69,
+              "min": 1276.88,
+              "max": 2988.66,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 7560.9,
+              "min": 3301.3,
+              "max": 7598.7,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 25.1967,
+              "min": 25.117,
+              "max": 25.1975,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 8.1602,
+              "min": 8.1602,
+              "max": 8.1602,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 4.509,
+              "min": 4.505,
+              "max": 9.0,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 5.463,
+              "min": 5.36,
+              "max": 42.307,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 3.596,
+              "min": 3.591,
+              "max": 5.847,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "text": "not reached (best recall 0.986)"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.8714,
+                "p50": 3.109,
+                "p99": 3.754
+              },
+              {
+                "beam": 100,
+                "recall": 0.9328,
+                "p50": 3.596,
+                "p99": 4.283
+              },
+              {
+                "beam": 200,
+                "recall": 0.9699,
+                "p50": 4.509,
+                "p99": 5.463
+              },
+              {
+                "beam": 400,
+                "recall": 0.9857,
+                "p50": 6.152,
+                "p99": 7.654
+              }
+            ]
+          }
+        },
+        {
+          "backend": "LadybugDB (fp32)",
+          "build": null,
+          "backend_key": "ladybug_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "ladybugdb 0.22.0",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 104.77,
+              "min": 102.189,
+              "max": 130.844,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 143.323,
+              "min": 131.765,
+              "max": 881.621,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 103.3145,
+              "min": 99.926,
+              "max": 131.918,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 141.036,
+              "min": 130.779,
+              "max": 852.208,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9392,
+              "min": 0.9385,
+              "max": 0.9405,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 5217.43,
+              "min": 4983.51,
+              "max": 17197.6,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 338.4,
+              "min": 338.07,
+              "max": 340.05,
+              "n": 3
+            },
+            "index s": {
+              "median": 4878.21,
+              "min": 4642.63,
+              "max": 16858.07,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 1914.7,
+              "min": 580.9,
+              "max": 2004.6,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 21.6491,
+              "min": 21.6479,
+              "max": 21.7762,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 6.3281,
+              "min": 6.3277,
+              "max": 6.3282,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 201.829,
+              "min": 170.769,
+              "max": 228.087,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 1206.263,
+              "min": 237.485,
+              "max": 1548.378,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 102.743,
+              "min": 101.28,
+              "max": 131.159,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "text": "not reached (best recall 0.984)"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.8885,
+                "p50": 62.905,
+                "p99": 90.899
+              },
+              {
+                "beam": 100,
+                "recall": 0.9393,
+                "p50": 102.743,
+                "p99": 139.061
+              },
+              {
+                "beam": 200,
+                "recall": 0.9659,
+                "p50": 201.829,
+                "p99": 1206.263
+              },
+              {
+                "beam": 400,
+                "recall": 0.9832,
+                "p50": 306.592,
+                "p99": 2023.584
+              }
+            ]
+          }
+        },
+        {
+          "backend": "MongoDB (fp32)",
+          "build": null,
+          "backend_key": "mongodb_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "mongodb 9.0.4 + MongoDb Search Community Version 1.70.5",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 24.003,
+              "min": 8.432,
+              "max": 41.777,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 55.727,
+              "min": 14.353,
+              "max": 260.51,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 9.2855,
+              "min": 6.134,
+              "max": 40.883,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 17.782,
+              "min": 7.347,
+              "max": 71.326,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9455,
+              "min": 0.9437,
+              "max": 0.9492,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 1440.06,
+              "min": 1019.81,
+              "max": 3507.13,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 230.08,
+              "min": 217.46,
+              "max": 242.58,
+              "n": 3
+            },
+            "index s": {
+              "median": 1220.42,
+              "min": 786.01,
+              "max": 3249.3,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 6937.2,
+              "min": 2848.5,
+              "max": 9795.9,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 23.1372,
+              "min": 23.0024,
+              "max": 25.4713,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 22.737,
+              "min": 22.69,
+              "max": 23.2012,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 15.086,
+              "min": 8.13,
+              "max": 17.463,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 72.101,
+              "min": 10.247,
+              "max": 112.725,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 400.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 9.574,
+              "min": 7.396,
+              "max": 14.356,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 10.718,
+              "min": 10.718,
+              "max": 10.718,
+              "n": 1
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 400.0,
+              "min": 400.0,
+              "max": 400.0,
+              "n": 1
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9008,
+                "p50": 9.574,
+                "p99": 19.696
+              },
+              {
+                "beam": 100,
+                "recall": 0.9504,
+                "p50": 17.463,
+                "p99": 72.101
+              },
+              {
+                "beam": 200,
+                "recall": 0.9778,
+                "p50": 20.459,
+                "p99": 93.665
+              },
+              {
+                "beam": 400,
+                "recall": 0.9895,
+                "p50": 15.086,
+                "p99": 112.725
+              }
+            ]
+          }
+        },
+        {
+          "backend": "pgvector (fp32)",
+          "build": null,
+          "backend_key": "pgvector_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "pgvector 0.8.7",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 3.495,
+              "min": 3.391,
+              "max": 3.686,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 4.442,
+              "min": 4.37,
+              "max": 4.767,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 3.1375,
+              "min": 3.077,
+              "max": 3.502,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 4.0775,
+              "min": 4.017,
+              "max": 20.518,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9539,
+              "min": 0.9533,
+              "max": 0.9555,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 1436.98,
+              "min": 1352.64,
+              "max": 3888.37,
+              "n": 3
+            },
+            "ingest s": {
+              "median": 30.22,
+              "min": 30.19,
+              "max": 31.51,
+              "n": 3
+            },
+            "index s": {
+              "median": 1404.74,
+              "min": 1321.69,
+              "max": 3853.56,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 6952.1,
+              "min": 2569.2,
+              "max": 7385.6,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 30.1649,
+              "min": 28.9609,
+              "max": 30.2922,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 17.3674,
+              "min": 17.0396,
+              "max": 17.4299,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 3.148,
+              "min": 3.12,
+              "max": 3.19,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 4.119,
+              "min": 4.053,
+              "max": 4.857,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.862,
+              "min": 1.86,
+              "max": 2.011,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 10.1495,
+              "min": 9.5,
+              "max": 10.799,
+              "n": 2
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 400.0,
+              "min": 400.0,
+              "max": 400.0,
+              "n": 2
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.905,
+                "p50": 1.862,
+                "p99": 2.713
+              },
+              {
+                "beam": 100,
+                "recall": 0.9534,
+                "p50": 3.148,
+                "p99": 4.119
+              },
+              {
+                "beam": 200,
+                "recall": 0.9784,
+                "p50": 5.45,
+                "p99": 7.819
+              },
+              {
+                "beam": 400,
+                "recall": 0.9905,
+                "p50": 9.514,
+                "p99": 21.132
+              }
+            ]
+          }
+        },
+        {
+          "backend": "Qdrant (fp32)",
+          "build": null,
+          "backend_key": "qdrant_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "qdrant 1.20.0",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 1.226,
+              "min": 1.185,
+              "max": 1.299,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 1.648,
+              "min": 1.567,
+              "max": 1.696,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1.23,
+              "min": 1.192,
+              "max": 1.31,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 1.633,
+              "min": 1.571,
+              "max": 1.779,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9801,
+              "min": 0.9795,
+              "max": 0.9805,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 1121.12,
+              "min": 642.12,
+              "max": 1246.24,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 8910.7,
+              "min": 8016.1,
+              "max": 15557.8,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 5.5894,
+              "min": 5.5045,
+              "max": 5.6645,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 4.351,
+              "min": 4.3509,
+              "max": 4.3514,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 1.065,
+              "min": 1.021,
+              "max": 1.074,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 1.311,
+              "min": 1.266,
+              "max": 1.344,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1.065,
+              "min": 1.021,
+              "max": 1.074,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 50.0,
+              "min": 50.0,
+              "max": 50.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 1.527,
+              "min": 1.486,
+              "max": 1.59,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.99": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.9539,
+                "p50": 1.065,
+                "p99": 1.311
+              },
+              {
+                "beam": 100,
+                "recall": 0.9807,
+                "p50": 1.194,
+                "p99": 1.592
+              },
+              {
+                "beam": 200,
+                "recall": 0.9926,
+                "p50": 1.527,
+                "p99": 2.004
+              },
+              {
+                "beam": 400,
+                "recall": 0.9972,
+                "p50": 2.148,
+                "p99": 3.02
+              }
+            ]
+          }
+        },
+        {
+          "backend": "Redis (fp32)",
+          "build": null,
+          "backend_key": "redis_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "server",
+          "image": null,
+          "version_name": "redis 8.10.2",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 0.622,
+              "min": 0.62,
+              "max": 0.63,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 1.075,
+              "min": 0.979,
+              "max": 1.085,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 0.594,
+              "min": 0.565,
+              "max": 0.603,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 0.829,
+              "min": 0.766,
+              "max": 0.927,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 0.9342,
+              "min": 0.9334,
+              "max": 0.9372,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 2759.29,
+              "min": 2582.88,
+              "max": 3140.55,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 3620.5,
+              "min": 3181.0,
+              "max": 3867.8,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 21.135,
+              "min": 20.7473,
+              "max": 21.2254,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 3.795,
+              "min": 3.795,
+              "max": 3.795,
+              "n": 1
+            },
+            "p50 ms at recall 0.95": {
+              "median": 0.921,
+              "min": 0.815,
+              "max": 6.224,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 1.41,
+              "min": 1.0,
+              "max": 9.318,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.95": {
+              "median": 200.0,
+              "min": 200.0,
+              "max": 200.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 0.588,
+              "min": 0.58,
+              "max": 1.512,
+              "n": 3
+            },
+            "ef or nProbe at recall 0.90": {
+              "median": 100.0,
+              "min": 100.0,
+              "max": 100.0,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "text": "not reached (best recall 0.987)"
+            }
+          },
+          "beam_curve": {
+            "kind": "ef",
+            "points": [
+              {
+                "beam": 50,
+                "recall": 0.8742,
+                "p50": 0.376,
+                "p99": 0.544
+              },
+              {
+                "beam": 100,
+                "recall": 0.9354,
+                "p50": 0.588,
+                "p99": 0.782
+              },
+              {
+                "beam": 200,
+                "recall": 0.9694,
+                "p50": 0.921,
+                "p99": 1.41
+              },
+              {
+                "beam": 400,
+                "recall": 0.9856,
+                "p50": 1.558,
+                "p99": 2.58
+              }
+            ]
+          }
+        },
+        {
+          "backend": "sqlite-vec (fp32)",
+          "build": null,
+          "backend_key": "sqlite_vec_dense",
+          "is_arcadedb": false,
+          "precision": "fp32",
+          "scale": "deep10m",
+          "scale_label": "9.99M vectors",
+          "workload": "search",
+          "n_docs": "9,990,000",
+          "deployment": "embedded",
+          "image": null,
+          "version_name": "sqlite-vec 0.1.9",
+          "host": "benchmark machine",
+          "metrics": {
+            "cold p50 ms": {
+              "median": 1586.349,
+              "min": 1582.102,
+              "max": 1834.07,
+              "n": 3
+            },
+            "cold p99 ms": {
+              "median": 1596.016,
+              "min": 1592.228,
+              "max": 5320.753,
+              "n": 3
+            },
+            "warm p50 ms": {
+              "median": 1583.754,
+              "min": 1579.852,
+              "max": 2068.994,
+              "n": 12
+            },
+            "warm p99 ms": {
+              "median": 4810.3725,
+              "min": 1587.794,
+              "max": 7626.439,
+              "n": 12
+            },
+            "recall@10": {
+              "median": 1.0,
+              "min": 1.0,
+              "max": 1.0,
+              "n": 12
+            },
+            "ingest+index total s": {
+              "median": 105.48,
+              "min": 103.05,
+              "max": 105.64,
+              "n": 3
+            },
+            "ingest+index vectors/s": {
+              "median": 94709.9,
+              "min": 94566.5,
+              "max": 96943.2,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 3.6598,
+              "min": 3.6125,
+              "max": 3.7496,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 3.8032,
+              "min": 3.8032,
+              "max": 3.8032,
+              "n": 3
+            },
+            "p50 ms at recall 0.95": {
+              "median": 1589.778,
+              "min": 1583.732,
+              "max": 1766.649,
+              "n": 3
+            },
+            "p99 ms at recall 0.95": {
+              "median": 4683.713,
+              "min": 1603.207,
+              "max": 6149.278,
+              "n": 3
+            },
+            "p50 ms at recall 0.90": {
+              "median": 1589.778,
+              "min": 1583.732,
+              "max": 1766.649,
+              "n": 3
+            },
+            "p50 ms at recall 0.99": {
+              "median": 1589.778,
+              "min": 1583.732,
+              "max": 1766.649,
+              "n": 3
+            }
+          },
+          "beam_curve": {
+            "kind": "none",
+            "na": "exact scan (vec0 brute force): there is no search beam to set, recall is 1.0 by construction"
+          }
+        }
+      ],
+      "instrument": "2026-11",
+      "directions": {
+        "cold p50 ms": "down",
+        "cold p99 ms": "down",
+        "warm p50 ms": "down",
+        "warm p99 ms": "down",
+        "after insert p50 ms": "down",
+        "after delete p50 ms": "down",
+        "recall@10": "up",
+        "ingest+index vectors/s": "up",
+        "ingest s": "down",
+        "index s": "down",
+        "ingest+index total s": "down",
+        "peak memory GiB": "down",
+        "disk GiB": "down"
+      },
+      "declared_absences": [
+        {
+          "backend": "ArcadeDB (server, fp32, native build)",
+          "column": null,
+          "kind": "not measured",
+          "why": "ArcadeDB (server, fp32, native build) was not measured at 9.99M vectors."
+        },
+        {
+          "backend": "CrateDB (fp32)",
+          "column": null,
+          "kind": "censored",
+          "why": "CrateDB (fp32), SurrealDB (embedded, fp32), and SurrealDB (server, fp32) at 1M vectors: the search cell exceeded its 0.5 hour budget, the same budget every engine on this table had, on its first attempt and was not retried; there is no row. It was still in the index build when the budget ran out."
+        },
+        {
+          "backend": "SurrealDB (embedded, fp32)",
+          "column": null,
+          "kind": "censored",
+          "why": "CrateDB (fp32), SurrealDB (embedded, fp32), and SurrealDB (server, fp32) at 1M vectors: the search cell exceeded its 0.5 hour budget, the same budget every engine on this table had, on its first attempt and was not retried; there is no row. It was still in the index build when the budget ran out."
+        },
+        {
+          "backend": "SurrealDB (server, fp32)",
+          "column": null,
+          "kind": "censored",
+          "why": "CrateDB (fp32), SurrealDB (embedded, fp32), and SurrealDB (server, fp32) at 1M vectors: the search cell exceeded its 0.5 hour budget, the same budget every engine on this table had, on its first attempt and was not retried; there is no row. It was still in the index build when the budget ran out."
+        },
+        {
+          "backend": "ArcadeDB (server, fp32, native build)",
+          "column": null,
+          "kind": "failed",
+          "why": "ArcadeDB (server, fp32, native build) at 9.99M vectors: the search cell failed inside its budget and was not retried, so there is no row. What it reported: lean_http.ConnectionError: POST http://srv-l3d_arcadedb_dense_server_search_deep10m_r1:248"
+        }
+      ],
+      "source_paths": [
+        "experiments/results/runs_paper.csv",
+        "experiments/results/dense_mp5_<pin>",
+        "experiments/lean_http.py"
+      ],
+      "source_urls": [
+        "https://github.com/humemai/mmdbbench/blob/main/experiments/results/runs_paper.csv",
+        "https://github.com/humemai/mmdbbench/blob/main/experiments/results/dense_mp5_<pin>",
+        "https://github.com/humemai/mmdbbench/blob/main/experiments/lean_http.py"
+      ],
+      "source_path": "experiments/results/runs_paper.csv",
+      "source_url": "https://github.com/humemai/mmdbbench/blob/main/experiments/results/runs_paper.csv"
+    },
+    {
       "id": "l2",
       "title": "Graph OLTP",
       "dataset": "LDBC-SNB Interactive (SF1, SF10)",
       "conditions": [
         "Disk is what the workload left on disk, in GiB: the engine's writable layer plus its volumes after the cell, minus the same engine's empty footprint.",
-        "Every deterministic answer on this table is hashed and compared across the engines before anything is published, and a publish is refused when two of them disagree. What that comparison could not cover, declared rather than skipped: ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 71 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 73 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 81 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 129 of 500 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 133 of 500 starts; ArcadeDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 63 of 200 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 271 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 310 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 339 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 169 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 170 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 171 of 500 starts; PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 103 of 500 starts; PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 135 s probe budget after 0 of 20 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 12 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 15 of 500 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 22 of 500 starts.",
+        "Every deterministic answer on this table is hashed and compared across the engines before anything is published, and a publish is refused when two of them disagree. What that comparison could not cover, declared rather than skipped: ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 71 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 73 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 81 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 129 of 500 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 133 of 500 starts; ArcadeDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 63 of 200 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 271 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 310 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 339 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 1800 s budget after 8 of 200 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 169 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 170 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 171 of 500 starts; PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 8 of 200 starts; PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 103 of 500 starts; PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 135 s probe budget after 0 of 20 starts; PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 450 s probe budget after 0 of 20 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 12 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 15 of 500 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 22 of 500 starts.",
         "The cold column is the very first query of a session, the point lookup, timed once on a database that has just been opened; every other latency column is the warm median of the iterations that follow it. It answers what the first query of a session costs against the hundredth, which is a different question from the steady-state one and is the one an application that opens a database per request actually asks.",
         "Durability is matched at the relaxed end: on every engine that has the setting, a commit returns without waiting for the disk and the log is flushed by the engine's own background policy, which is ArcadeDB's engine default and a documented production mode for each of the others. Each row records what it ran as `durability`, and every engine's setting was read out of the engine rather than assumed. The exceptions on this table are LadybugDB and Neo4j, which have no setting to relax and wait for the disk at every commit; their write and transaction cells are paying for that.",
         "Both server arms are the official ArcadeDB server images, one built for the JVM and one compiled to a native executable, started with the same server settings, which each server reports back when it starts. The CPU baselines differ: the native server image is native server image: -march=x86-64-v3 and the native wheel (the embedded arm) as native wheel: -march=compatibility, and the JVM server compiles for the CPU it runs on.",
@@ -190,12 +4587,13 @@
         "Every repetition, on every engine, runs each read against the same start persons, 500 at SF1 (10k people, 181k friendships) and 200 at SF10 (66k people, 1.9M friendships), plus 1,000 each of the insert, update, and delete; the p50 and p99 are over those. The start persons are picked at random with a fixed seed and with replacement, so one person can be picked more than once.",
         "DuckPGQ at SF1 (10k people, 181k friendships): the transaction cell reached the 8g memory envelope (peak 8,192 MiB) and the engine stopped it with its own out-of-memory error, the same envelope every engine on this table had; it did not run out of time, and there is no row.",
         "DuckPGQ at SF10 (66k people, 1.9M friendships): the transaction cell reached the 24g memory envelope (peak 24,576 MiB) and the engine stopped it with its own out-of-memory error, the same envelope every engine on this table had; it did not run out of time, and there is no row.",
-        "Ten query cells on this table stopped at their per-query budget, the same for every engine here; each one's p50 and p99 are over those starts timed in the first pass, and every other query in those cells keeps its numbers.",
+        "12 query cells on this table stopped at their per-query budget, the same for every engine here; each one's p50 and p99 are over those starts timed in the first pass, and every other query in those cells keeps its numbers.",
         "ArangoDB at SF1 (10k people, 181k friendships): 3-hop filtered (124 to 128 starts).",
         "ArangoDB at SF10 (66k people, 1.9M friendships): 3-hop filtered (66 to 76 starts).",
         "ArcadeDB (server) at SF10 (66k people, 1.9M friendships): 3-hop filtered (58 starts).",
         "MongoDB at SF1 (10k people, 181k friendships): 3-hop filtered (266 to 334 starts).",
         "PostgreSQL + AGE at SF1 (10k people, 181k friendships): 2-hop (164 to 166 starts) and 3-hop filtered (98).",
+        "PostgreSQL + AGE at SF10 (66k people, 1.9M friendships): 2-hop (3 starts) and 3-hop filtered (3).",
         "SurrealDB (embedded) at SF1 (10k people, 181k friendships): 3-hop filtered (10 to 13 starts).",
         "SurrealDB (embedded) at SF10 (66k people, 1.9M friendships): 3-hop filtered (7 to 8 starts).",
         "SurrealDB (server) at SF1 (10k people, 181k friendships): 3-hop filtered (13 to 17 starts).",
@@ -2491,6 +6889,107 @@
             },
             "JVM heap": {
               "text": "8g"
+            }
+          }
+        },
+        {
+          "backend": "PostgreSQL + AGE",
+          "build": null,
+          "backend_key": "pgage_graph",
+          "is_arcadedb": false,
+          "precision": null,
+          "scale": "sf10",
+          "scale_label": "SF10 (66k people, 1.9M friendships)",
+          "workload": "oltp",
+          "n_docs": null,
+          "deployment": "server",
+          "image": "dbbench:pg-age",
+          "version_name": "PostgreSQL 18.6 + age 1.8.0",
+          "host": null,
+          "metrics": {
+            "point p50 ms": {
+              "median": 0.058,
+              "min": 0.057,
+              "max": 0.082,
+              "n": 3
+            },
+            "point p99 ms": {
+              "median": 0.146,
+              "min": 0.143,
+              "max": 0.148,
+              "n": 3
+            },
+            "1-hop p50 ms": {
+              "median": 2343.017,
+              "min": 2335.366,
+              "max": 2350.976,
+              "n": 3
+            },
+            "2-hop p50 ms": {
+              "median": 313848.723,
+              "min": 313057.269,
+              "max": 314835.399,
+              "n": 3
+            },
+            "3-hop filtered p50 ms": {
+              "median": 340172.025,
+              "min": 339190.881,
+              "max": 342818.419,
+              "n": 3
+            },
+            "insert p50 ms": {
+              "median": 0.098,
+              "min": 0.097,
+              "max": 0.158,
+              "n": 3
+            },
+            "update p50 ms": {
+              "median": 0.069,
+              "min": 0.069,
+              "max": 0.122,
+              "n": 3
+            },
+            "delete p50 ms": {
+              "median": 3.267,
+              "min": 3.267,
+              "max": 3.269,
+              "n": 3
+            },
+            "cold first query ms": {
+              "median": 1.4904,
+              "min": 1.458,
+              "max": 1.5274,
+              "n": 3
+            },
+            "ingest vertices+edges/s": {
+              "median": 173821.4224,
+              "min": 171295.812,
+              "max": 173972.309,
+              "n": 3
+            },
+            "ingest total s": {
+              "median": 11.53,
+              "min": 11.52,
+              "max": 11.7,
+              "n": 3
+            },
+            "peak memory GiB": {
+              "median": 0.9371,
+              "min": 0.9362,
+              "max": 0.9386,
+              "n": 3
+            },
+            "disk GiB": {
+              "median": 0.6879,
+              "min": 0.6879,
+              "max": 0.6879,
+              "n": 3
+            },
+            "owned memory after queries GiB": {
+              "median": 0.5299,
+              "min": 0.5294,
+              "max": 0.5304,
+              "n": 3
             }
           }
         },
@@ -11688,20 +16187,20 @@
             "no wait ms": {
               "median": 0.097,
               "min": 0.096,
-              "max": 0.097,
-              "n": 3
+              "max": 0.158,
+              "n": 6
             },
             "waits for the disk ms": {
-              "median": 2.241,
+              "median": 2.2145,
               "min": 2.173,
               "max": 2.42,
-              "n": 3
+              "n": 6
             },
             "cost of waiting": {
-              "median": 23.1,
-              "min": 23.1,
-              "max": 23.1,
-              "n": 3
+              "median": 22.83,
+              "min": 22.83,
+              "max": 22.83,
+              "n": 6
             }
           }
         },
@@ -12060,20 +16559,20 @@
             "no wait ms": {
               "median": 0.069,
               "min": 0.068,
-              "max": 0.118,
-              "n": 3
+              "max": 0.122,
+              "n": 6
             },
             "waits for the disk ms": {
-              "median": 2.114,
+              "median": 2.1275,
               "min": 2.055,
-              "max": 2.165,
-              "n": 3
+              "max": 2.331,
+              "n": 6
             },
             "cost of waiting": {
-              "median": 30.64,
-              "min": 30.64,
-              "max": 30.64,
-              "n": 3
+              "median": 30.83,
+              "min": 30.83,
+              "max": 30.83,
+              "n": 6
             }
           }
         },
@@ -12430,22 +16929,22 @@
           "host": null,
           "metrics": {
             "no wait ms": {
-              "median": 3.276,
+              "median": 3.268,
               "min": 3.267,
               "max": 3.293,
-              "n": 3
+              "n": 6
             },
             "waits for the disk ms": {
-              "median": 5.124,
-              "min": 5.117,
+              "median": 5.127,
+              "min": 5.098,
               "max": 5.16,
-              "n": 3
+              "n": 6
             },
             "cost of waiting": {
-              "median": 1.56,
-              "min": 1.56,
-              "max": 1.56,
-              "n": 3
+              "median": 1.57,
+              "min": 1.57,
+              "max": 1.57,
+              "n": 6
             }
           }
         },
@@ -18439,13 +22938,14 @@
       "dataset": "Every table on this page, read for which engine has a row",
       "instrument": "2026-11",
       "conditions": [
-        "This table is derived from the seven tables above and carries no measurement of its own. Each column is one of those tables. measured means the engine has at least one row on that table, counting every arm of one engine as one, so both ArcadeDB deployments are ArcadeDB and both SurrealDB modes are SurrealDB; declared means the table has no row for the engine and says why beneath itself, in the words printed there (censored, the cell exceeded the budget every engine had; out of memory, the cell reached the memory envelope every engine on that table had and was killed by the kernel or stopped by the engine's own out-of-memory error); no arm means the engine was not run on that workload, with neither a row nor a declared reason. The Mode column lists the deployments the engine has rows for anywhere on the page."
+        "This table is derived from the eight tables above and carries no measurement of its own. Each column is one of those tables. measured means the engine has at least one row on that table, counting every arm of one engine as one, so both ArcadeDB deployments are ArcadeDB and both SurrealDB modes are SurrealDB; declared means the table has no row for the engine and says why beneath itself, in the words printed there (censored, the cell exceeded the budget every engine had; out of memory, the cell reached the memory envelope every engine on that table had and was killed by the kernel or stopped by the engine's own out-of-memory error); no arm means the engine was not run on that workload, with neither a row nor a declared reason. The Mode column lists the deployments the engine has rows for anywhere on the page."
       ],
       "columns": [
         "Document OLTP",
         "Document OLAP",
         "Graph OLTP",
         "Graph OLAP",
+        "Dense vector search",
         "Cross-model transaction",
         "Cross-model transaction: what survives a crash",
         "What waiting for the disk costs"
@@ -18478,6 +22978,9 @@
               "text": "measured"
             },
             "Graph OLAP": {
+              "text": "measured"
+            },
+            "Dense vector search": {
               "text": "measured"
             },
             "Cross-model transaction": {
@@ -18516,6 +23019,9 @@
             "Graph OLAP": {
               "text": "measured"
             },
+            "Dense vector search": {
+              "text": "measured"
+            },
             "Cross-model transaction": {
               "text": "measured"
             },
@@ -18550,6 +23056,9 @@
               "text": "measured"
             },
             "Graph OLAP": {
+              "text": "measured"
+            },
+            "Dense vector search": {
               "text": "measured"
             },
             "Cross-model transaction": {
@@ -18588,6 +23097,9 @@
             "Graph OLAP": {
               "text": "declared, censored; out of memory"
             },
+            "Dense vector search": {
+              "text": "declared, censored"
+            },
             "Cross-model transaction": {
               "text": "measured"
             },
@@ -18623,6 +23135,9 @@
             },
             "Graph OLAP": {
               "text": "measured"
+            },
+            "Dense vector search": {
+              "text": "no arm"
             },
             "Cross-model transaction": {
               "text": "measured"
@@ -18660,7 +23175,7 @@
         ]
       },
       {
-        "text": "Every deterministic answer on this table is hashed and compared across the engines before anything is published, and a publish is refused when two of them disagree. What that comparison could not cover, declared rather than skipped: ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 71 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 73 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 81 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 129 of 500 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 133 of 500 starts; ArcadeDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 63 of 200 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 271 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 310 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 339 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 169 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 170 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 171 of 500 starts; PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 103 of 500 starts; PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 135 s probe budget after 0 of 20 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 12 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 15 of 500 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 22 of 500 starts.",
+        "text": "Every deterministic answer on this table is hashed and compared across the engines before anything is published, and a publish is refused when two of them disagree. What that comparison could not cover, declared rather than skipped: ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 71 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 73 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 81 of 200 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 129 of 500 starts; ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 133 of 500 starts; ArcadeDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 63 of 200 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 271 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 310 of 500 starts; MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 339 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 1800 s budget after 8 of 200 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 169 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 170 of 500 starts; PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 171 of 500 starts; PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 8 of 200 starts; PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 103 of 500 starts; PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 135 s probe budget after 0 of 20 starts; PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 450 s probe budget after 0 of 20 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 12 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 15 of 500 starts; SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 18 of 500 starts; SurrealDB (server)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 22 of 500 starts.",
         "values": [
           "ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 71 of 200 starts",
           "ArangoDB's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 73 of 200 starts",
@@ -18671,11 +23186,14 @@
           "MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 271 of 500 starts",
           "MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 310 of 500 starts",
           "MongoDB's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 339 of 500 starts",
+          "PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 1800 s budget after 8 of 200 starts",
           "PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 169 of 500 starts",
           "PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 170 of 500 starts",
           "PostgreSQL + AGE's 2-hop answer is not compared, because it stopped at its 540 s budget after 171 of 500 starts",
+          "PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 8 of 200 starts",
           "PostgreSQL + AGE's 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 103 of 500 starts",
           "PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 135 s probe budget after 0 of 20 starts",
+          "PostgreSQL + AGE's hop3_visited answer is not compared, because it killed by the server at its 450 s probe budget after 0 of 20 starts",
           "SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 12 of 200 starts",
           "SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 1800 s budget after 13 of 200 starts",
           "SurrealDB (embedded)'s 3-hop filtered answer is not compared, because it stopped at its 540 s budget after 15 of 500 starts",
@@ -18748,6 +23266,14 @@
         ]
       },
       {
+        "text": "The insert and delete into a built index, the search after each, and the recall after each are measured at 1M vectors only. At 9.99M vectors those columns are blank because the pass is not run there, not because an engine failed it. These engines do not all maintain an index the same way: ArcadeDB (embedded, fp32) left 1,001 vectors in its delta buffer, to be merged by a later full rebuild this cell does not pay for. A full rebuild touches every vector in the index and an incremental insert touches only the new ones, so the per-vector costs here price different amounts of work and are not a straight speed comparison.",
+        "values": [
+          "9.99M vectors",
+          "1M vectors",
+          "1,001"
+        ]
+      },
+      {
         "text": "Durability is matched at the relaxed end: on every engine that has the setting, a commit returns without waiting for the disk and the log is flushed by the engine's own background policy, which is ArcadeDB's engine default and a documented production mode for each of the others. Each row records what it ran as `durability`, and every engine's setting was read out of the engine rather than assumed. The exceptions on this table are LadybugDB and Neo4j, which have no setting to relax and wait for the disk at every commit; their write and transaction cells are paying for that.",
         "values": [
           "LadybugDB",
@@ -18777,6 +23303,13 @@
         ]
       },
       {
+        "text": "The native build was not measured for ArcadeDB (server, fp32, native build) at 9.99M vectors, so those rows are absent.",
+        "values": [
+          "ArcadeDB (server, fp32, native build)",
+          "9.99M vectors"
+        ]
+      },
+      {
         "text": "LSQB Q6 and LSQB Q9 were not run at this size, for any engine.",
         "values": [
           "LSQB Q6",
@@ -18795,6 +23328,24 @@
         "values": []
       },
       {
+        "text": "DuckDB's vector rows keep their HNSW index in the database through a persistence feature that its vector extension still labels experimental and that has to be switched on for the index to be stored at all.",
+        "values": []
+      },
+      {
+        "text": "ArcadeDB's vector index is built as a layered graph, the structure the hnswlib family uses; the engine's own default is a single flat layer.",
+        "values": []
+      },
+      {
+        "text": "The ArcadeDB server is started with the limit on the records or groups that one sorting, grouping, or distinct query may hold in memory fixed at 5,000,000, while the embedded package leaves that limit at the engine's default, which grows with the heap, so the two deployments can run different limits.",
+        "values": [
+          "5,000,000"
+        ]
+      },
+      {
+        "text": "The rows of this table that carry the id-index stamp ran with an index on the vector's id in every engine: ArcadeDB, pgvector, Neo4j, Memgraph, FalkorDB, DuckDB, and LanceDB built one on the empty store before the load, so it is counted in the load time, and the other engines find a record by a key they always index. The delete finds each vector through that index.",
+        "values": []
+      },
+      {
         "text": "Neo4j's page cache is sized from the memory the run was given, what is left after its heap and a fixed reserve, where its image would set one small fixed size whatever the container holds.",
         "values": []
       },
@@ -18806,21 +23357,11 @@
         ]
       },
       {
-        "text": "The ArcadeDB server is started with the limit on the records or groups that one sorting, grouping, or distinct query may hold in memory fixed at 5,000,000, while the embedded package leaves that limit at the engine's default, which grows with the heap, so the two deployments can run different limits.",
-        "values": [
-          "5,000,000"
-        ]
-      },
-      {
         "text": "The ArcadeDB server that loads its data through the bulk endpoint is started with the limit on one HTTP request body raised to 64 GiB, where the engine's default is 100 MiB. The default refuses the single streamed request that carries the larger graph and cross-model loads (the engine's own message says to raise the limit or split the payload), so the load stays one request, as the embedded arm's is one call. The limit caps how much one request may carry and is no speed setting; the embedded arms have no HTTP body.",
         "values": [
           "64",
           "100"
         ]
-      },
-      {
-        "text": "DuckDB's vector rows keep their HNSW index in the database through a persistence feature that its vector extension still labels experimental and that has to be switched on for the index to be stored at all.",
-        "values": []
       },
       {
         "text": "Each printed cell is the median of 3 repetitions, with min and max carried alongside; nothing here is a single sample.",
@@ -18839,10 +23380,106 @@
         ]
       },
       {
+        "text": "ingest s and index s are two timers where the engine has the boundary: inserting the vectors, then building the index. Qdrant (fp32), Redis (fp32), and sqlite-vec (fp32) record one timer only, because the index is built while ingesting or the adapter times no boundary, so their ingest s and index s are blank. ingest+index total s is one timer around both, and ingest+index vectors/s divides the vector count by it.",
+        "values": [
+          "Qdrant (fp32)",
+          "Redis (fp32)",
+          "sqlite-vec (fp32)"
+        ]
+      },
+      {
+        "text": "ArangoDB, ArcadeDB, DuckDB VSS, LadybugDB, MongoDB, Qdrant, Redis, pgvector, and sqlite-vec have an index on the vector id, the key the delete pass finds each vector by, and building it is part of the ingest time.",
+        "values": [
+          "ArangoDB",
+          "ArcadeDB",
+          "DuckDB VSS",
+          "LadybugDB",
+          "MongoDB",
+          "Qdrant",
+          "Redis",
+          "pgvector",
+          "sqlite-vec"
+        ]
+      },
+      {
+        "text": "ArangoDB's vector index is FAISS IVF (inverted lists over trained centroids), not HNSW, so the degree match above does not apply to it, and its rows record its operating point instead. Its number of lists is four times the square root of the vector count, the low end of the range FAISS's own guidelines give, which makes 4,000 lists at 1M vectors and 12,643 lists at 9.99M vectors. The number of lists each query probes is calibrated, not set: after the build and before any timed pass, the benchmark picks the smallest number whose recall@10 on 200 queries held out from the timed ones reaches the recall target its rows record. At 1M vectors that target is 0.95 and the calibration chose 38 to 47 lists across three builds; At 9.99M vectors that target is 0.95 and the calibration chose 38 to 41 lists across three builds.",
+        "values": [
+          "4,000",
+          "1M vectors",
+          "12,643",
+          "9.99M vectors",
+          "200",
+          "38",
+          "47",
+          "0.95",
+          "41"
+        ]
+      },
+      {
         "text": "ArcadeDB's served rows time every call through the benchmark's own minimal HTTP client, lean_http (http.client, keep-alive) (source: experiments/lean_http.py), which keeps one persistent http.client connection per host. The other engines are measured through their vendors' own Python clients, so client weight differs between the served engines.",
         "values": [
           "lean_http (http.client, keep-alive)",
           "experiments/lean_http.py"
+        ]
+      },
+      {
+        "text": "ArcadeDB (server, fp32, JVM build) and ArcadeDB (server, fp32, native build) run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: ArcadeDB (server, fp32, native build)'s 3.78 GiB at 1M vectors is about 47 per cent of its 8g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory.",
+        "values": [
+          "ArcadeDB (server, fp32, JVM build) and ArcadeDB (server, fp32, native build)",
+          "3.78",
+          "47",
+          "8g",
+          "1M vectors"
+        ]
+      },
+      {
+        "text": "ArcadeDB (server, fp32, JVM build) and ArcadeDB (server, fp32, native build) run on a JVM, and for them this column is close to the heap they were given rather than the memory the work needed: ArcadeDB (server, fp32, native build)'s 3.78 GiB at 1M vectors is about 47 per cent of its 8g heap. Every engine on a table gets the same memory envelope; how much of it a JVM takes is a property of the runtime, so read these cells against each other rather than against an engine that manages its own memory. ArcadeDB (embedded, fp32, JVM build) and ArcadeDB (embedded, fp32, native build) run on a JVM too, but they start with no initial heap size, so their column follows what the work needed and not the heap the JVM was allowed to grow into.",
+        "values": [
+          "ArcadeDB (server, fp32, JVM build) and ArcadeDB (server, fp32, native build)",
+          "3.78",
+          "47",
+          "8g",
+          "1M vectors",
+          "ArcadeDB (embedded, fp32, JVM build) and ArcadeDB (embedded, fp32, native build)"
+        ]
+      },
+      {
+        "text": "Each pass answers 1,000 queries; cold is the first pass after the build and warm pools the four passes after it, over three builds.",
+        "values": [
+          "1,000",
+          "4",
+          "3"
+        ]
+      },
+      {
+        "text": "`ingest+index total s` is the whole of building this corpus. `ingest s` and `index s` are the two phases timed inside it -- writing the data, then building whatever index the engine was given -- and they are not a division of it: each engine's ingest clock starts after the setup it does first, creating a schema or a collection, which neither phase counts. How much is left over depends on the engine: nothing on some of the ones here, up to about 40 per cent on others. Read the two as what each phase cost, and the total as what the whole of it cost.",
+        "values": [
+          "ingest+index total s",
+          "40"
+        ]
+      },
+      {
+        "text": "CrateDB (fp32), SurrealDB (embedded, fp32), and SurrealDB (server, fp32) at 1M vectors: the search cell exceeded its 0.5 hour budget, the same budget every engine on this table had, on its first attempt and was not retried; there is no row. It was still in the index build when the budget ran out.",
+        "values": [
+          "CrateDB (fp32), SurrealDB (embedded, fp32), and SurrealDB (server, fp32)",
+          "1M vectors",
+          "0.5 hour",
+          "the index build"
+        ]
+      },
+      {
+        "text": "ArcadeDB (server, fp32, native build) at 9.99M vectors: the search cell failed inside its budget and was not retried, so there is no row. What it reported: lean_http.ConnectionError: POST http://srv-l3d_arcadedb_dense_server_search_deep10m_r1:248",
+        "values": [
+          "ArcadeDB (server, fp32, native build)",
+          "9.99M vectors",
+          "lean_http.ConnectionError: POST http://srv-l3d_arcadedb_dense_server_search_deep10m_r1:248"
+        ]
+      },
+      {
+        "text": "In the cells: `>30m` means the cell ran past its tier's cap and was not retried. `lost` means the connection dropped mid-query. A dash is an operation the engine cannot express, never a slow one.",
+        "values": [
+          ">30m",
+          "lost"
         ]
       },
       {
@@ -18892,9 +23529,9 @@
         ]
       },
       {
-        "text": "Ten query cells on this table stopped at their per-query budget, the same for every engine here; each one's p50 and p99 are over those starts timed in the first pass, and every other query in those cells keeps its numbers.",
+        "text": "12 query cells on this table stopped at their per-query budget, the same for every engine here; each one's p50 and p99 are over those starts timed in the first pass, and every other query in those cells keeps its numbers.",
         "values": [
-          "Ten",
+          "12",
           "per-query budget"
         ]
       },
@@ -18936,6 +23573,14 @@
           "PostgreSQL + AGE",
           "SF1 (10k people, 181k friendships)",
           "2-hop (164 to 166 starts) and 3-hop filtered (98)"
+        ]
+      },
+      {
+        "text": "PostgreSQL + AGE at SF10 (66k people, 1.9M friendships): 2-hop (3 starts) and 3-hop filtered (3).",
+        "values": [
+          "PostgreSQL + AGE",
+          "SF10 (66k people, 1.9M friendships)",
+          "2-hop (3 starts) and 3-hop filtered (3)"
         ]
       },
       {
@@ -19454,15 +24099,14 @@
         ]
       },
       {
-        "text": "This table is derived from the seven tables above and carries no measurement of its own. Each column is one of those tables. measured means the engine has at least one row on that table, counting every arm of one engine as one, so both ArcadeDB deployments are ArcadeDB and both SurrealDB modes are SurrealDB; declared means the table has no row for the engine and says why beneath itself, in the words printed there (censored, the cell exceeded the budget every engine had; out of memory, the cell reached the memory envelope every engine on that table had and was killed by the kernel or stopped by the engine's own out-of-memory error); no arm means the engine was not run on that workload, with neither a row nor a declared reason. The Mode column lists the deployments the engine has rows for anywhere on the page.",
+        "text": "This table is derived from the eight tables above and carries no measurement of its own. Each column is one of those tables. measured means the engine has at least one row on that table, counting every arm of one engine as one, so both ArcadeDB deployments are ArcadeDB and both SurrealDB modes are SurrealDB; declared means the table has no row for the engine and says why beneath itself, in the words printed there (censored, the cell exceeded the budget every engine had; out of memory, the cell reached the memory envelope every engine on that table had and was killed by the kernel or stopped by the engine's own out-of-memory error); no arm means the engine was not run on that workload, with neither a row nor a declared reason. The Mode column lists the deployments the engine has rows for anywhere on the page.",
         "values": [
-          "seven"
+          "eight"
         ]
       }
     ]
   },
   "pending_tables": {
-    "l3d": "Still being measured at this version. This table appears here when its run finishes.",
     "l3s": "Still being measured at this version. This table appears here when its run finishes.",
     "l4": "Still being measured at this version. This table appears here when its run finishes.",
     "lifecycle": "Still being measured at this version. This table appears here when its run finishes.",

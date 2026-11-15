@@ -230,7 +230,8 @@ _THREE = []
 
 
 def _three_builds():
-    """The publish fixture with builds 4 and 5 removed from both dense overlays: what a landing at n=3 pulls. Built once."""
+    """The publish fixture as a landing at n=3 pulls it: three builds per arm in both dense overlays and none above (the fixture is n=3 itself
+    since humemai/mmdbbench#95, so nothing is removed here; the assertions state it instead of trusting it). Built once."""
     if _THREE:
         return _THREE[0]
     root = Path(tempfile.mkdtemp(prefix="dense-n3-"))
@@ -240,18 +241,35 @@ def _three_builds():
     with gzip.open(dest / "runs.jsonl.gz", "rt") as src, open(dest / "runs.jsonl", "w") as out:
         shutil.copyfileobj(src, out)
     (dest / "runs.jsonl.gz").unlink()
-    gone = 0
-    for d in dest.glob("dense_mp5*"):
-        for fp in list(d.glob("mp_*_b4.json")) + list(d.glob("mp_*_b5.json")):
-            fp.unlink()
-            gone += 1
-    assert gone >= 2 * (13 + 10)          # at least the required arms of both sizes, two builds each
+    overlays = list(dest.glob("dense_mp5*"))
+    assert len(overlays) == 2, [d.name for d in overlays]
+    above = [fp.name for d in overlays for fp in list(d.glob("mp_*_b4.json")) + list(d.glob("mp_*_b5.json"))]
+    assert not above, above
+    # the third build of at least the required arms of both sizes is there, so the three-build landing is not an empty directory
+    assert sum(1 for d in overlays for _ in d.glob("mp_*_b3.json")) >= 13 + 10
     _THREE.append(dest)
     return dest
 
 
+def _three_builds_with_five_sparse_reps():
+    """The three-build fixture whose sparse (l3s) rows also have a rep 4 and a rep 5, the rep 3 rows renumbered. The sparse table is built before
+    the dense overlays and its guard follows the landing's n too (test_sparse_pinned_reps.py), so at BENCH_MP_BUILDS=5 the three-rep fixture is
+    refused there first and never reaches the dense refusal this test is about. Synthetic rows, a test of the five-build opt-in only."""
+    root = Path(tempfile.mkdtemp(prefix="dense-n3-s5-"))
+    atexit.register(shutil.rmtree, root, True)
+    dest = root / "results"
+    shutil.copytree(_three_builds(), dest)
+    lines = (dest / "runs.jsonl").read_text().splitlines()
+    rows = [json.loads(l) for l in lines if l.strip()]
+    third = [r for r in rows if r["lane"] == "l3s" and r.get("rep") == 3]
+    assert third, "the fixture holds no rep 3 sparse row to renumber"
+    extra = [dict(r, rep=n, run_id=f"{r.get('run_id', 'x')}_rep{n}") for r in third for n in (4, 5)]
+    (dest / "runs.jsonl").write_text("\n".join(lines + [json.dumps(r) for r in extra]) + "\n")
+    return dest
+
+
 def test_a_five_build_landing_refuses_the_three_build_fixture_and_names_the_count():
-    proc = _run("make_paper_tables.py", _three_builds(), BENCH_MP_BUILDS="5")
+    proc = _run("make_paper_tables.py", _three_builds_with_five_sparse_reps(), BENCH_MP_BUILDS="5")
     assert proc.returncode != 0
     assert "files missing" in proc.stderr and "5 builds per arm" in proc.stderr and "no fallback, re-run the arm" in proc.stderr
 

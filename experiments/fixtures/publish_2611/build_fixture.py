@@ -35,7 +35,6 @@ KEEP = {"e2": {"e2"}, "e4": {"e2"}, "l1tpc": {"tpch1"}, "l2": {"sf1"}, "l3d": {"
 MAX_REP = 3
 PQ_ARMS = {"arcadedb_dense_embedded": "arcadedb_dense_embedded_pq", "arcadedb_dense_server": "arcadedb_dense_server_pq",
            "qdrant_dense": "qdrant_dense_pq", "milvus_dense": "milvus_dense_pq", "arangodb_dense": "arangodb_dense_pq"}
-FULL_REP_LANES = {"l3s"}   # the sparse freeze takes a pinned tier only at five repetitions, at every tier
 WITH_PQ = True
 OUT = HERE / "results"
 
@@ -52,12 +51,33 @@ def _rows(src: Path):
             continue
         r = json.loads(line)
         if (r.get("instrument") != "2026-10" or r.get("rc") != 0 or r.get("scale") not in KEEP.get(r.get("lane"), ())
-                or (int(r.get("rep") or 0) > MAX_REP and r.get("lane") not in FULL_REP_LANES)):
+                or int(r.get("rep") or 0) > MAX_REP):
             continue
         key = (r["lane"], r["scale"], r["backend"], r.get("workload"), r.get("gav"), r.get("rep"), r.get("durability_class"))
         if key not in seen or r["ts_utc"] > seen[key]["ts_utc"]:
             seen[key] = r
     return [seen[k] for k in sorted(seen, key=str)]
+
+
+def _above_max_rep(name: str) -> bool:
+    """True for an overlay file of a build or repetition above MAX_REP: `mp_<arm>_b4.json`, `decomp3m_<pin>_rep5.json`."""
+    m = re.search(r"_b(\d+)\.json$|_rep(\d+)\.json$", name)
+    return bool(m) and int(m.group(1) or m.group(2)) > MAX_REP
+
+
+def _drop_above_max_rep(rows):
+    """THE FIXTURE IS N=3 (humemai/mmdbbench#95): the 2026-11 instrument runs exactly three repetitions, so no row of the fixture has a
+    `rep` above MAX_REP. The sparse lane used to be exempt (its freeze took a pinned tier only at five repetitions); the freeze follows
+    the landing's n now (make_paper_tables.mp_builds()), so it is not."""
+    return [r for r in rows if int(r.get("rep") or 0) <= MAX_REP]
+
+
+def _drop_overlay_files_above_max_rep():
+    """The overlay files of builds and repetitions above MAX_REP (the dense overlays' `_b4`/`_b5`, the e4 decomposition's `_rep4`/`_rep5`)."""
+    for d in sorted(OUT.glob("*_261100fix")):
+        for f in sorted(d.iterdir()):
+            if _above_max_rep(f.name):
+                f.unlink()
 
 
 def _beam_points(rep: int, seed: int):
@@ -380,6 +400,8 @@ def _copy_overlay(src: Path, name: str):
     d = OUT / name
     d.mkdir(parents=True, exist_ok=True)
     for f in sorted(s.iterdir()):
+        if _above_max_rep(f.name):
+            continue
         text = _restamp(f.read_text())
         obj = json.loads(text)
         (d / f.name.replace(PIN_OLD, PIN_NEW)).write_text(json.dumps(obj, separators=(",", ":")) + "\n")
@@ -397,7 +419,8 @@ def patch_existing():
     with gzip.open(OUT / "runs.jsonl.gz", "rt") as fh:
         rows = [json.loads(l) for l in fh if l.strip()]
     _patch_overlays()
-    rows = realistic_2611([r for r in rows if not str(r.get("run_id", "")).endswith("_deep10m")])
+    _drop_overlay_files_above_max_rep()
+    rows = realistic_2611(_drop_above_max_rep([r for r in rows if not str(r.get("run_id", "")).endswith("_deep10m")]))
     write_rows(rows)
     print(f"{len(rows)} rows patched in place")
 

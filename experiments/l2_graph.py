@@ -3481,6 +3481,79 @@ def pct(sorted_ms, q):
     return sorted_ms[min(len(sorted_ms) - 1, int(len(sorted_ms) * q))]
 
 
+# PER-START SAMPLES, OPT-IN, OFF BY DEFAULT (mmdbbench#102). The lane keeps every timed start's latency in memory and writes only p50, p95,
+# p99 and the count into the row. BENCH_GRAPH_SAMPLES_OUT=<path> makes an oltp cell also write ONE JSON-lines side file with, for every read
+# and both timed passes, one record per start: the start id, the latency exactly as the timer measured it, the pass, the position and the
+# answer the lane collected after the clock stopped. Unset, nothing below runs but one `is None` test per start after the clock has
+# stopped, and the row is the row it always was. The file is written once, after the row is on disk and after the close, never inside a
+# timed region and never between two reads; a path that cannot be written is refused before the connect, not after the cell has run.
+SAMPLES_ENV = "BENCH_GRAPH_SAMPLES_OUT"
+SAMPLES_FORMAT = 1
+# `_read_pass` leaves the first five timed starts of a read out of its percentiles (`if w >= 5`). The file keeps them and marks them.
+# (A SurrealDB start taken across a reconnect is also left out of the percentiles, by surreal_common.keep, and is not marked here.)
+SAMPLES_DISCARDED_FIRST = 5
+# What of the row names the run: copied when the row has it. The host, the cgroup and the wheel come from bench_common.run_conditions().
+SAMPLES_ROW_FIELDS = ("engine_version", "engine_backend", "graph_source", "query_language", "instrument", "durability",
+                      "durability_class", "n_persons", "n_persons_ingested", "n_edges_ingested", "jpype_version", "knows_direction")
+
+
+def samples_target(workload, environ=None):
+    """(path, note): where the per-start samples go. path is None when they are not asked for (unset or empty) or do not apply."""
+    environ = os.environ if environ is None else environ
+    path = environ.get(SAMPLES_ENV) or None
+    if path and workload != "oltp":
+        return None, f"{SAMPLES_ENV} is set but the {workload} workload times no per-start reads: no samples file is written"
+    return path, None
+
+
+def check_samples_path(path):
+    """Refuse a path that cannot be written NOW, before the connect and the build, not after the cell has run for ten minutes."""
+    existed = os.path.exists(path)
+    try:
+        with open(path, "a"):
+            pass
+    except OSError as e:
+        raise SystemExit(f"{SAMPLES_ENV}={path!r} cannot be written ({e.__class__.__name__}: {e}); nothing has run yet")
+    if not existed:
+        os.remove(path)         # only the empty file this check just made
+
+
+def samples_header(row, backend, workload, scale, row_file):
+    """What names the run: the row's own identifying fields, and the conditions bench_common reads from the process."""
+    cond = bench_common.run_conditions()
+    head = {"lane": "l2", "cell": f"l2_{backend}_{workload}_{scale}", "backend": backend, "workload": workload, "scale": scale,
+            "row_file": os.path.basename(row_file)}
+    head.update({k: row[k] for k in SAMPLES_ROW_FIELDS if k in row})
+    head["wheel_version"] = cond.get("engine_version")      # the installed distribution; "unknown (...)" for an arm with no wheel
+    head.update({k: cond.get(k) for k in ("host", "cpuset", "mem_cap", "heap", "image", "server_image", "engine_commit",
+                                          "native_isolate_args")})
+    head["written_utc"] = cond.get("ts_utc")
+    return head
+
+
+def sample_records(header, passes, ids):
+    """The records of the samples file, header first. Pure: no clock, no engine, no file.
+
+    `passes` holds one (pass_no, op, latencies_ms, answers, bounds) per read per pass: the latencies of its starts in the order they ran
+    (the loop's `raw`, unrounded), the rows the lane collected after each clock stopped (its `answers`, flat), and `bounds[i]`, how many
+    of those rows existed once start i was done. `ids[i]` is the start the pass asked i-th. A start that returned nothing has `[]`.
+    """
+    yield {"record": "header", "format": SAMPLES_FORMAT, **header}
+    for pass_no, op, latencies, answers, bounds in passes:
+        lo = 0
+        for pos, (ms, hi) in enumerate(zip(latencies, bounds)):
+            yield {"record": "sample", "op": op, "pass": pass_no, "position": pos, "start_id": int(ids[pos]),
+                   "latency_ms": ms, "answer": answers[lo:hi], "discarded": pos < SAMPLES_DISCARDED_FIRST}
+            lo = hi
+
+
+def write_samples(path, header, passes, ids):
+    """Write the samples file, one JSON object per line. Called once, at the end of the cell, after the row is on disk."""
+    with open(path, "w") as f:
+        for rec in sample_records(header, passes, ids):
+            f.write(json.dumps(rec, default=str) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--backend", required=True, choices=list(ADAPTERS))
@@ -3488,6 +3561,15 @@ def main():
     ap.add_argument("--scale", required=True, choices=list(SCALE_PERSONS))
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+
+    # PER-START SAMPLES (opt-in, see samples_target): the path is checked here, before the connect, and `_samples` collects one entry per
+    # read per pass, appended after that read's last start. None when not asked for.
+    _samples_path, _samples_note = samples_target(args.workload)
+    if _samples_note:
+        print(_samples_note, file=sys.stderr)
+    if _samples_path:
+        check_samples_path(_samples_path)
+    _samples = [] if _samples_path else None
 
     # COUNTED, not asserted. n_persons was SCALE_PERSONS[scale], a module constant, so
     # PAGE-SPEC rule 4's corpus fingerprint was fingerprinting a constant: point a
@@ -3684,6 +3766,7 @@ def main():
                 lat = []
                 raw = []
                 answers = []
+                _bounds = [] if _samples is not None else None      # per-start samples: len(answers) after each start
                 if op in read_cut:
                     # Spent its budget in the first pass: nothing left to time.
                     for q in (0.50, 0.95, 0.99):
@@ -3711,10 +3794,16 @@ def main():
                     # timed call returned (DECISIONS #88).
                     if rows:
                         answers.extend(rows)
+                    if _bounds is not None:
+                        # opt-in per-start samples: where this start's rows end in `answers`, taken after the clock stopped
+                        _bounds.append(len(answers))
                     if w >= 5:  # warmups discarded
                         # ...and so is a sample whose connection dropped
                         # while it was being taken (DECISIONS #91).
                         surreal_common.keep(ad, lat, dt)
+                if _bounds is not None:
+                    # once per read per pass, after its last start: the references the samples file is written from at the end of the cell
+                    _samples.append((2 if prefix else 1, op, raw, list(answers), _bounds))
                 if not lat and raw:
                     # CUT BEFORE THE WARM-UPS WERE OVER. A censored read with a
                     # measurement is a result and one with none is a gap, so the
@@ -4165,6 +4254,14 @@ def main():
     with open(args.out, "w") as f:
         json.dump(out, f)
     print(json.dumps(out))
+    if _samples is not None:
+        # THE SAMPLES FILE, last: the row is on disk and printed, the engine is closed, and nothing after this line is timed. A failure
+        # here costs the side file, never the row, so it is a warning and not a refusal (the path was checked before the run started).
+        try:
+            write_samples(_samples_path, samples_header(out, args.backend, args.workload, args.scale, args.out), _samples, ids)
+            print(f"per-start samples written to {_samples_path}", file=sys.stderr)
+        except OSError as e:
+            print(f"WARNING: {SAMPLES_ENV}={_samples_path!r} could not be written ({e}); the row is unaffected", file=sys.stderr)
 
 
 if __name__ == "__main__":

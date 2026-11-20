@@ -2028,6 +2028,7 @@ def main(argv=None) -> int:
     ap.add_argument("--wheel-sha256")
     ap.add_argument("--wheel-url")
     a = ap.parse_args(argv)
+    stage_repo()  # refuse a BENCH_STAGE_REPO that bash could read as more than a path BEFORE any stage is written
     status_file = None if a.status_file is None or a.status_file.strip().lower() == "none" else a.status_file
 
     problems = instrument_problems()

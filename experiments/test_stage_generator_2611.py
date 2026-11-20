@@ -431,7 +431,7 @@ def test_bench_stage_repo_names_the_checkout(tmp_path):
     assert files
     for f in files:
         t = f.read_text()
-        assert "\nREPO=/srv/bench/mmdbbench\n" in t and "humemai/mmdbbench" not in t, f.name
+        assert "\nREPO=/srv/bench/mmdbbench\n" in t and "$HOME/repos/humemai/mmdbbench" not in t, f.name  # a citation of the issue tracker (humemai/mmdbbench#62) may stay in a comment
 
 
 @pytest.mark.parametrize("bad", ["/x y", "/x;rm -rf y", "../x", "$(id)", "'/x'", "/x/../y"])

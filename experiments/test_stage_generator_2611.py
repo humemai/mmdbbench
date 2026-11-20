@@ -25,7 +25,7 @@ WSHA = "cd" * 32
 
 
 def run(args, tmp_path=None, env_extra=None, drop=()):
-    env = {k: v for k, v in os.environ.items() if k not in ("BENCH_INSTRUMENT",) + tuple(drop)}
+    env = {k: v for k, v in os.environ.items() if k not in ("BENCH_INSTRUMENT", "BENCH_STAGE_REPO") + tuple(drop)}
     if tmp_path is not None:
         wheel = tmp_path / WHEEL
         wheel.write_bytes(b"not a real wheel, only its name and sha256 are read")
@@ -403,6 +403,42 @@ def test_the_drafts_are_the_ones_on_file(tmp_path):
     """A change to the template, the stage table, a pin the stages bake in or the cap rule moves a draft. That is allowed, but
     never silently: review the diff of the drafts, then `python3 test_stage_generator_2611.py --rewrite` and commit the list."""
     assert SHA_LIST.read_text().splitlines() == drafts_sha256(tmp_path)
+
+
+# ------------------------------------------------------------------------------------------ where the stages run from (humemai/mmdbbench#92)
+def test_the_stages_run_from_this_repository_and_not_from_the_old_one(drafts, tmp_path):
+    """No generated stage names the old repository or its harness directory. REPO is a checkout of this repository (BENCH_STAGE_REPO, default
+    $HOME/repos/humemai/mmdbbench), the harness is R=$REPO/experiments, and the wheel directory is BINDINGS_REPO's (default: the stage's REPO)."""
+    release = tmp_path / "release"
+    r = run(_release_args() + ["--after", "none", "--id-prefix", "qV", "--out", str(release)])
+    assert r.returncode == 0, r.stdout[-600:] + r.stderr[-600:]
+    files = sorted(drafts.glob("*.sh")) + sorted(release.glob("*.sh"))
+    assert len(files) >= 10
+    for f in files:
+        t = f.read_text()
+        assert "arcadedb-embedded-python" not in t and "benchmarks/experiments" not in t, f.name
+        assert "REPO=$HOME/repos/humemai/mmdbbench" in t and "R=$REPO/experiments" in t, f.name
+        assert "BINDINGS_REPO=${BINDINGS_REPO:-$REPO}; export BINDINGS_REPO" in t, f.name
+        assert "$REPO/bindings" not in t and '"$REPO"/bindings' not in t, f.name
+        assert subprocess.run(["bash", "-n", str(f)], capture_output=True, text=True).returncode == 0, f.name
+
+
+def test_bench_stage_repo_names_the_checkout(tmp_path):
+    out = tmp_path / "o"
+    r = run(["--after", "none", "--status-file", "none", "--lanes", "graph", "--out", str(out)], tmp_path, env_extra={"BENCH_STAGE_REPO": "/srv/bench/mmdbbench"})
+    assert r.returncode == 0, r.stdout[-600:] + r.stderr[-600:]
+    files = sorted(out.glob("*.sh"))
+    assert files
+    for f in files:
+        t = f.read_text()
+        assert "\nREPO=/srv/bench/mmdbbench\n" in t and "$HOME/repos/humemai/mmdbbench" not in t, f.name  # a citation of the issue tracker (humemai/mmdbbench#62) may stay in a comment
+
+
+@pytest.mark.parametrize("bad", ["/x y", "/x;rm -rf y", "../x", "$(id)", "'/x'", "/x/../y"])
+def test_bench_stage_repo_refuses_what_bash_could_read_as_more_than_a_path(bad, tmp_path):
+    r = run(["--after", "none", "--status-file", "none", "--lanes", "graph", "--out", str(tmp_path / "o")], tmp_path, env_extra={"BENCH_STAGE_REPO": bad})
+    assert r.returncode != 0 and "BENCH_STAGE_REPO" in (r.stdout + r.stderr), (bad, r.stdout[-300:], r.stderr[-300:])
+    assert not list((tmp_path / "o").glob("*.sh"))
 
 
 # ------------------------------------------------------------------------------------------------------ engine tiers

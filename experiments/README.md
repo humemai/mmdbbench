@@ -32,11 +32,12 @@ uv run --no-project --with pytest --with numpy --with pandas --with pyarrow --wi
 
 ## Paths that stay as they are
 
-The benchmark host runs its stages from a checkout of the repository the harness came from, until its chain ends. Three places name that checkout on purpose and are not changed here:
+The benchmark host ran its stages from a checkout of the repository the harness came from, and stages already generated still say so; they are records and are not edited. Two places still name that checkout on purpose and are not changed here:
 
-- the stage scripts that `make_2611_stages.py` and `make_post1_rerun_stages.py` write (and `stage_drafts_2611.sha256`, which pins the first ones) go to that checkout and to its `bindings/python/dist`
-- the defaults of `BENCH_LAND_REMOTE` in `land_stage.py` and of `--remote` in `merge_campaign.py`
+- the defaults of `BENCH_LAND_REMOTE` in `land_stage.py` and of `--remote` in `merge_campaign.py`, which change on the day the host switches to a checkout of this repository
 - `queue_lint.py` and its test, which match the host's own stage processes by their command line
+
+The stage scripts that `make_2611_stages.py` and `make_post1_rerun_stages.py` write name a checkout of this repository: `REPO` is `BENCH_STAGE_REPO` at generation, default `$HOME/repos/humemai/mmdbbench`, and the harness is `$REPO/experiments`. The pinned wheel is read from `$BINDINGS_REPO/bindings/python/dist`, with `BINDINGS_REPO` defaulting to the stage's `REPO`. `stage_drafts_2611.sha256` pins the drafts and is regenerated with `python3 test_stage_generator_2611.py --rewrite`.
 
 `build_c25_wheel.sh` and `verify_pair_c25.sh` need `BINDINGS_REPO`, the checkout that holds `bindings/python`, because the engine bindings are not in this repository. `CAMPAIGN.md`, the runbook of the host, is not copied, so the four tests that read it skip.
 

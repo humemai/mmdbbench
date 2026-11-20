@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rows of a wheels-only re-measure (26.11.1.post1): build-only mode, the wheel label, and the per-cell choice of ONE wheel.
 
-WHY (DECISIONS #292 to #299, CAMPAIGN section 7 row 93, humemai/arcadedb-embedded-python#581). A wheels-only post1 changes the Python and
+WHY (DECISIONS #292 to #299, CAMPAIGN section 7 row 94, humemai/arcadedb-embedded-python#581). A wheels-only post1 changes the Python and
 native glue of the ArcadeDB bindings, not the engine. The paper cells whose figures it can move are rerun on it, and the user's rule is that
 the post1 rows OVERRIDE the 26.11.1 rows of the cells that are rerun, with ALL repetitions of a cell from ONE wheel. This module makes that a
 property of the data instead of a thing somebody remembers:

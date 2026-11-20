@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Emit the stage scripts of the wheels-only post1 re-measure of the paper's ArcadeDB EMBEDDED cells (DECISIONS #293 to #306, CAMPAIGN section 7
-row 93, humemai/arcadedb-embedded-python#581): the embedded arms only, build-only where the cell list says so, the post1 wheel pinned by name and
+row 94, humemai/arcadedb-embedded-python#581): the embedded arms only, build-only where the cell list says so, the post1 wheel pinned by name and
 sha256, and nothing of it touching the live pass.
 
 It does not template anything itself. Every stage is what make_2611_stages.stage_script writes (the TEMP GATE, the guards, the cap rule, the rep

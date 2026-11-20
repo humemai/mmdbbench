@@ -280,7 +280,7 @@ def test_the_gate_has_exactly_one_switch():
     assert len(re.findall(r"^INDEX_KINDS_GATE_FAILS = ", src, re.M)) == 1
     assert "INDEX_KINDS_GATE_FAILS = True" in src                       # an unstamped row fails from the re-pin on
     # the switch is documented where the flip is made
-    if (HERE / "CAMPAIGN.md").exists():       # the runbook is not part of the public copy
+    if (HERE / "CAMPAIGN.md").exists():
         assert "INDEX_KINDS_GATE_FAILS" in (HERE / "CAMPAIGN.md").read_text()
 
 

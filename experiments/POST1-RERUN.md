@@ -1,6 +1,6 @@
 # Re-measuring paper cells on a wheels-only post1
 
-The procedure for rerunning the paper's ArcadeDB embedded cells on `26.11.1.post1`, the wheels-only release whose engine is byte-identical to 26.11.1 (DECISIONS #297). The plan and the open question of which cells qualify are CAMPAIGN section 7 row 93 (issue #581). This file is the how. Nothing in it runs by itself, and nothing in it touches the live pass: the rerun writes its own rows file and its own rep state, from its own worktrees.
+The procedure for rerunning the paper's ArcadeDB embedded cells on `26.11.1.post1`, the wheels-only release whose engine is byte-identical to 26.11.1 (DECISIONS #297). The plan and the open question of which cells qualify are CAMPAIGN section 7 row 94 (issue #581). This file is the how. Nothing in it runs by itself, and nothing in it touches the live pass: the rerun writes its own rows file and its own rep state, from its own worktrees.
 
 ## What was built
 

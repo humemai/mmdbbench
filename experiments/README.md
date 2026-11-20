@@ -39,6 +39,6 @@ The benchmark host ran its stages from a checkout of the repository the harness 
 
 The stage scripts that `make_2611_stages.py` and `make_post1_rerun_stages.py` write name a checkout of this repository: `REPO` is `BENCH_STAGE_REPO` at generation, default `$HOME/repos/humemai/mmdbbench`, and the harness is `$REPO/experiments`. The pinned wheel is read from `$BINDINGS_REPO/bindings/python/dist`, with `BINDINGS_REPO` defaulting to the stage's `REPO`. `stage_drafts_2611.sha256` pins the drafts and is regenerated with `python3 test_stage_generator_2611.py --rewrite`.
 
-`build_c25_wheel.sh` and `verify_pair_c25.sh` need `BINDINGS_REPO`, the checkout that holds `bindings/python`, because the engine bindings are not in this repository. `CAMPAIGN.md`, the runbook of the host, is not copied, so the four tests that read it skip.
+`build_c25_wheel.sh` and `verify_pair_c25.sh` need `BINDINGS_REPO`, the checkout that holds `bindings/python`, because the engine bindings are not in this repository. `CAMPAIGN.md`, the runbook of the host, is in this directory, so the four tests that read it run.
 
 The first study that lives here, [sql-corpus](sql-corpus/README.md), is independent of the harness.

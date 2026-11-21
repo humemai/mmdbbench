@@ -977,7 +977,8 @@ def scale_label(lane: str, scale: str) -> str:
     the page under its harness label is exactly the defect this map exists to
     prevent, and a silent fallback would let it through looking deliberate.
     """
-    if lane == "l2":
+    # The full-network tier keeps its own label (SCALE_LABELS): people and friendships alone would hide the message half, which is most of that graph.
+    if lane == "l2" and scale != "sf1full":
         size = _l2_size(scale)
         if size:
             return f"{str(scale).upper()} ({size})"
@@ -1889,6 +1890,11 @@ def _declare_missing_builds(tables):
             parts, vals = [], []
             for label, sizes in sorted(arms.items()):
                 arm = _with_build(label, b)
+                # An arm with a statement for a size (failed, censored, out of memory) was attempted there: it is not also "not measured".
+                said = [a["why"] for a in _DECLARED_ABSENCES[t["id"]] if a["backend"] == arm and a["kind"] != "not measured"]
+                sizes = [z for z in sizes if not any(z in why for why in said)]
+                if not sizes:
+                    continue
                 _declare_absence(t["id"], arm, None, "not measured",
                                  f"{arm} was not measured at {_join_and(sizes)}.")
                 parts.append(f"{arm} at {_join_and(sizes)}")
@@ -2443,7 +2449,7 @@ LANES = {
     #
     "l2olap": {
         "title": "Graph OLAP",
-        "dataset": "LDBC-SNB, SF10",
+        "dataset": "LDBC-SNB, SF1 full network",
         "lane_source": "l2",
         # The full SF1 network as this table's SINGLE size: the one table left
         # at one size, because the full network at SF10 is not feasible. Elsewhere
@@ -5688,8 +5694,9 @@ def _mark_legend(marks):
             raise SystemExit(f"export_web: no legend defined for the cell mark {m!r}; "
                              f"a mark the table cannot define must not reach a reader")
         parts.append(f"`{m}` means {_MARK_MEANINGS[m]}")
-    return [_gen("In the cells: " + ". ".join(parts) + ". A dash is an operation the "
-                 "engine cannot express, never a slow one.", *sorted(marks))]
+    return [_gen("In the cells: " + ". ".join(parts) + ". A dash means the column does not apply to that row, "
+                 "or the step was not run at that size, or the engine cannot express the operation (declared under the table). "
+                 "It never stands for a slow one.", *sorted(marks))]
 
 
 def _censored_entries(table):
@@ -5740,10 +5747,11 @@ def _censored_entries(table):
                     **({"engine": _lifecycle_engine(backend)} if _lc else {}),
                     "backend_key": backend,
                     "is_arcadedb": "arcadedb" in str(backend).lower(),
-                    "precision": None, "scale": scale,
+                    "precision": (DENSE_PRECISION.get(backend) if lane == "l3d" else None), "scale": scale,
                     "scale_label": scale_label(lane, scale), "workload": w,
                     "n_docs": None,
-                    "deployment": "server" if str(backend).endswith("_server") else "embedded",
+                    "deployment": (deployment_of(backend) if backend in BACKENDS
+                                   else ("server" if str(backend).endswith("_server") else "embedded")),
                     "image": None, "version_name": None, "host": None,
                     "outcome": kind,
                     "metrics": {c: {"text": mark} for c in cols}})

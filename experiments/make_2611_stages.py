@@ -1477,7 +1477,7 @@ say "$ID START: {title}, {nbe} engines, rep pass $PASS of $REPS, pin $PIN, instr
 {rep_helpers}
 {temp_gate_helpers}
 run_overlay() {{  # <label> <scale> <cap> <be> <wl> <driver> <outdir> <rf> <reps> <env>
-  local label=$1 scale=$2 cap=$3 be=$4 wl=$5 drv=$6 outdir=$7 orf=$8 oreps=$9 oenv=${{10}}
+  local label=$1 scale=$2 cap=$3 be=$4 wl=$5 drv=$6 outdir=$7 orf=$8 oreps=$9 oenv=${{10}} rc
   # ONE RECORDED FAILURE PER ARM (BUGS F162, DECISIONS #127). Rep 1 first; the later passes run only when rep 1 left a clean row
   # (rep_gate). The sparse driver repeats inside itself (oreps 1): it runs in pass 1 only, as one invocation.
   cap_rule_skip "$label" "$be|$wl|" && return 0
@@ -1491,8 +1491,12 @@ run_overlay() {{  # <label> <scale> <cap> <be> <wl> <driver> <outdir> <rf> <reps
     --driver-out-dir "$outdir" --results-file "$orf" $CLIENTS_ARG >> "$S" 2>&1; then
     rep_note "$label" "$PASS" ok
   else
-    rep_note "$label" "$PASS" fail
-    say "$ID: $label OVERLAY rep $PASS failed (the table reads this, not the lane row)"
+    rc=$?
+    if rep_twin_only "$label" "$PASS" "$rc"; then rep_note "$label" "$PASS" ok
+    else
+      rep_note "$label" "$PASS" fail
+      say "$ID: $label OVERLAY rep $PASS failed (the table reads this, not the lane row)"
+    fi
   fi
   return 0
 }}
@@ -1505,14 +1509,17 @@ run_cell() {{   # run_cell <label> <scale> <cap> <backend> <workload> <env-or-em
   # overwritten before any lane reads it and the cell runs relaxed while
   # claiming nothing. Unquoted on purpose: "--durability strict" must reach
   # the runner as two words, which is what bash does here.
-  local dur=${{7:-}}
+  local dur=${{7:-}} rc
   cap_rule_skip "$label" "$be|$wl|$dur" && return 0
   rep_gate "$label" || return 0
   temp_gate "$label"
   env $envset python3 runner.py --lanes {lane} --scale "$scale" --backends "$be" \\
     --workloads "$wl" --tier paper --workers 1 --timeout "$cap" $dur \\
     --only-reps "$PASS" --reps "$REPS" --results-file "$RF" $CLIENTS_ARG >> "$S" 2>&1
-  if [ $? -ne 0 ]; then
+  rc=$?
+  # ONLY THE POSTGRESQL-WIRE TWIN FAILED (humemai/mmdbbench#22): the cell's headline rep is clean and noted ok, the twin's failure goes to the twin's own file
+  if rep_twin_only "$label" "$PASS" "$rc"; then rep_note "$label" "$PASS" ok; return 0; fi
+  if [ "$rc" -ne 0 ]; then
     rep_note "$label" "$PASS" fail
     # only a TIMEOUT of rep 1 censors the larger sizes; a later pass fails on its own
     if [ "$PASS" -eq 1 ]; then cap_rule_note "$be|$wl|$dur" "$scale"; say "$ID: $label rep 1 failed, not repeating it"
@@ -1532,6 +1539,8 @@ REP_HELPERS = r"""
 # the data, this file only drives the order. Stopping after any pass leaves a valid n; a later pass picks up from it with no
 # regeneration, and a restarted stage skips what is already clean. Delete REPSTATE to start the chain over.
 REPSTATE=$HOME/rep-state-@INSTRUMENT@-$PIN@BUILD@.tsv
+# THE TWIN'S OWN REP-STATE FILE, named before the case below can move REPSTATE: the one the catch-up writes (`-pgwire.tsv`), so a twin that failed in a normal pass is retried there.
+PGWIRE_REPSTATE=${REPSTATE%.tsv}-pgwire.tsv
 # TWIN-ONLY CATCH-UP (DECISIONS #263; FOURARM_CLIENTS=lean is the same switch for the lean twins, humemai/mmdbbench#62). FOURARM_CLIENTS=pgwire, set by the caller and unset in every normal pass (then CLIENTS_ARG is empty and nothing changes), hands
 # `--clients pgwire` to every runner call of this stage, so only the PostgreSQL-wire sensitivity twins run, and moves REPSTATE to its own file: the headline's
 # "rep already clean" gate would skip the twin, and the headline's rep-state is not this run's to write.
@@ -1546,6 +1555,14 @@ rep_done() {  # <label> <rep>: true when that repetition of the cell finished CL
 }
 rep_note() {  # <label> <rep> <ok|fail>
   printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$REPSTATE"
+}
+rep_twin_only() {  # <label> <rep> <runner rc>: true (and records it) when the runner failed ONLY on the PostgreSQL-wire twin (exit 3, runner.EXIT_PGWIRE_TWIN_ONLY)
+  # A normal pass (no --clients): the twin is a sensitivity series nothing is published from, and the cell's headline and vendor-driver jobs ran clean, so the cell's rep is
+  # clean: a twin that fails must neither block the later reps of the cell (the rep-1-first rule reads `ok`) nor stand in for them. The failure is recorded as a fail line in the
+  # twin's own file, where the twin-only catch-up looks. In the catch-up itself (CLIENTS_ARG set) every row is a twin row, so exit 3 is a plain failure there.
+  [ "$3" -eq 3 ] && [ -z "$CLIENTS_ARG" ] || return 1
+  printf '%s\t%s\t%s\n' "$1" "$2" fail >> "$PGWIRE_REPSTATE"
+  say "$ID: $1 rep $2: headline rows clean, only the PostgreSQL-wire twin failed (recorded as fail in $(basename "$PGWIRE_REPSTATE"))"
 }
 rep_gate() {  # <label>: true when this pass may run the cell; says why when it may not
   [ "$PASS" -le "$REPS" ] || return 1   # a cell whose stage environment declares fewer reps (REPS=k) is done after k passes

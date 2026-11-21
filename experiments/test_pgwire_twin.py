@@ -329,6 +329,46 @@ def test_the_stage_template_hands_clients_to_every_runner_call_and_keeps_the_cat
     assert re.search(r"^REPSTATE=\$HOME/rep-state-2026-11-\$PIN(-jvm|-native)?\.tsv$", helpers, re.M)   # the headline's file is as it was
     assert 'case "${FOURARM_CLIENTS:-}" in' in helpers and 'CLIENTS_ARG="--clients pgwire"' in helpers and "${REPSTATE%.tsv}-pgwire.tsv" in helpers
     assert "only lean or pgwire" in helpers                                                      # any other value ends the stage
+    assert "PGWIRE_REPSTATE=${REPSTATE%.tsv}-pgwire.tsv" in helpers and helpers.index("PGWIRE_REPSTATE=") < helpers.index('case "${FOURARM_CLIENTS:-}" in')
+    assert "rep_twin_only()" in helpers and '"$3" -eq 3' in helpers                              # exit 3 of the runner (runner.EXIT_PGWIRE_TWIN_ONLY)
+
+
+# ------------------------------------------------------------------------------------------------------ humemai/mmdbbench#22: a failed twin is not a failed cell
+def _res(run_id, error=None):
+    return {"run_id": run_id, "rc": 1 if error else 0, **({"error": error} if error else {})}
+
+
+HEAD_ID = "l1_arcadedb_server_oltp_tiny_r1"                          # the vendor-driver job: no client suffix, the role `headline` as stamped
+LEAN_ID = "l1_arcadedb_server_oltp_clientlean_tiny_r1"
+PGWIRE_ID = "l1_arcadedb_server_oltp_clientpgwire_tiny_r1"
+
+
+def test_the_runner_exits_3_only_when_the_failed_cell_runs_are_all_pgwire_twins():
+    ok = [_res(HEAD_ID), _res(LEAN_ID), _res(PGWIRE_ID)]
+    assert runner.run_exit_code(ok, []) == 0
+    assert runner.run_exit_code([], []) == 0
+    # the case of the four-arm pass: the settings check failed the twin, the two HTTP cell-runs were ok
+    twin_fail = [_res(HEAD_ID), _res(LEAN_ID), _res(PGWIRE_ID, "setting arcadedb.postgres.debug was requested as false and the engine runs False")]
+    assert runner.run_exit_code(twin_fail, []) == runner.EXIT_PGWIRE_TWIN_ONLY == 3
+    assert runner.run_exit_code([_res(PGWIRE_ID, "x"), _res(PGWIRE_ID.replace("_r1", "_r2"), "y")], []) == 3     # several twins, nothing else
+    # anything else that failed keeps exit 1, whatever the twin did
+    assert runner.run_exit_code([_res(HEAD_ID, "boom"), _res(LEAN_ID), _res(PGWIRE_ID)], []) == 1
+    assert runner.run_exit_code([_res(HEAD_ID), _res(LEAN_ID, "boom"), _res(PGWIRE_ID)], []) == 1        # the lean job is the published headline client
+    assert runner.run_exit_code([_res(HEAD_ID, "boom"), _res(LEAN_ID), _res(PGWIRE_ID, "boom")], []) == 1
+    assert runner.run_exit_code([{"error": "no run id"}], []) == 1
+    # a cell-run that RAISED names no client, so it is never read as a twin; with no failed row it is the old exit 1
+    assert runner.run_exit_code(ok, ["l1_arcadedb_server_r1"]) == 1
+    assert runner.run_exit_code(twin_fail, ["l1_arcadedb_server_r1"]) == 1
+    # a comparator has no twin: its failure is a headline failure
+    assert runner.run_exit_code([_res("l1_postgresql_oltp_tiny_r1", "boom")], []) == 1
+
+
+def test_main_ends_with_the_exit_code_of_run_exit_code():
+    import inspect
+    src = inspect.getsource(runner.main)
+    assert "code = run_exit_code(rows, raised)" in src
+    tail = src.split("code = run_exit_code(rows, raised)", 1)[1]
+    assert tail.count("sys.exit(code)") == 2 and "sys.exit(1)" not in tail
 
 
 def test_the_cells_log_gives_the_calls_and_the_reasons():

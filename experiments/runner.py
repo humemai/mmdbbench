@@ -4594,6 +4594,22 @@ def _client_of_run_id(run_id):
     return m.group(1) if m else ""
 
 
+# THE EXIT CODE OF A BATCH WHOSE ONLY FAILURES ARE PGWIRE TWINS (humemai/mmdbbench#22). A stage notes one rep-state line per cell from the exit code, and a cell's
+# invocation runs the headline job, the vendor-driver job and the PostgreSQL-wire twin together. The twin is a sensitivity series that nothing is published
+# from, but its failure (the settings check of the first four-arm pass, #23) exited 1 like a headline failure, the stage wrote `fail` for the cell, and the
+# rep-1-first rule then refused reps 2 and 3 of the HTTP series of nine cells. 3 is still nonzero, so every caller that reads "nonzero = failed" is unchanged;
+# the stage template alone tells it from 1. 1 stays for any failure of the lean or the vendor-driver job and for a cell-run that RAISED (a raise names no client).
+EXIT_PGWIRE_TWIN_ONLY = 3
+
+
+def run_exit_code(rows, raised):
+    """0 when no row failed and nothing raised; EXIT_PGWIRE_TWIN_ONLY when the failed rows are all PostgreSQL-wire twin rows; 1 otherwise."""
+    failed = [r for r in rows if r.get("error")]
+    if raised or any(_client_of_run_id(r.get("run_id")) != PGWIRE_CLIENT for r in failed):
+        return 1
+    return EXIT_PGWIRE_TWIN_ONLY if failed else 0
+
+
 def build_jobs(lanes, workloads_arg, scale=None):
     """Jobs for these lanes, optionally narrowed to some workloads. `scale` is the scale the invocation runs: a PostgreSQL-wire twin is built only
     when it is not a large-tier scale (LARGE_SCALES); None (no scale named) builds it.
@@ -4990,15 +5006,18 @@ def main():
         print(f"\n{len(raised)} cell-run(s) RAISED instead of returning a row "
               f"(nothing recorded for them): {', '.join(raised[:10])}")
     failed = [r for r in rows if r.get("error")]
+    code = run_exit_code(rows, raised)
     if raised and not failed:
-        sys.exit(1)
+        sys.exit(code)
     if failed:
         print(f"\n{len(failed)} of {len(rows)} cell-runs FAILED:")
         for r in failed[:10]:
             print(f"  {r.get('run_id')}: {str(r.get('error'))[:120]}")
         if len(failed) > 10:
             print(f"  ... and {len(failed) - 10} more")
-        sys.exit(1)
+        if code == EXIT_PGWIRE_TWIN_ONLY:
+            print(f"only PostgreSQL-wire twin cell-runs failed: exit {code}, not 1 (a stage keeps the cell's headline rep clean)")
+        sys.exit(code)
 
 
 if __name__ == "__main__":

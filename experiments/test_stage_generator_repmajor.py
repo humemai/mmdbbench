@@ -124,9 +124,9 @@ def env(tmp_path, chain):
     return tmp_path
 
 
-def cell(env, pass_no, label, rc=0, reps=3):
+def cell(env, pass_no, label, rc=0, reps=3, **extra):
     (env / "rc").write_text(str(rc))
-    e = dict(os.environ, T_CALLS=str(env / "calls"), T_RC=str(env / "rc"), REPS=str(reps), BENCH_GATE_HWMON=str(env / "no-hwmon"))   # no coretemp here: the temperature gate lets the stub cell go at once
+    e = dict(os.environ, T_CALLS=str(env / "calls"), T_RC=str(env / "rc"), REPS=str(reps), BENCH_GATE_HWMON=str(env / "no-hwmon"), **extra)   # no coretemp here: the temperature gate lets the stub cell go at once
     p = subprocess.run(["bash", "-c", HARNESS, "bash", str(env), str(pass_no), "run_cell", label, "tpch1", "600", "surrealdb_tpc",
                         "q1", ""], env=e, capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p.stderr
@@ -167,3 +167,75 @@ def test_stopping_after_pass_2_leaves_a_state_a_third_pass_can_use(env):
     st = (env / "rep-state-2026-11-abc123.tsv").read_text().splitlines()
     assert st == ["Z\t1\tok", "Z\t2\tok"]
     assert len(cell(env, 3, "Z")) == 3
+
+
+# ------------------------------------------------------------------------------------ humemai/mmdbbench#22: a failed twin is not a failed cell
+# The stub runner exits with the code in T_RC. 3 is runner.EXIT_PGWIRE_TWIN_ONLY: the runner's failed cell-runs were all PostgreSQL-wire twins.
+STATE = "rep-state-2026-11-abc123.tsv"
+TWIN_STATE = "rep-state-2026-11-abc123-pgwire.tsv"
+
+
+def test_a_twin_that_fails_in_rep_1_leaves_the_headline_rep_ok_and_rep_2_runs(env):
+    """The acceptance of #22: the twin failed in rep 1 and the headline rows were clean, so rep 1 is ok, the twin's failure is its own line, and rep 2 runs."""
+    assert len(cell(env, 1, "L", rc=3)) == 1
+    assert (env / STATE).read_text().splitlines() == ["L\t1\tok"]
+    assert (env / TWIN_STATE).read_text().splitlines() == ["L\t1\tfail"]
+    status = (env / "status").read_text()
+    assert "only the PostgreSQL-wire twin failed" in status and "not repeating it" not in status
+    c = cell(env, 2, "L")                                       # the twin's failure did not stop the later pass
+    assert len(c) == 2 and "--only-reps 2 " in c[1]
+    assert "no clean rep 1" not in (env / "status").read_text()
+    assert (env / STATE).read_text().splitlines() == ["L\t1\tok", "L\t2\tok"]
+    assert len(cell(env, 3, "L")) == 3                          # and rep 3
+    # a restart of pass 1 does not rerun the clean headline rep either
+    assert len(cell(env, 1, "L")) == 3
+
+
+def test_a_twin_failure_does_not_censor_the_larger_sizes_but_a_headline_timeout_does(env):
+    """cap_rule_note reads the last `[n/m]` line of the log: a twin that timed out last must not censor the headline at a larger size."""
+    def script(first, second):
+        return HARNESS.rsplit('"$@"', 1)[0] + (
+            'printf "  [3/3] l1_x_clientpgwire_tiny_r1 9.0s (s0) -> timeout_after_600s\\n" >> "$S"\n'
+            f'run_cell {first} tpch1 600 surrealdb_tpc q1 ""\n'
+            f'run_cell {second} tpch10 600 surrealdb_tpc q1 ""\n')
+
+    def go(first, second, rc):
+        (env / "rc").write_text(str(rc))
+        e = dict(os.environ, T_CALLS=str(env / "calls"), T_RC=str(env / "rc"), REPS="3", BENCH_GATE_HWMON=str(env / "no-hwmon"))
+        p = subprocess.run(["bash", "-c", script(first, second), "bash", str(env), "1"], env=e, capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0, p.stderr
+        return (env / "calls").read_text().splitlines()
+
+    assert len(go("A", "B", 3)) == 2 and "censored" not in (env / "status").read_text()          # only the twin failed: the larger size ran
+    (env / "calls").unlink()
+    assert len(go("C", "D", 1)) == 1 and "D not run: censored at tpch1" in (env / "status").read_text()    # the same last line after a headline failure censors it
+
+
+def test_any_other_failure_is_a_fail_and_a_twin_failure_is_a_plain_fail_in_the_catch_up(env):
+    assert len(cell(env, 1, "H", rc=1)) == 1 and (env / STATE).read_text().splitlines() == ["H\t1\tfail"]
+    assert not (env / TWIN_STATE).exists()                      # exit 1 is not a twin failure
+    assert len(cell(env, 2, "H")) == 1 and "no clean rep 1, rep 2 not run" in (env / "status").read_text()
+    # the twin-only catch-up: every row of the stage is a twin row, so exit 3 is the failure of what it ran and goes to its own file as fail
+    assert len(cell(env, 1, "T", rc=3, FOURARM_CLIENTS="pgwire")) == 2
+    assert (env / TWIN_STATE).read_text().splitlines() == ["T\t1\tfail"] and "T\t1\tok" not in (env / STATE).read_text()
+    assert "--clients pgwire" in (env / "calls").read_text().splitlines()[-1]
+    assert len(cell(env, 2, "T", FOURARM_CLIENTS="pgwire")) == 2        # rep 1 of the twin is not ok, so rep 2 of the twin is not run
+    assert "T has no clean rep 1, rep 2 not run" in (env / "status").read_text()
+
+
+def overlay(env, pass_no, label, rc):
+    (env / "rc").write_text(str(rc))
+    e = dict(os.environ, T_CALLS=str(env / "calls"), T_RC=str(env / "rc"), REPS="3", BENCH_GATE_HWMON=str(env / "no-hwmon"))
+    p = subprocess.run(["bash", "-c", HARNESS, "bash", str(env), str(pass_no), "run_overlay", label, "tpch1", "600", "surrealdb_tpc", "q1", "drv.py",
+                        "out", "ov.jsonl", "3", ""], env=e, capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    return (env / "calls").read_text().splitlines() if (env / "calls").exists() else []
+
+
+def test_the_overlay_notes_a_twin_only_failure_the_same_way(env):
+    """run_overlay is the stage's other runner call; it reads the exit code in an `if ... else`, where $? is the runner's."""
+    assert len(overlay(env, 1, "O", 3)) == 1
+    assert (env / STATE).read_text().splitlines() == ["O\t1\tok"] and (env / TWIN_STATE).read_text().splitlines() == ["O\t1\tfail"]
+    assert len(overlay(env, 2, "O", 0)) == 2                   # rep 2 of the overlay runs
+    assert len(overlay(env, 1, "P", 1)) == 3 and "P\t1\tfail" in (env / STATE).read_text()
+    assert len(overlay(env, 2, "P", 0)) == 3 and "no clean rep 1, rep 2 not run" in (env / "status").read_text()

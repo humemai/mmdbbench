@@ -79,8 +79,6 @@ REMOTE = os.environ.get("BENCH_LAND_REMOTE", "~/repos/humemai/mmdbbench/experime
 PY = os.environ.get("BENCH_LAND_PY") or str(REPO / ".venv" / "bin" / "python")
 SCRATCH = Path(os.environ.get("BENCH_LAND_SCRATCH", "/tmp/claude-1000/land_stage"))
 PROTECTED_BRANCHES = ("main", "master")
-TRAILER = ("\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n"
-           "Claude-Session: https://claude.ai/code/session_01Ubz3m6QXHESerCkehC1qgi")
 
 
 def sh(cmd, cwd=None, check=True, capture=False, env=None, quiet=False):
@@ -425,7 +423,7 @@ def publish_branch(branch, message, site_files, tracked):
     sh(["git", "switch", "-c", branch], cwd=SITE)
     sh(["git", "switch", "-c", branch], cwd=REPO)
     sh(["git", "add"] + site_files, cwd=SITE)
-    sh(["git", "commit", "-q", "-m", f"dbbench: {message}{TRAILER}"], cwd=SITE, check=False)
+    sh(["git", "commit", "-q", "-m", f"dbbench: {message}"], cwd=SITE, check=False)
     sh(["git", "push", "-q", "-u", "origin", branch], cwd=SITE)
     # THE COMMIT MUST BE VERIFIED, NOT ASSUMED (BUGS F56): the
     # pre-commit hook rewrote a staged JSON file, git aborted the commit, this
@@ -437,7 +435,7 @@ def publish_branch(branch, message, site_files, tracked):
                                  capture_output=True).stdout.strip()
     for attempt in (1, 2):
         sh(["git", "add"] + tracked, cwd=REPO)
-        rc = sh(["git", "commit", "-q", "-m", f"results: {message}{TRAILER}"],
+        rc = sh(["git", "commit", "-q", "-m", f"results: {message}"],
                 cwd=REPO, check=False).returncode
         after_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, text=True,
                                     capture_output=True).stdout.strip()

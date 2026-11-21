@@ -73,8 +73,8 @@ def test_the_harness_sits_one_level_below_the_repository_root():
 
 
 def test_the_copy_is_not_empty():
-    # a layout test that finds nothing passes for the wrong reason
-    assert len(MODULES) > 50 and len(TESTS) > 50 and len(SCRIPTS) >= 5 and len(TOOL_SOURCES) == 5
+    # a layout test that finds nothing passes for the wrong reason; the tools directory grows, so its count is a floor, not a pin
+    assert len(MODULES) > 50 and len(TESTS) > 50 and len(SCRIPTS) >= 5 and len(TOOL_SOURCES) >= 5
 
 
 @pytest.mark.parametrize("name", MODULES)

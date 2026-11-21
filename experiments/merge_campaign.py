@@ -159,11 +159,16 @@ def report(before, after):
         sorted(f"{l}/{s}" for l, s in PUBLISHED)))
 
 
+# The campaign file on --host: in the results directory of the checkout the host runs its stages from, which is a checkout of this
+# repository (land_stage.REMOTE is the same directory). A file that a pre-switch stage wrote into the old repository is pulled
+# with --remote naming it.
+DEFAULT_REMOTE = "~/repos/humemai/mmdbbench/experiments/results/runs.jsonl"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="mini")
-    ap.add_argument("--remote", default="~/repos/humemai/arcadedb-embedded-python/"
-                                        "benchmarks/experiments/results/runs.jsonl")
+    ap.add_argument("--remote", default=DEFAULT_REMOTE)
     ap.add_argument("--from-file", help="skip scp, merge this local file instead")
     ap.add_argument("--apply", action="store_true",
                     help="write the merge; default is a dry run")

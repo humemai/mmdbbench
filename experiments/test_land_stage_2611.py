@@ -361,3 +361,38 @@ def test_landing_the_same_pull_twice_is_the_same_result(landed_twice):
     assert "nothing new to merge" in d["out2"]
     assert len(d["seen"]) >= 2
     assert json.dumps(d["seen"][-1]["tables"], sort_keys=True) == json.dumps(d["seen"][-2]["tables"], sort_keys=True)
+
+
+# THE LANDING DEFAULTS NAME THIS REPOSITORY (mmdbbench#26, #100). The host's stages write their rows into the results directory of a
+# checkout of this repository; the two defaults that still named the old repository's results directory were flipped when the old
+# repository was archived.
+def _land_remote(env_value):
+    """The REMOTE that a fresh import of land_stage reads (it reads BENCH_LAND_REMOTE once, at import)."""
+    env = {k: v for k, v in os.environ.items() if k != "BENCH_LAND_REMOTE"}
+    if env_value is not None:
+        env["BENCH_LAND_REMOTE"] = env_value
+    out = subprocess.run([sys.executable, "-c", "import land_stage; print(land_stage.REMOTE)"],
+                         cwd=HERE, env=env, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    return out.stdout.strip()
+
+
+def test_land_stage_pulls_from_this_repository_and_the_environment_overrides_it():
+    assert _land_remote(None) == "~/repos/humemai/mmdbbench/experiments/results"
+    assert _land_remote("~/elsewhere/results") == "~/elsewhere/results"
+
+
+def test_merge_campaign_pulls_from_this_repository_and_the_flag_overrides_it(monkeypatch):
+    seen = []
+
+    def fake_run(cmd, *a, **k):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1)     # scp "fails", so main() stops right after naming what it would pull
+
+    monkeypatch.setattr(M.subprocess, "run", fake_run)
+    for argv, want in ((["merge_campaign.py"], "mini:~/repos/humemai/mmdbbench/experiments/results/runs.jsonl"),
+                       (["merge_campaign.py", "--remote", "~/elsewhere/runs.jsonl"], "mini:~/elsewhere/runs.jsonl")):
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit):
+            M.main()
+        assert seen[-1][:2] == ["scp", "-q"] and seen[-1][2] == want

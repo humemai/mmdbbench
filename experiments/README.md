@@ -2,7 +2,7 @@
 
 The code, the pins and the documents behind the published MMDBBench results.
 
-This directory is filled in steps, so that each step is one pull request that a reader can compare with its origin:
+This directory was filled in steps, so that each step was one pull request that a reader could compare with its origin:
 
 1. The method documents and [PROVENANCE.md](PROVENANCE.md), which says where every file came from and which commit of the origin measured which rows.
 2. The harness, copied verbatim at one commit of its origin.
@@ -32,9 +32,9 @@ uv run --no-project --with pytest --with numpy --with pandas --with pyarrow --wi
 
 ## Paths that stay as they are
 
-The benchmark host ran its stages from a checkout of the repository the harness came from, and stages already generated still say so; they are records and are not edited. Two places still name that checkout on purpose and are not changed here:
+The benchmark host ran its stages from a checkout of the old repository, `humemai/arcadedb-embedded-python` (now archived), and stages already generated still say so; they are records and are not edited. The landing defaults name this repository: `BENCH_LAND_REMOTE` in `land_stage.py` and `--remote` in `merge_campaign.py` default to `~/repos/humemai/mmdbbench/experiments/results` (and its `runs.jsonl`) on the host `BENCH_LAND_HOST` (default `mini`). A stage generated before the host switched wrote its rows into `benchmarks/experiments/results` of the old checkout, and landing those rows takes that path in `BENCH_LAND_REMOTE` or `--remote`. Two places are left as they are on purpose:
 
-- the defaults of `BENCH_LAND_REMOTE` in `land_stage.py` and of `--remote` in `merge_campaign.py`, which change on the day the host switches to a checkout of this repository
+- `tools/merge_fourarm_rows.py` and its test: `BENCH_FOURARM_RESULTS` defaults to `benchmarks/experiments/results`, the layout of the four-arm worktrees on the host, which are checkouts of the old repository
 - `queue_lint.py` and its test, which match the host's own stage processes by their command line
 
 The stage scripts that `make_2611_stages.py` and `make_post1_rerun_stages.py` write name a checkout of this repository: `REPO` is `BENCH_STAGE_REPO` at generation, default `$HOME/repos/humemai/mmdbbench`, and the harness is `$REPO/experiments`. The pinned wheel is read from `$BINDINGS_REPO/bindings/python/dist`, with `BINDINGS_REPO` defaulting to the stage's `REPO`. `stage_drafts_2611.sha256` pins the drafts and is regenerated with `python3 test_stage_generator_2611.py --rewrite`.

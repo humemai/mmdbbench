@@ -1,6 +1,8 @@
 # Re-measuring paper cells on a wheels-only post1
 
-The procedure for rerunning the paper's ArcadeDB embedded cells on `26.11.1.post1`, the wheels-only release whose engine is byte-identical to 26.11.1 (DECISIONS #297). The plan and the open question of which cells qualify are CAMPAIGN section 7 row 94 (issue #581). This file is the how. Nothing in it runs by itself, and nothing in it touches the live pass: the rerun writes its own rows file and its own rep state, from its own worktrees.
+> Status on 2026-11-21: this procedure was written for `26.11.1.post1` and ran for `26.11.1.post2` (ingest-only cells) and `26.11.1.post3` (four whole cells). `26.11.1.post4` was released and not rerun, and no further `26.11.1.postN` release is made, so no further rerun is planned. What ran is recorded in CAMPAIGN section 7 row 94; the file and script names keep `post1`, and the text below is the procedure as it was written.
+
+The procedure for rerunning the paper's ArcadeDB embedded cells on `26.11.1.post1`, the wheels-only release whose engine is byte-identical to 26.11.1 (DECISIONS #297). The plan and the record of which cells ran are CAMPAIGN section 7 row 94 (humemai/arcadedb-embedded-python#581). This file is the how. Nothing in it runs by itself, and nothing in it touches the live pass: the rerun writes its own rows file and its own rep state, from its own worktrees.
 
 ## What was built
 

@@ -858,6 +858,10 @@ NOT_PRINTED = [
     (r"^native_isolate_args$",
      "the arguments the native engine's isolate was created with (heap -Xmx, -D settings), the native counterpart of the JVM arguments: a "
      "condition of the cell read from the process (_arcadedb_import.effective_native_args), null on the JVM build, never a column"),
+    (r"^jvm_(input_args|java_version)$",
+     "the JVM an embedded ArcadeDB arm ran in, as the running JVM reports it (bench_common.jvm_fields: the input arguments from "
+     "ManagementFactory.getRuntimeMXBean().getInputArguments() and `java.version`), the JVM counterpart of native_isolate_args: a condition "
+     "of the cell read from the process, null for every arm that runs no JVM in its own process, never a column"),
     (r"^engine_backend$",
      "which ArcadeDB build ran the cell, \"native\" or \"jvm\" (arcadedb.__backend__, bench_common.engine_backend): the identity of an arm beside "
      "engine_version (arm_identity.py). the page prints the build in the arm's label (export_web groups on it), never as a column"),

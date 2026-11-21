@@ -3526,7 +3526,7 @@ def samples_header(row, backend, workload, scale, row_file):
     head.update({k: row[k] for k in SAMPLES_ROW_FIELDS if k in row})
     head["wheel_version"] = cond.get("engine_version")      # the installed distribution; "unknown (...)" for an arm with no wheel
     head.update({k: cond.get(k) for k in ("host", "cpuset", "mem_cap", "heap", "image", "server_image", "engine_commit",
-                                          "native_isolate_args")})
+                                          "native_isolate_args", "jvm_input_args", "jvm_java_version")})
     head["written_utc"] = cond.get("ts_utc")
     return head
 

@@ -362,7 +362,7 @@ def test_a_row_built_by_the_recording_path_carries_the_jpype_the_process_ran(mon
     monkeypatch.setitem(sys.modules, "jpype", _FakeJpype)
     cond = bench_common.run_conditions(lane="l3d", scale="micro", backend="arcadedb_dense_embedded")
     assert cond["jpype_version"] == "9.9.9"
-    assert bench_common.jpype_fields() == {"jpype_version": "9.9.9"}
+    assert bench_common.jpype_fields()["jpype_version"] == "9.9.9"
 
 
 def test_an_arm_that_never_imports_jpype_records_an_empty_value_and_never_imports_it(monkeypatch):
@@ -377,6 +377,81 @@ def test_the_row_reads_the_loaded_module_not_the_pin_and_not_the_package_metadat
         __version__ = "1.8.0"
     monkeypatch.setitem(sys.modules, "jpype", Other)
     assert bench_common.jpype_version() == "1.8.0" != bench_common.JPYPE_PIN
+
+
+# --------------------------------------------------------------------------- the JVM arguments a row records
+ARGS = ["-Darcadedb.txWalFlush=0", "--add-modules=jdk.incubator.vector", "-Xmx4g"]
+
+
+class _FakeJvmJpype:
+    """JPype as it is after start_jvm: JClass hands back the two Java classes the harness asks, with java.lang's own method names."""
+    __version__ = "1.7.2"
+
+    def __init__(self, started=True, args=ARGS, version="25.0.5", boom=None):
+        self._started, self._args, self._version, self._boom = started, args, version, boom
+        self.classes = []
+
+    def isJVMStarted(self):
+        return self._started
+
+    def JClass(self, name):
+        self.classes.append(name)
+        if self._boom:
+            raise self._boom
+        me = self
+
+        class Bean:
+            def getInputArguments(self):
+                return list(me._args)
+
+        class MF:
+            @staticmethod
+            def getRuntimeMXBean():
+                return Bean()
+
+        class Sys:
+            @staticmethod
+            def getProperty(key):
+                assert key == "java.version"
+                return me._version
+        return {"java.lang.management.ManagementFactory": MF, "java.lang.System": Sys}[name]
+
+
+def test_a_row_records_the_arguments_the_running_jvm_received_and_its_java_version(monkeypatch):
+    fake = _FakeJvmJpype()
+    monkeypatch.setitem(sys.modules, "jpype", fake)
+    assert bench_common.jvm_fields() == {"jvm_input_args": " ".join(ARGS), "jvm_java_version": "25.0.5"}
+    assert fake.classes == ["java.lang.management.ManagementFactory", "java.lang.System"]
+    assert bench_common.jpype_fields() == {"jpype_version": "1.7.2", "jvm_input_args": " ".join(ARGS), "jvm_java_version": "25.0.5"}
+    cond = bench_common.run_conditions(lane="l3d", scale="micro", backend="arcadedb_dense_embedded")
+    assert cond["jvm_input_args"] == " ".join(ARGS) and cond["jvm_java_version"] == "25.0.5"
+
+
+def test_a_process_with_no_jvm_records_null_and_never_imports_or_starts_one(monkeypatch):
+    monkeypatch.delitem(sys.modules, "jpype", raising=False)
+    cond = bench_common.run_conditions(lane="l3d", scale="micro", backend="duckdb_dense")
+    assert cond["jvm_input_args"] is None and cond["jvm_java_version"] is None      # present and null, like native_isolate_args on the JVM build
+    assert "jpype" not in sys.modules, "asking which JVM ran must not load JPype"
+    fake = _FakeJvmJpype(started=False)
+    monkeypatch.setitem(sys.modules, "jpype", fake)
+    assert bench_common.jvm_fields() == {"jvm_input_args": None, "jvm_java_version": None}
+    assert fake.classes == [], "a JVM that is not started must not be asked (JClass would start nothing, but it would raise)"
+
+
+def test_a_jvm_that_cannot_be_asked_says_so_and_does_not_stop_the_cell(monkeypatch):
+    monkeypatch.setitem(sys.modules, "jpype", _FakeJvmJpype(boom=RuntimeError("no management module")))
+    got = bench_common.jvm_fields()
+    assert got == {"jvm_input_args": "unreadable (RuntimeError)", "jvm_java_version": "unreadable (RuntimeError)"}
+    monkeypatch.setitem(sys.modules, "jpype", _FakeJpype)          # a stub without isJVMStarted: still not a crash
+    assert bench_common.jvm_fields()["jvm_input_args"] == "unreadable (AttributeError)"
+
+
+def test_the_page_gate_and_the_schema_page_declare_the_jvm_fields():
+    import page_check
+    for field in ("jvm_input_args", "jvm_java_version"):
+        reason = page_check._not_printed_reason(field)
+        assert reason and "native_isolate_args" in reason, field
+        assert f"`{field}`" in (HERE.parent / "docs" / "results-schema.md").read_text(), field
 
 
 def test_a_row_stamped_by_the_real_jpype_carries_its_version(monkeypatch):

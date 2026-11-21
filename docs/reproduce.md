@@ -6,7 +6,7 @@ A reproduction is comparable when it keeps the memory cap, the durability class 
 
 ## What you need
 
-- A Linux machine on x86-64, [`uv`](https://docs.astral.sh/uv/), and a clone of this repository. Python 3.11 to 3.14 is fetched by `uv`.
+- A Linux machine on x86-64, [`uv`](https://docs.astral.sh/uv/), and a clone of this repository. Python 3.11 to 3.14 is fetched by `uv`. The `arcadedb-jvm` wheels for macOS arm64 and Linux arm64 exist too, but the benchmark was only run on Linux x86-64.
 - No Java installation: the `arcadedb-jvm` package bundles its own runtime. Docker is needed only for the cells that run a server or a comparator engine, not for the command below.
 - About 1.1 GB of disk for the SF1 data (a 211 MB download, 888 MB extracted) and a few GB of memory. The published rows used a 4 GB heap inside an 8 GB cap.
 
@@ -44,6 +44,8 @@ export BENCH_GRAPH_SAMPLES_OUT=$PWD/samples.jsonl   # optional: one record per t
 uv run --no-project --with arcadedb-jvm==26.11.1 python l2_graph.py \
   --backend arcadedb_graph_embedded --workload oltp --scale sf1 --out hop3f_sf1.json
 ```
+
+Run the command from `experiments/` inside the clone: the repository's `.python-version` pins Python 3.12, and `uv` finds it from there. From another directory `uv` may pick Python 3.15, where JPype has no wheel and the build fails (seen 2026-11-21: `Could NOT find Java (missing: Java_JAVAC_EXECUTABLE ...)` while building `jpype1`).
 
 This is the command we ran from a clean checkout of this repository. It finished in about 12 minutes on the benchmark host, with exit code 0. There is no switch for one operation: the cell times the point read, the one-hop, two-hop and filtered three-hop reads in turn, and then the writes. The database is created fresh at `/tmp/l2_arcade` (about 11 MB) in every run; delete it when you are done.
 

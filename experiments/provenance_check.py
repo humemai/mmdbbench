@@ -514,8 +514,14 @@ def caption_n():
     # that was never meant to fill it is a false finding.
     _only = {x.strip() for x in os.environ.get("BENCH_ONLY_LANES", "").split(",") if x.strip()}
     if _only:
+        # SAY WHICH LANES THIS DID NOT LOOK AT (humemai/mmdbbench#30). The skip is right, and a bare "skipped" reads as a pass:
+        # name the lanes of the paper's tables that lie outside the scope, so the reader sees what the freeze was not asked
+        # about. Printing only; no check changes strictness, and make_paper_tables keeps its own l4 refusal for a scope that
+        # names l4 (dense_ts_table and make_paper_figures read the same BENCH_ONLY_LANES).
+        _out_of_scope = sorted(set(_MPT.PAPER_SCALES) - _only)
         print(f"  SKIPPED: this landing is scoped to {','.join(sorted(_only))}, so the "
-              f"paper's tables cover lanes the freeze does not hold\n")
+              f"paper's tables cover lanes the freeze does not hold\n"
+              f"  not checked, out of scope: {', '.join(_out_of_scope) or '(none)'}\n")
         return 0
     try:
         sys.path.insert(0, HERE)

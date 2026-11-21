@@ -238,7 +238,7 @@ def test_version_consistency_treats_native_and_jvm_spellings_of_one_release_as_o
 def test_page_check_names_the_new_row_fields_as_conditions_not_columns():
     import re
     import page_check as PC
-    for field in ("engine_backend", "native_isolate_args", "engine_load_ms"):
+    for field in ("engine_backend", "native_isolate_args", "jvm_input_args", "jvm_java_version", "engine_load_ms"):
         assert any(re.match(p, field) for p, _why in PC.NOT_PRINTED), field
 
 

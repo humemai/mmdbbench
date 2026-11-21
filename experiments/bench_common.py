@@ -132,9 +132,35 @@ def jpype_version():
     return str(getattr(mod, "__version__", "") or "") if mod is not None else ""
 
 
+def jvm_fields():
+    """The JVM THIS process started, as the JVM itself reports it: {"jvm_input_args": ..., "jvm_java_version": ...}.
+
+    `jvm_input_args` is the command line the running JVM received, space-joined, from
+    `ManagementFactory.getRuntimeMXBean().getInputArguments()` (the -D settings, -X flags, --add-modules and
+    --add-opens the bindings and this harness passed), not the arguments the harness meant to pass.
+    `jvm_java_version` is `System.getProperty("java.version")` of that JVM. The JVM counterpart of
+    `native_isolate_args`: both are None when the process runs no JVM (a comparator arm, a served ArcadeDB
+    client, the native build, or a JVM not started yet, so stamp it after the arm has run). Never imports JPype
+    or starts a JVM, so asking cannot change what ran. A JVM that cannot be asked records "unreadable (...)",
+    never a guess, and never stops the cell.
+    """
+    out = {"jvm_input_args": None, "jvm_java_version": None}
+    mod = sys.modules.get("jpype")
+    try:
+        if mod is None or not mod.isJVMStarted():
+            return out
+        bean = mod.JClass("java.lang.management.ManagementFactory").getRuntimeMXBean()
+        out["jvm_input_args"] = " ".join(str(a) for a in bean.getInputArguments())
+        out["jvm_java_version"] = str(mod.JClass("java.lang.System").getProperty("java.version"))
+    except Exception as e:
+        out["jvm_input_args"] = out["jvm_java_version"] = f"unreadable ({e.__class__.__name__})"
+    return out
+
+
 def jpype_fields():
-    """What a result row records about JPype: {"jpype_version": ...}. Stamp it after the arm has run."""
-    return {"jpype_version": jpype_version()}
+    """What a result row records about JPype and the JVM it started: {"jpype_version": ..., "jvm_input_args": ..., "jvm_java_version": ...}.
+    Stamp it after the arm has run (the JVM arguments are read from the running JVM, see jvm_fields)."""
+    return {"jpype_version": jpype_version(), **jvm_fields()}
 
 
 def client_path_fields():

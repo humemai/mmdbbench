@@ -5,7 +5,7 @@ that produced it, and keeps the history, so a number can always be traced and a 
 
 !!! note "Status"
     The protocol version is `2026-11`, in development until its first release; the results on the project page are measured with it. The benchmark code is in [`experiments/`](https://github.com/humemai/mmdbbench/tree/main/experiments) of this repository, copied in steps from
-    [humemai/arcadedb-embedded-python](https://github.com/humemai/arcadedb-embedded-python), which is retiring; new work goes here. The live results are on
+    [humemai/arcadedb-embedded-python](https://github.com/humemai/arcadedb-embedded-python), which is archived; the benchmark lives here, and new work goes here. The Python bindings of ArcadeDB are developed in [ArcadeData/arcadedb-python](https://github.com/ArcadeData/arcadedb-python) (`uv add arcadedb`). The live results are on
     the [project page](https://humem.ai/research/mmdbbench); these documents describe how they are produced.
 
 ## Lanes

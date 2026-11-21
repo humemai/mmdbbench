@@ -21,7 +21,7 @@ Engines are compared inside each lane; an engine appears only in the lanes it is
 ## Status
 
 The benchmark code is in [`experiments/`](experiments/): the runner, the engine adapters, the landing and page generators, the gates and the pins. It was copied in steps from
-[humemai/arcadedb-embedded-python](https://github.com/humemai/arcadedb-embedded-python), and [experiments/PROVENANCE.md](experiments/PROVENANCE.md) names the origin commit of every copy. The benchmark host still runs its current stages from that repository, which is retiring. New work and new issues go to this repository. The results are published on the project page above.
+[humemai/arcadedb-embedded-python](https://github.com/humemai/arcadedb-embedded-python), which is now archived, and [experiments/PROVENANCE.md](experiments/PROVENANCE.md) names the origin commit of every copy. The benchmark lives in this repository, and new work and new issues go here. The frozen artifact of the SciPy 2026 paper on the Python bindings, `benchmarks/python-bindings`, stays in the archived repository, which remains the citation target of that paper. The Python bindings of ArcadeDB are developed in [ArcadeData/arcadedb-python](https://github.com/ArcadeData/arcadedb-python) (`uv add arcadedb`). The results are published on the project page above.
 Small self-contained studies that run today live under `experiments/`, starting with the [SQL acceptance corpus](experiments/sql-corpus/README.md).
 The documented protocol version is `2026-11`, in development until its first release.
 

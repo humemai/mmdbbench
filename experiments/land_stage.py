@@ -69,8 +69,11 @@ SITE_PAYLOAD = SITE / "src" / "data" / "dbbench-benchmarks.json"
 SITE_PAGE_SOURCE = "src/lib/dbbench/lanes.ts"
 SITE_FILES = ["src/data/dbbench-benchmarks.json", SITE_PAGE_SOURCE]
 HOST = os.environ.get("BENCH_LAND_HOST", "mini")
-REMOTE = os.environ.get("BENCH_LAND_REMOTE",
-                        "~/repos/humemai/arcadedb-embedded-python/benchmarks/experiments/results")
+# The results directory, on HOST, of the checkout the benchmark host runs its stages from: a checkout of this repository (the
+# stage generators write BENCH_STAGE_REPO, default $HOME/repos/humemai/mmdbbench, and the rows go to its experiments/results).
+# A stage generated before the host switched wrote into the old repository's results directory; landing one of those takes
+# BENCH_LAND_REMOTE naming that directory.
+REMOTE = os.environ.get("BENCH_LAND_REMOTE", "~/repos/humemai/mmdbbench/experiments/results")
 # BENCH_LAND_PY names the interpreter every step runs under, for a rehearsal in a worktree that has no .venv (the default
 # is the repository's own).
 PY = os.environ.get("BENCH_LAND_PY") or str(REPO / ".venv" / "bin" / "python")

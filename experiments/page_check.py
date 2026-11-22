@@ -36,6 +36,7 @@ sys.path.insert(0, str(HERE))
 
 from publish_instrument import PUBLISH_INSTRUMENT, results_dir
 import arm_identity as _AI
+import size_classes as _SC
 
 DEFAULT_JSON = results_dir() / "web_benchmarks.json"
 
@@ -1463,8 +1464,9 @@ def _check_build_pair(payload, rows):
     Fails when (1) an in-process ArcadeDB entry of a split page names no build, (2) the two builds of one arm and size carry different
     version_name values (one release is built from one engine commit, so the commit-bearing name must be equal), (3) one build has a
     row at a size and the other has neither a row nor a declared absence ("not measured") for it, or (4) the frozen rows of the two
-    builds name different engine_version or engine_commit values. A page of one build only (a deliberate BENCH_ENGINE_BACKEND freeze,
-    or rows from before 26.11.1) passes with nothing to compare. Returns the number of findings.
+    builds name different engine_version or engine_commit values inside one size class (humemai/mmdbbench#134: a table may hold two releases,
+    the small rows on one and the large rows on the other, and never two inside one size class). A page of one build only (a deliberate
+    BENCH_ENGINE_BACKEND freeze, or rows from before 26.11.1) passes with nothing to compare. Returns the number of findings.
     """
     bad = 0
     if not _page_split(payload):
@@ -1491,7 +1493,8 @@ def _check_build_pair(payload, rows):
             if len(got) == 2:
                 names = {got[b].get("version_name") for b in _AI.BUILDS}
                 if len(names) > 1:
-                    print(f"  VERSION {t['id']}: {bare} at {size}: the builds name different engines {sorted(map(str, names))}")
+                    print(f"  VERSION {t['id']}: {bare} at {size} ({got['native'].get('size_class') or 'no size class'}): "
+                          f"the builds name different engines {sorted(map(str, names))}")
                     bad += 1
                 continue
             (have,) = got
@@ -1505,7 +1508,7 @@ def _check_build_pair(payload, rows):
                 continue
             print(f"  ONEBUILD {t['id']}: {bare} at {size} has a {_AI.BUILD_NAMES[have]} row and no {_AI.BUILD_NAMES[miss]} row or declaration")
             bad += 1
-    for problem in _AI.pair_problems(rows):
+    for problem in _AI.pair_problems(rows, group=_SC.row_size_class, table_of=_SC.row_table):
         print(f"  COMMIT  {problem}")
         bad += 1
     return bad

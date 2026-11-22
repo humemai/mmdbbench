@@ -12,6 +12,11 @@ wrapper over an engine ("duckpgq:f386a6c on duckdb:1.5.4"), so the check looks
 for each family name anywhere in the string and takes the version beside it,
 rather than splitting on the first space and hoping.
 
+ArcadeDB is read per SIZE CLASS (humemai/mmdbbench#134): until the large sizes are rerun, the small rows of a table are on one release and
+the large rows on another, so two ArcadeDB releases in different size classes pass. Two inside one size class fail, on one table or across
+tables, exactly as before; rows with no `size_class` (an older payload, a table that prints no corpus size) are one group, as before. Every
+other family stays one version across the whole page.
+
 Usage:
     python3 version_consistency_check.py <payload.json> [more.json ...]
 
@@ -106,19 +111,29 @@ _OURS = re.compile(r"^2[0-9]\.[0-9]{1,2}\.[0-9]+$")
 _SUMMARY_TABLES = {"multimodel"}
 
 
-def _rows(node, table=None):
-    """Yield (table_id, backend, version_name) for every row in a payload."""
+def _sized_rows(node, table=None):
+    """Yield (table_id, backend, version_name, size_class) for every row in a payload. The class is the row's own `size_class`, None without one."""
     if isinstance(node, dict):
         tid = node.get("id", table) if "entries" in node else table
         if tid in _SUMMARY_TABLES:
             return
         if isinstance(node.get("version_name"), str):
-            yield tid, node.get("backend", "?"), node["version_name"]
+            yield tid, node.get("backend", "?"), node["version_name"], node.get("size_class")
         for value in node.values():
-            yield from _rows(value, tid)
+            yield from _sized_rows(value, tid)
     elif isinstance(node, list):
         for value in node:
-            yield from _rows(value, table)
+            yield from _sized_rows(value, table)
+
+
+def _rows(node, table=None):
+    """Yield (table_id, backend, version_name) for every row in a payload."""
+    for tid, backend, version, _cls in _sized_rows(node, table):
+        yield tid, backend, version
+
+
+def _is_arcadedb(version):
+    return re.search(r"\barcadedb\b", version.lower()) is not None
 
 
 def _versionless_measurements(node, table=None):
@@ -151,15 +166,16 @@ def _versionless_measurements(node, table=None):
 
 def check(path: str) -> list[str]:
     payload = json.load(open(path))
-    seen: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    # (family, size class) -> version -> where. Only ArcadeDB is split by size class; every other family has the class None.
+    seen: dict[tuple, dict[str, set]] = defaultdict(lambda: defaultdict(set))
     unparsed: list[tuple] = []
-    for table, backend, version in _rows(payload):
+    for table, backend, version, cls in _sized_rows(payload):
         low = version.lower()
         hit = False
         for family in FAMILIES:
             pat = SPELLINGS.get(family, re.escape(family))
             for match in re.finditer(r"\b" + pat + _VER, low):
-                seen[family][match.group(1)].add((table, backend))
+                seen[(family, cls if family == "arcadedb" else None)][match.group(1)].add((table, backend))
                 hit = True
         if not hit:
             unparsed.append((table, backend, version))
@@ -209,7 +225,7 @@ def check(path: str) -> list[str]:
             f"two engines")
 
     # (a) our version on somebody else's row
-    for family, versions in sorted(seen.items()):
+    for (family, _cls), versions in sorted(seen.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
         if family == "arcadedb":
             continue
         for version, where in sorted(versions.items()):
@@ -221,10 +237,15 @@ def check(path: str) -> list[str]:
                     f"number, not {family}'s: {rows}")
 
     # (b) one backend label, two spellings of its version
+    # An ArcadeDB backend label is read per size class (#134): its small rows and its large rows may name two releases.
     spellings = defaultdict(set)
-    for table, backend, version in _rows(payload):
-        spellings[backend].add(version.strip())
-    for backend, values in sorted(spellings.items()):
+    spelled_in = defaultdict(set)    # (backend, class) -> tables
+    for table, backend, version, cls in _sized_rows(payload):
+        key = (backend, cls if _is_arcadedb(version) else None)
+        spellings[key].add(version.strip())
+        spelled_in[key].add(str(table))
+    for (backend, cls), values in sorted(spellings.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
+        who = backend if cls is None else f"{backend} in the {cls} size (table {', '.join(sorted(spelled_in[(backend, cls)]))})"
         # AN OPTIONAL COMPONENT IS NOT A SECOND ENGINE. MongoDB's document
         # arms run mongod alone and its vector arms run mongod beside mongot,
         # so the rows honestly read "mongodb 8.2.12" and "mongodb 8.2.12 +
@@ -242,23 +263,23 @@ def check(path: str) -> list[str]:
         norm = {re.sub(r"\bv(?=[0-9])", "", v) for v in values}
         if len(values) > 1 and len(norm) == 1:
             failures.append(
-                f"{backend} spells one version two ways across tables "
+                f"{who} spells one version two ways across tables "
                 f"({', '.join(sorted(values))}); a string comparison across "
                 f"tables cannot see they agree")
         elif len(values) > 1:
             failures.append(
-                f"{backend} publishes {len(values)} different version strings: "
+                f"{who} publishes {len(values)} different version strings: "
                 f"{', '.join(sorted(values))}")
 
     # (c) one engine family, two versions
-    for family, versions in sorted(seen.items()):
+    for (family, cls), versions in sorted(seen.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
         if len(versions) < 2:
             continue
         if family in ALLOWED_SPLITS:
             print(f"  ALLOWED {family}: {', '.join(sorted(versions))}"
                   f" -- {ALLOWED_SPLITS[family]}")
             continue
-        lines = [f"{family} wears {len(versions)} versions on one page:"]
+        lines = [f"{family} wears {len(versions)} versions {'in the ' + cls + ' size ' if cls else ''}on one page:"]
         for version, where in sorted(versions.items()):
             for table, backend in sorted(where, key=lambda w: (str(w[0]), w[1])):
                 lines.append(f"      {version:12} {backend:34} table {table}")

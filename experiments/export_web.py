@@ -47,6 +47,7 @@ RESULTS = _PI.results_dir()
 from runner import BACKENDS, MEM_BY_SCALE, HEAP_BY_SCALE  # noqa: E402  (path set above)
 import bench_common  # noqa: E402
 import arm_identity as _AI  # noqa: E402
+import size_classes as _SC  # noqa: E402
 import overlay_merge as _OM  # noqa: E402  (which overlay file a table reads when the name carries the client, humemai/mmdbbench#62)
 import engine_pin as _EP  # noqa: E402
 
@@ -1002,36 +1003,8 @@ def scale_label(lane: str, scale: str) -> str:
 #   - The restart table borrows each model's two sizes, so its classes are the ones of the lanes it borrows from.
 # NOT runner.LARGE_SCALES: that tuple is the stage generator's order of work (which cells run last), and it lists `sf1full` beside the two
 # largest corpora because the cell is long. What a reader calls small and large is this table.
-SIZE_CLASSES = ("small", "large", "extra")
-SIZE_CLASS = {
-    ("l3s", "tiny"): "extra",
-    ("l3s", "small"): "small",
-    ("l3s", "medium"): "large",
-    ("l3d", "small"): "small",
-    ("l3d", "deep10m"): "large",
-    ("e4", "e2"): "small",
-    ("l2", "sf1"): "small",
-    ("l2", "sf10"): "large",
-    ("l2", "sf1full"): "small",
-    ("l1tpc", "tpch1"): "small",
-    ("l1tpc", "tpch10"): "large",
-    ("e2", "e2"): "small",
-    ("e2", "e2_500k"): "large",
-    ("l4", "ts100"): "small",
-    ("l4", "ts1000"): "large",
-    ("lifecycle", "lc10k"): "extra",
-    ("lifecycle", "lc100k"): "extra",
-    ("lifecycle", "lc1m"): "small",
-    ("lifecycle", "lc10m"): "large",
-    ("restart", "tpch1"): "small",
-    ("restart", "tpch10"): "large",
-    ("restart", "sf1"): "small",
-    ("restart", "sf10"): "large",
-    ("restart", "small"): "small",
-    ("restart", "deep10m"): "large",
-    ("restart", "ts100"): "small",
-    ("restart", "ts1000"): "large",
-}
+SIZE_CLASSES = _SC.SIZE_CLASSES
+SIZE_CLASS = _SC.SIZE_CLASS    # the table itself is in size_classes.py, so the gates that read frozen rows can import it without loading the exporter
 # A small size whose large size has no id in the harness yet, and what the page calls that large size. It is planned and has never run.
 PLANNED_LARGE = {
     ("l2", "sf1full"): "the full SF10 network",
@@ -2761,7 +2734,7 @@ def _native_server_equiv_note(tables, rows=None):
         files, lines = entry.get("files_changed"), entry.get("version_string_lines")
         if not (isinstance(files, int) and isinstance(lines, int) and entry.get("non_version_lines") == 0):
             raise SystemExit(f"REFUSING: the engine_commit_equiv.json entry for {release} does not state a version-strings-only difference")
-        text = (f"The ArcadeDB {release} native server image reports engine commit {short_eq}, and every other ArcadeDB build on the page (the JVM image, "
+        text = (f"The ArcadeDB {release} native server image reports engine commit {short_eq}, and every other ArcadeDB {release} build on the page (the JVM image, "
                 f"the jars, and both Python wheels) is commit {short_pin}: upstream builds the native server image at the release tag, one commit after "
                 f"{short_pin}. The difference between the two commits is {files:,} files and {lines:,} changed lines, every one "
                 f"a version string and none of them source, so the rows keep {short_pin} as their engine commit.")
@@ -5578,17 +5551,7 @@ try:
 except Exception:  # noqa: BLE001 - the page must still build without it
     LANES_RUNNER = {}
 
-_TABLE_LANE = {
-    "docs_oltp": ("l1tpc", "oltp"), "docs_olap": ("l1tpc", "olap"),
-    "l2": ("l2", "oltp"), "l2olap": ("l2", "olap"),
-    "l3d": ("l3d", None), "l3s": ("l3s", None), "l4": ("l4", None),
-    "e2": ("e2", "hybrid"), "e2atom": ("e2", "atomicity"),
-    # The lifecycle table was not here, so a lifecycle cell that exceeded its
-    # budget would have left an engine off the table with no note, and the
-    # coverage gate had no lane to read its fields from.
-    "lifecycle": ("lifecycle", None),
-    "restart": ("restart", "restart"),
-}
+_TABLE_LANE = _SC.TABLE_LANE   # table id -> (lane, workload): in size_classes.py, beside SIZE_CLASS
 
 
 def _table_scales(table_id):
@@ -7826,8 +7789,9 @@ def main() -> int:
     # TWO ARCADEDB BUILDS, TWO ARMS (26.11.1): native and jvm rows of a release share engine_version and arm names, so the tables
     # group on the build (_arm_build) and label it; no cell is a median over both. BENCH_ENGINE_BACKEND freezes one build on purpose.
     rows = _AI.select_build(rows)
-    # ONE ENGINE COMMIT FOR BOTH BUILDS: a freeze whose native and JVM rows name two engines is refused, not printed side by side.
-    _bad = _AI.pair_problems(rows)
+    # ONE ENGINE COMMIT FOR BOTH BUILDS: a freeze whose native and JVM rows name two engines is refused, not printed side by side. The unit is the
+    # size class (humemai/mmdbbench#134): the small rows may be on one release and the large rows on another, never two inside one size class.
+    _bad = _AI.pair_problems(rows, group=_SC.row_size_class, table_of=_SC.row_table)
     if _bad:
         raise SystemExit("REFUSING: " + "; ".join(_bad))
     global _FROZEN_ROWS, _SPLIT

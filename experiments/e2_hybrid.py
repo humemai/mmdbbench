@@ -2,8 +2,10 @@
 """E2: unified-ACID hybrid transaction lane.
 
 The thesis experiment: one operation = vector top-k -> graph traversal ->
-document update, executed per-op as ONE transaction where the engine can
-express it. Backends:
+record update, executed per-op as ONE transaction where the engine can
+express it. The record update is `views = views + 1` on each touched product;
+the record is a document, a table row, or a node's properties, depending on
+the engine, and each adapter says which in MODELS (mmdbbench#47). Backends:
 
   arcadedb_e2            embedded, one ACID transaction per op
   surrealdb_e2           embedded (in-process Rust), one transaction per op
@@ -234,6 +236,11 @@ class ArcadeE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): the vector search, the
     # hop, and the update, all inside one transaction.
     TXN_SCOPE = "whole"
+    # HOW THE ENGINE GETS TO THE THREE MODELS (mmdbbench#47), declared per adapter and printed per row, not equalised.
+    # `vector` and `graph`: "built in", "extension (<name>)", "separate process (<name>)", "separate product (<name>)", or
+    # "none (<what runs instead>)". `record` is what holds the `views` counter that the third step updates: "document",
+    # "table row", or "node properties". Here Product is a vertex type, and its record is updated through SQL like any document.
+    MODELS = {"vector": "built in", "graph": "built in", "record": "document"}
 
     def __init__(self):
         import _arcadedb_import
@@ -597,6 +604,7 @@ class SurrealE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): the two reads run first
     # and only the update is wrapped in a transaction.
     TXN_SCOPE = "update"
+    MODELS = {"vector": "built in", "graph": "built in", "record": "document"}
     URL = "surrealkv:///tmp/e2_surrealkv"
     INDEX_DDL = f"DEFINE INDEX pe ON product FIELDS embedding HNSW DIMENSION {DIM} DIST EUCLIDEAN"
     # The embedded core (2.3.10) maintains the index during the insert, so the
@@ -771,6 +779,7 @@ class ArangoE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): the two reads run first
     # and only the update is wrapped in a transaction.
     TXN_SCOPE = "update"
+    MODELS = {"vector": "built in", "graph": "built in", "record": "document"}
 
     def __init__(self):
         self.cl, self.db, self.version = arango_common.connect()
@@ -924,6 +933,7 @@ class MongoE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): the two reads run first
     # and only the update is wrapped in a transaction.
     TXN_SCOPE = "update"
+    MODELS = {"vector": "separate process (mongot)", "graph": "none (the hop is a $lookup join)", "record": "document"}
 
     def __init__(self):
         self.cl, self.db, mongod = mongo_common.connect(auth=True)
@@ -1055,6 +1065,7 @@ class PgAgeE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): the vector search, the
     # hop, and the update, all inside one transaction.
     TXN_SCOPE = "whole"
+    MODELS = {"vector": "extension (pgvector)", "graph": "extension (AGE)", "record": "table row"}
 
     def __init__(self):
         # WHICH #174 CLIENT PATH THIS ARM RAN (issue #261): stamped so a row says it, not only the code.
@@ -1220,6 +1231,7 @@ class Neo4jE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): the vector search, the
     # hop, and the update, all inside one transaction.
     TXN_SCOPE = "whole"
+    MODELS = {"vector": "built in", "graph": "built in", "record": "node properties"}
 
     def __init__(self):
         from neo4j import GraphDatabase
@@ -1362,6 +1374,7 @@ class MemgraphE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): the vector search, the
     # hop, and the update, all inside one transaction.
     TXN_SCOPE = "whole"
+    MODELS = {"vector": "built in", "graph": "built in", "record": "node properties"}
     FILTER_MODE = ("pre-filter: WHERE p.pid IN $ids then ORDER BY "
                    "vector_search.cosine_similarity (L2 order on the lane's unit vectors)")
 
@@ -1497,6 +1510,7 @@ class LadybugE2:
     relaxed (fsync at commit; the named exception, DECISIONS #90)."""
     name = "ladybug_e2"
     TXN_SCOPE = "whole"
+    MODELS = {"vector": "extension (vector)", "graph": "built in", "record": "node properties"}
     FILTER_MODE = "pre-filter: WHERE p.pid IN $ids then ORDER BY array_distance (L2)"
     PATH = "/tmp/e2_ladybug"
 
@@ -1645,6 +1659,7 @@ class DuckE2:
     fsync at commit with no knob (DECISIONS #90)."""
     name = "duckdb_e2"
     TXN_SCOPE = "whole"
+    MODELS = {"vector": "extension (vss)", "graph": "extension (DuckPGQ)", "record": "table row"}
     FILTER_MODE = "pre-filter: WHERE pid IN (bound list) then ORDER BY array_distance (L2)"
     PATH = "/tmp/e2_duck.db"
 
@@ -1780,6 +1795,7 @@ class ComposedE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): nothing spans the two
     # systems, which is what this arm exists to show.
     TXN_SCOPE = "none"
+    MODELS = {"vector": "separate product (Qdrant)", "graph": "separate product (Neo4j)", "record": "node properties"}
 
     def __init__(self):
         from qdrant_client import QdrantClient
@@ -2013,6 +2029,7 @@ class ComposedEmbeddedE2:
     # WHAT THE TIMED TRANSACTION HOLDS (DECISIONS #118): nothing spans the
     # three stores, which is what this arm exists to show.
     TXN_SCOPE = "none"
+    MODELS = {"vector": "separate product (LanceDB)", "graph": "separate product (LadybugDB)", "record": "table row"}
     VIEW_SUM_KEY = "sqlite_view_sum"
     # The vector index, matched to the table's HNSW settings and to the dense
     # lane's LanceDB fp32 arm (`lancedb_dense_fp32`): IVF_HNSW_FLAT, m 16,

@@ -2380,6 +2380,12 @@ def _beam_extras(entry, rs):
     entry["beam_curve"] = {"kind": kind, "points": curve}
 
 
+# THE THIRD STEP OF THE CROSS-MODEL OPERATION, BY ITS NAME ON THE PAGE (mmdbbench#47). The harness raises the `views` counter of each touched
+# product (e2_hybrid.py). That record is a document on some engines, a table row on others and a graph node's properties on others, so the
+# page calls the step a record update and each row says what its engine holds (`models`, from the adapter's MODELS declaration).
+MODEL_STEP = "record update (a document, a table row, or a node's properties)"
+
+
 LANES = {
     "l3s": {
         "title": "Sparse vector search",
@@ -2485,7 +2491,7 @@ LANES = {
     },
     "e2atom": {
         "title": "Cross-model transaction: what survives a crash",
-        "dataset": "The same vector-graph-document operation, killed mid-way, then inspected",
+        "dataset": "The same vector, graph and record-update operation, killed mid-way, then inspected",
         "lane_source": "e2",
         "only_workload": "atomicity",
         # No `crashes raised` column: the kill always lands, so it said nothing (DECISIONS #73).
@@ -2511,7 +2517,7 @@ LANES = {
     },
     "e2": {
         "title": "Cross-model transaction",
-        "dataset": "Vector hit to graph traversal to document update, in one transaction",
+        "dataset": f"Vector hit to graph traversal to {MODEL_STEP}, in one transaction",
         "metrics": [("hybrid_p50_ms", "p50 ms"), ("hybrid_p99_ms", "p99 ms"),
                     (_rate(("n_products", "n_edges"), "build_s"), "ingest+index vertices+edges/s"),
                     ("build_s", "ingest+index total s"),
@@ -5022,6 +5028,91 @@ def _txn_scope_note(table):
         *whole, *upd, *none_, *sorted(refuses))
 
 
+def _models_of(backend_key):
+    """How one cross-model arm gets to the three models, as the row's tag (mmdbbench#47).
+
+    Read from the adapter's own `MODELS` declaration (e2_hybrid.py), the way
+    `_txn_scope_note` reads `TXN_SCOPE`, so the tag cannot drift from the code
+    that ran. None for an arm that declares nothing.
+    """
+    try:
+        import e2_hybrid as _e2
+    except Exception:  # noqa: BLE001 - the page must still build without it
+        return None
+    decl = getattr(_e2.BACKENDS.get(str(backend_key)), "MODELS", None)
+    if not decl:
+        return None
+    return "; ".join(f"{k}: {decl[k]}" for k in ("vector", "graph", "record"))
+
+
+def _tag_models(table):
+    """Put the tag on every row of the two cross-model tables as `models`."""
+    if table.get("id") not in ("e2", "e2atom"):
+        return
+    for e in table.get("entries") or []:
+        tag = _models_of(e.get("backend_key"))
+        if tag:
+            e["models"] = tag
+
+
+def _models_note(table):
+    """Name the record-update step and say which rows get to the models which way (mmdbbench#47).
+
+    A graph engine that keeps the record as node properties passes the third
+    step, and so does a relational engine with two extensions. The rows stay:
+    the measured operation is the same for every one of them. What the page
+    owes the reader is a plain statement of what each row provides, grouped
+    here and carried per row in `models`.
+    """
+    if table.get("id") != "e2":
+        return None
+    try:
+        import e2_hybrid as _e2
+    except Exception:  # noqa: BLE001 - the page must still build without it
+        return None
+    built, ext, node, composed, other = set(), set(), set(), set(), {}
+    for e in table.get("entries", []):
+        bk = str(e.get("backend_key"))
+        decl = getattr(_e2.BACKENDS.get(bk), "MODELS", None)
+        if not decl:
+            continue
+        name = display_name(bk)
+        how = (decl["vector"], decl["graph"])
+        if any(h.startswith("separate product") for h in how):
+            composed.add(name)
+            continue
+        if decl["record"] == "node properties":
+            node.add(name)
+        if any(h.startswith("extension") for h in how):
+            ext.add(name)
+        elif all(h == "built in" for h in how):
+            if decl["record"] != "node properties":
+                built.add(name)
+        else:
+            other[name] = decl
+    if not (built or ext or node or composed or other):
+        return None
+
+    def _s(names, one, many):
+        return f"{_join_and(sorted(names))} {one if len(names) == 1 else many}"
+    parts = ["The last step is a record update: it raises the views counter of each touched product by one, and that record is "
+             "a document, a table row, or a node's properties, depending on the engine."]
+    if built:
+        parts.append(_s(built, "has", "have") + " the vector index, the graph, and the document built in.")
+    if ext:
+        parts.append(_s(ext, "reaches", "reach") + " the vector search, the graph, or both through an extension.")
+    if node:
+        parts.append(_s(node, "keeps", "keep") + " the record as the properties of a graph node.")
+    if composed:
+        parts.append(_s(composed, "is a stack", "are stacks") + " of separate products.")
+    for name in sorted(other):
+        d = other[name]
+        parts.append(f"For {name}, vector search: {d['vector']}; graph: {d['graph']}; record: {d['record']}.")
+    values = sorted(built | ext | node | composed | set(other))
+    values += [d[k] for _n, d in sorted(other.items()) for k in ("vector", "graph", "record")]
+    return _gen(" ".join(parts), *values)
+
+
 def _filtered_modes():
     """backend display name -> the `filtered_mode` its rows recorded."""
     out = {}
@@ -5242,6 +5333,9 @@ def _oct_conditions(table):
     ts = _txn_scope_note(table)
     if ts:
         head.append(ts)
+    mo = _models_note(table)
+    if mo:
+        head.append(mo)
     if tid == "l3d":
         split = _ingest_split_note(table)
         if split:
@@ -7285,6 +7379,7 @@ def _finish_table(table: dict) -> dict:
                 # the native build (the default install) first, its JVM twin right after it
                 {"native": 0, "jvm": 1}.get(e.get("build"), 2))
     table["entries"] = sorted(entries, key=key)
+    _tag_models(table)
     # THE HEAP BESIDE THE PEAK (DECISIONS #116 item 7, decided: the
     # memory column stays the peak an operator has to provision, with the heap
     # printed beside it for JVM engines). A JVM engine's peak sits close to the

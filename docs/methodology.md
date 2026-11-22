@@ -89,6 +89,28 @@ Elastic recommends a heap of no more than 50% of the node's memory and below the
 - **Memory.** The three containers share the cell's one memory cap, as every other engine's server side has it. etcd takes 512m and MinIO 1g out of the cap, the Milvus container gets the rest, and the split is recorded on the row. The row's memory, CPU, I/O and disk figures are the three containers added together.
 - **Index parameters.** HNSW `M` 16, `efConstruction` 100 and `ef` 100, the HNSW_SQ SQ8 arm, and the sparse inverted index are unchanged. Equal `ef` is not equal recall, so every row carries recall@10 beside latency, and the dense lane's beam sweep reports latency at matched recall.
 
+## The cross-model transaction
+
+The cross-model lane runs one operation per transaction: a vector search, a one-hop graph expansion from the best hit, and a record update. The record update raises a counter (`views`) on each product the operation touched. That record is a document, a table row, or a node's properties, depending on the engine, so the step is called a record update and not a document update. The operation and the checked answer are the same for every row.
+
+The engines do not get to the three models the same way. Each row of the cross-model tables carries the line below as its `models` field, read from the engine's adapter in the harness (`MODELS` in `experiments/e2_hybrid.py`):
+
+| Engine | Vector search | Graph | Record |
+|---|---|---|---|
+| ArcadeDB (embedded and server) | `built in` | `built in` | `document` |
+| SurrealDB (embedded and server) | `built in` | `built in` | `document` |
+| ArangoDB | `built in` | `built in` | `document` |
+| MongoDB | `separate process (mongot)` | `none (the hop is a $lookup join)` | `document` |
+| PostgreSQL + pgvector + AGE | `extension (pgvector)` | `extension (AGE)` | `table row` |
+| Neo4j | `built in` | `built in` | `node properties` |
+| Memgraph | `built in` | `built in` | `node properties` |
+| LadybugDB | `extension (vector)` | `built in` | `node properties` |
+| DuckDB | `extension (vss)` | `extension (DuckPGQ)` | `table row` |
+| Qdrant + Neo4j | `separate product (Qdrant)` | `separate product (Neo4j)` | `node properties` |
+| SQLite + LanceDB + LadybugDB | `separate product (LanceDB)` | `separate product (LadybugDB)` | `table row` |
+
+`built in` means the engine has it without anything added. `extension` is an extension loaded into the engine. `separate process` is a second process beside the server (MongoDB Search). `separate product` is another database, joined by glue code with no transaction across the products. `node properties` means the record is the properties of a graph node. These rows stay on the table because the measured operation is the same; the line says what each engine provides.
+
 ## Reading a result
 
 A bar or a number is only meaningful with its footnotes: the category (in-process or server), the durability class, the scale, the version, and whether any query in the cell was censored.

@@ -19,6 +19,7 @@ This directory was filled in steps, so that each step was one pull request that 
 | [PUBLISHING.md](PUBLISHING.md) | how the frozen rows get onto the project page |
 | [READING-RESULTS.md](READING-RESULTS.md) | how to read the results without misreading them |
 | [QUANTIZATION.md](QUANTIZATION.md) | what each vector engine ships and which quantization arms the page runs |
+| [RENAME-MAP.md](RENAME-MAP.md) | every lane, table, size and backend id as it is today, the name proposed for it, and where it is written; nothing is renamed yet |
 
 ## Running the tests
 

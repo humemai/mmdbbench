@@ -350,8 +350,8 @@ def _dense_overlay_recall(arm="fp32", scale="deep10m"):
 
 
 def _glob_json(root, pattern):
-    import glob as _glob
-    return _glob.glob(os.path.join(root, pattern))
+    import overlay_merge as _OM   # the lean client's file under the plain name (humemai/mmdbbench#62)
+    return _OM.files(root, pattern)
 
 
 def _dense_overlay_p50(srv=False, arm="fp32", warm=True, scale="deep10m"):
@@ -382,7 +382,6 @@ def _dense_overlay_p50(srv=False, arm="fp32", warm=True, scale="deep10m"):
     Whenever a figure compares engines, pass warm= explicitly on both sides and
     let _check_f4_protocol prove they match.
     """
-    import glob as _glob
     import json as _json
     import make_paper_tables as _T
     # Five independent builds, so warm pools every warm pass of every build
@@ -395,7 +394,7 @@ def _dense_overlay_p50(srv=False, arm="fp32", warm=True, scale="deep10m"):
     # read from anywhere else is a different experiment wearing the same axis.
     name = f"mp_{'arcsrv' if srv else arm}_b*.json"
     root = _T.dense_mp_dir() if scale == "deep10m" else _T.dense_mp_small_dir()
-    hits = sorted(_glob.glob(os.path.join(root, name)))
+    hits = sorted(_glob_json(root, name))
     if not hits:
         return None
     vals = []
@@ -622,7 +621,8 @@ def _sparse_overlay_pass(tier, arm, warm):
     pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
     if not pin:
         raise SystemExit("BENCH_ENGINE_COMMIT is unset: the sparse overlay is pinned only")
-    fp = os.path.join(_T.RESULTS, f"sparse_mp_{pin}", f"sp_{arm}_{tier}.json")
+    import overlay_merge as _OM
+    fp = _OM.pick(os.path.join(_T.RESULTS, f"sparse_mp_{pin}"), f"sp_{arm}_{tier}.json")
     if not os.path.isfile(fp):
         return None
     passes = _json.load(open(fp, encoding="utf-8"))

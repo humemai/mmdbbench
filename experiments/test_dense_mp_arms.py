@@ -79,6 +79,20 @@ def test_a_named_arm_with_fewer_builds_than_the_landing_holds_still_refuses():
 
 
 @_isolated
+def test_a_served_arm_is_complete_with_its_lean_named_files_and_missing_with_only_another_clients():
+    """humemai/mmdbbench#62: the served ArcadeDB arm's files carry the client; the resolver counts the lean client's and no other."""
+    d, ov = _tree(("fp32", "arcsrv"))
+    for b in (1, 2, 3):
+        os.rename(os.path.join(ov, f"mp_arcsrv_b{b}.json"), os.path.join(ov, f"mp_arcsrv_clientlean_b{b}.json"))
+        open(os.path.join(ov, f"mp_arcsrv_clientofficial_b{b}.json"), "w").write("{}")
+    M.RESULTS = d
+    _env(BENCH_MP_ARMS="fp32,arcsrv")
+    assert M.dense_mp_dir() == ov
+    os.remove(os.path.join(ov, "mp_arcsrv_clientlean_b3.json"))               # the vendor driver's rep 3 does not stand in for it
+    _refuses(M.dense_mp_dir, "mp_arcsrv_b3.json", "1 of 6 files missing")
+
+
+@_isolated
 def test_the_one_megabyte_overlay_reads_the_same_list():
     d, _ = _tree(("fp32", "arcsrv"))
     os.rename(os.path.join(d, f"dense_mp5_{PIN}"), os.path.join(d, f"dense_mp5_small_{PIN}"))

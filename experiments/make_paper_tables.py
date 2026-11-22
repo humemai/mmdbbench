@@ -94,6 +94,7 @@ def _commit_matches(row_commit):
 HERE = os.path.dirname(os.path.abspath(__file__))
 import publish_instrument as _PI
 import arm_identity as _AI
+import overlay_merge as _OM
 import io_stat_correction as _IOC
 RESULTS = str(_PI.results_dir())
 
@@ -1019,7 +1020,7 @@ def _optional_arms_present(cand, label, arms=MP_ARMS_OPTIONAL):
     n = mp_builds()
     present = []
     for a in arms:
-        have = [b for b in range(1, n + 1) if os.path.isfile(os.path.join(cand, f"mp_{a}_b{b}.json"))]
+        have = [b for b in range(1, n + 1) if os.path.isfile(_OM.pick(cand, f"mp_{a}_b{b}.json"))]
         if len(have) == n:
             present.append(a)
         elif have:
@@ -1053,7 +1054,7 @@ def _refuse_partial_native(cand, label, arms=MP_INPROCESS_ARMS, prefix="mp"):
     and publishing it beside a complete JVM overlay would print a native arm built from fewer builds than its twin."""
     n = mp_builds()
     arms = tuple(a for a in arms if a in mp_required(MP_ARMS))     # only the arms this landing holds have a twin to be complete
-    have = {a: [b for b in range(1, n + 1) if os.path.isfile(os.path.join(cand, f"{prefix}_{a}_native_b{b}.json"))]
+    have = {a: [b for b in range(1, n + 1) if os.path.isfile(_OM.pick(cand, f"{prefix}_{a}_native_b{b}.json"))]
             for a in arms}
     if any(have.values()) and any(len(v) != n for v in have.values()):
         part = {a: len(v) for a, v in have.items() if len(v) != n}
@@ -1088,7 +1089,7 @@ def dense_mp_dir():
         return cand
     required = mp_required(MP_ARMS)
     missing = [f"mp_{a}_b{b}.json" for a in required for b in range(1, n + 1)
-               if not os.path.isfile(os.path.join(cand, f"mp_{a}_b{b}.json"))]
+               if not os.path.isfile(_OM.pick(cand, f"mp_{a}_b{b}.json"))]
     if missing:
         raise SystemExit(f"dense_mp5_{pin}: {len(missing)} of {len(required) * n} files missing "
                          f"(e.g. {missing[0]}) at {n} builds per arm (BENCH_MP_BUILDS, default {MP_BUILDS_DEFAULT}); no fallback, re-run the arm")
@@ -1109,7 +1110,7 @@ def dense_mp_small_dir():
         return cand
     required = mp_required(MP_ARMS_SMALL)
     missing = [f"mp_{a}_b{b}.json" for a in required for b in range(1, n + 1)
-               if not os.path.isfile(os.path.join(cand, f"mp_{a}_b{b}.json"))]
+               if not os.path.isfile(_OM.pick(cand, f"mp_{a}_b{b}.json"))]
     if missing:
         raise SystemExit(f"dense_mp5_small_{pin}: {len(missing)} of {len(required) * n} files missing "
                          f"(e.g. {missing[0]}) at {n} builds per arm (BENCH_MP_BUILDS, default {MP_BUILDS_DEFAULT}); no fallback, re-run the arm")
@@ -1130,7 +1131,6 @@ def _dense_multipass():
 
     Returns [(label, build_s, cold_p50, warm_cell, cold_p99, recall)].
     """
-    import glob
     # FIVE INDEPENDENT BUILDS PER ARM, not one build read five times.
     #
     # dense_mp_2681 held ONE file per arm: one build followed by five query
@@ -1146,8 +1146,9 @@ def _dense_multipass():
     # could not decide whether an 85% cold-latency move between two engine
     # builds was a regression or noise. It is now five, one per build.
     stats = {}
-    _both_builds = bool(glob.glob(os.path.join(dense_mp_dir(), "mp_*_native_b*.json"))) and not _AI.wanted_build()
-    for fp in sorted(glob.glob(os.path.join(dense_mp_dir(), "mp_*_b*.json"))):
+    # _OM.files: a served ArcadeDB arm's file is named for its client since humemai/mmdbbench#62; the lean client's file is read under the plain name
+    _both_builds = bool(_OM.files(dense_mp_dir(), "mp_*_native_b*.json")) and not _AI.wanted_build()
+    for fp in _OM.files(dense_mp_dir(), "mp_*_b*.json"):
         try:
             passes = json.load(open(fp))
         except Exception:

@@ -47,6 +47,7 @@ RESULTS = _PI.results_dir()
 from runner import BACKENDS, MEM_BY_SCALE, HEAP_BY_SCALE  # noqa: E402  (path set above)
 import bench_common  # noqa: E402
 import arm_identity as _AI  # noqa: E402
+import overlay_merge as _OM  # noqa: E402  (which overlay file a table reads when the name carries the client, humemai/mmdbbench#62)
 import engine_pin as _EP  # noqa: E402
 
 # THE PQ ARMS CAN HAVE ROWS EVEN WHEN THEY ARE NOT MEASURING. runner registers them only under BENCH_DENSE_PQ=1 (a stage
@@ -183,7 +184,7 @@ def _pinned_dir(name, expected=None):
     if not cand.is_dir():
         return cand
     if expected:
-        missing = [f for f in expected if not (cand / f).is_file()]
+        missing = [f for f in expected if not os.path.isfile(_OM.pick(cand, f))]
         if missing:
             raise SystemExit(f"{cand.name} has {len(missing)} of {len(expected)} files missing "
                              f"({', '.join(missing[:4])}{' ...' if len(missing) > 4 else ''}); no fallback")
@@ -1117,10 +1118,13 @@ DENSE_10M_ARMS = [
 def _overlay_files_by_build(root, stem, tail, backend_key):
     """[(build, files)] for one overlay arm: "" for a comparator or a served arm and for a page that names no build, else "native" and
     "jvm" read from the first pass of each file (arm_identity.build_of; an unstamped ArcadeDB file is the JVM build). The native
-    files carry `_native` after the stem; a glob on the plain stem never matches them."""
-    names = sorted(root.glob(f"{stem}{tail}")) + sorted(root.glob(f"{stem}_native{tail}"))
+    files carry `_native` after the stem; a glob on the plain stem never matches them. A served ArcadeDB arm's files carry the client
+    after the arm since humemai/mmdbbench#62; `_OM.files` matches the plain name and returns the lean client's file, or the plain file of
+    the 26.11.1 campaign when no file is named for a client."""
+    plain = [Path(p) for p in _OM.files(root, f"{stem}{tail}")]
+    names = plain + [Path(p) for p in _OM.files(root, f"{stem}_native{tail}")]
     if not (_SPLIT and _AI.built({"backend": backend_key})):
-        return [("", sorted(root.glob(f"{stem}{tail}")))] if names else []
+        return [("", plain)] if names else []
     got = {}
     for fp in names:
         try:
@@ -5148,12 +5152,14 @@ _OTHER_CLIENT_STAMP = re.compile(r'"arcadedb_http_client"\s*:\s*"[^"]*arcadedb[-
 
 def _refuse_other_client_overlays():
     """The multipass overlays (dense_mp5, sparse_mp) are read by the page without the freeze, so the rule is held here: an
-    overlay file whose rows name another client refuses the page. A served arm's twin job writes the same file name as the
-    other client's job, so the second job to finish wins; this catches the case where it was not the benchmark's own."""
+    overlay file whose rows name another client refuses the page. A served arm's twin job of the 26.11.1 campaign wrote the same
+    file name as the other client's job, so the second job to finish won; this catches the case where it was not the benchmark's
+    own. Since humemai/mmdbbench#62 the name carries the client, and the files checked are the ones a table reads (`_OM.files`): a
+    file named for the vendor driver or the PostgreSQL wire is read by no table, a file named for the lean client is still checked."""
     pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
     bad = []
     for d in sorted(RESULTS.glob(f"*_{pin}")) if pin else []:
-        for fp in sorted(d.glob("*.json")) if d.is_dir() else []:
+        for fp in [Path(p) for p in _OM.files(d, "*.json")] if d.is_dir() else []:
             if _OTHER_CLIENT_STAMP.search(fp.read_text(encoding="utf-8", errors="replace")):
                 bad.append(f"{d.name}/{fp.name}")
     if bad:

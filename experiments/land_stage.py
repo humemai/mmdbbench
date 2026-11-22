@@ -662,9 +662,13 @@ def main():
     for arm in args.overlay:
         for d in (f"dense_mp5_{args.pin}", f"dense_mp5_small_{args.pin}"):
             (RESULTS / d).mkdir(exist_ok=True)
-            sh(["scp", "-q", f"{HOST}:{REMOTE}/{host_name(d.rsplit('_', 1)[0], args.pin)}/mp_{arm}_b*.json", str(RESULTS / d)],
-               check=False)
-            have = sorted((RESULTS / d).glob(f"mp_{arm}_b*.json"))
+            # two names per arm: the plain one, and the one a served ArcadeDB arm's lean job writes since humemai/mmdbbench#62 (the files named
+            # for the vendor driver and the PostgreSQL wire stay on the host: no table reads them). A pattern that matches nothing is not an error.
+            _src = f"{HOST}:{REMOTE}/{host_name(d.rsplit('_', 1)[0], args.pin)}"
+            for _pat in (f"mp_{arm}_b*.json", f"mp_{arm}_clientlean_b*.json"):
+                sh(["scp", "-q", f"{_src}/{_pat}", str(RESULTS / d)], check=False)
+            import overlay_merge
+            have = overlay_merge.files(RESULTS / d, f"mp_{arm}_b*.json")
             print(f"  {d}: {len(have)} files for {arm}")
     apply_overlay_merge(args.overlay_merge, args.overlay_exclude, args.pin)
 

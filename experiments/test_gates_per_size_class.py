@@ -48,20 +48,21 @@ def both_builds(lane, scale, release, sha, **kw):
 
 def pair_problems(rows):
     """The call the exporter and the page check make."""
-    return AI.pair_problems(rows, group=SC.row_size_class, table_of=SC.row_table)
+    return AI.pair_problems(rows, group=SC.row_size_class, table_of=lambda r: SC.row_table(r, EW._TABLE_LANE))
 
 
 # ------------------------------------------------------------------ the row classifier is the exporter's own table
 def test_a_frozen_row_is_classified_by_the_one_size_class_table():
-    assert EW.SIZE_CLASS is SC.SIZE_CLASS and EW.SIZE_CLASSES is SC.SIZE_CLASSES and EW._TABLE_LANE is SC.TABLE_LANE   # one table, two readers
+    assert EW.SIZE_CLASS is SC.SIZE_CLASS and EW.SIZE_CLASSES is SC.SIZE_CLASSES   # one table, two readers
+    assert PC._table_lanes() == EW._TABLE_LANE                                    # the page check reads the exporter's table map by ast
     for (lane, sid), cls in EW.SIZE_CLASS.items():
         assert SC.row_size_class({"lane": lane, "scale": sid}) == cls == EW.size_class(lane, sid), (lane, sid)
     assert SC.row_size_class({"lane": "durability", "scale": "doc_insert"}) is None          # no corpus size: no class, one group
     assert SC.row_size_class({"lane": "l2"}) is None and SC.row_size_class({}) is None
     # The table a sentence names: lane and workload, as the exporter's _TABLE_LANE says; a lane with no table is named by itself.
-    assert SC.row_table({"lane": "l2", "workload": "oltp"}) == "l2" and SC.row_table({"lane": "l2", "workload": "olap"}) == "l2olap"
-    assert SC.row_table({"lane": "l1tpc", "workload": "olap"}) == "docs_olap" and SC.row_table({"lane": "l3d", "workload": "search"}) == "l3d"
-    assert SC.row_table({"lane": "durability", "workload": "doc_insert"}) == "durability"
+    assert SC.row_table({"lane": "l2", "workload": "oltp"}, EW._TABLE_LANE) == "l2" and SC.row_table({"lane": "l2", "workload": "olap"}, EW._TABLE_LANE) == "l2olap"
+    assert SC.row_table({"lane": "l1tpc", "workload": "olap"}, EW._TABLE_LANE) == "docs_olap" and SC.row_table({"lane": "l3d", "workload": "search"}, EW._TABLE_LANE) == "l3d"
+    assert SC.row_table({"lane": "durability", "workload": "doc_insert"}, EW._TABLE_LANE) == "durability"
 
 
 # ------------------------------------------------------------------ gate 1: arm_identity.pair_problems (the exporter's refusal, the page check's COMMIT line)
@@ -204,7 +205,7 @@ def test_an_entry_pools_one_release_and_two_sizes_are_two_entries():
 # ------------------------------------------------------------------ gate 5: the exporter wires the row classifier into its refusal
 def test_the_exporter_calls_the_pair_gate_per_size_class():
     import inspect
-    call = "_AI.pair_problems(rows, group=_SC.row_size_class, table_of=_SC.row_table)"
+    call = "_AI.pair_problems(rows, group=_SC.row_size_class, table_of=lambda r: _SC.row_table(r, "
     assert call in inspect.getsource(EW.main) and call in inspect.getsource(PC._check_build_pair)
 
 
@@ -214,7 +215,7 @@ def test_the_page_check_pair_gate_does_not_load_the_exporter():
     code = ("import sys, page_check, size_classes\n"
             "rows = [{'lane': 'l2', 'scale': 'sf1', 'workload': 'oltp', 'backend': 'arcadedb_graph_embedded', 'engine_backend': b,"
             " 'engine_version': '26.12.1', 'engine_commit': 'abc123def'} for b in ('native', 'jvm')]\n"
-            "assert page_check._AI.pair_problems(rows, group=size_classes.row_size_class, table_of=size_classes.row_table) == []\n"
+            "assert page_check._AI.pair_problems(rows, group=size_classes.row_size_class, table_of=lambda r: size_classes.row_table(r, page_check._table_lanes())) == []\n"
             "assert page_check._check_build_pair({'tables': []}, rows) == 0\n"
             "assert 'export_web' not in sys.modules\n")
     env = {k: v for k, v in os.environ.items() if not k.startswith("BENCH_")}

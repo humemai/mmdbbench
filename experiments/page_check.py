@@ -1508,7 +1508,7 @@ def _check_build_pair(payload, rows):
                 continue
             print(f"  ONEBUILD {t['id']}: {bare} at {size} has a {_AI.BUILD_NAMES[have]} row and no {_AI.BUILD_NAMES[miss]} row or declaration")
             bad += 1
-    for problem in _AI.pair_problems(rows, group=_SC.row_size_class, table_of=_SC.row_table):
+    for problem in _AI.pair_problems(rows, group=_SC.row_size_class, table_of=lambda r: _SC.row_table(r, _table_lanes())):
         print(f"  COMMIT  {problem}")
         bad += 1
     return bad

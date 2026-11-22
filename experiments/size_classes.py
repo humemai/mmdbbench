@@ -1,10 +1,11 @@
 """Which size class a frozen row belongs to, and which table it feeds (humemai/mmdbbench#131, #134).
 
-`SIZE_CLASS` (lane, size id -> small, large or extra) and `TABLE_LANE` (table id -> lane, workload) were in export_web.py. The gates that hold
+`SIZE_CLASS` (lane, size id -> small, large or extra) was in export_web.py. The gates that hold
 ArcadeDB to one engine commit per size class read FROZEN ROWS (arm_identity.pair_problems, called by the exporter and by page_check), and
 importing the exporter to ask a lane and a size for their class loads the exporter's whole machinery and refuses without its overlays. So the
-tables are here, imports only the standard library, and export_web binds them under their old names (`export_web.SIZE_CLASS`,
-`export_web._TABLE_LANE`): one table, one classifier, two readers. The words and what they mean are explained at SIZE_CLASS in export_web.py.
+table is here, imports only the standard library, and export_web binds it under its old name (`export_web.SIZE_CLASS`): one table, one
+classifier, two readers. The words and what they mean are explained at SIZE_CLASS in export_web.py. The table of page tables (`_TABLE_LANE`) stays in
+export_web.py, where make_2611_stages, page_check and gen_engines_doc read it by ast; `row_table` takes it as an argument.
 """
 from __future__ import annotations
 
@@ -40,19 +41,6 @@ SIZE_CLASS = {
 }
 
 
-TABLE_LANE = {
-    "docs_oltp": ("l1tpc", "oltp"), "docs_olap": ("l1tpc", "olap"),
-    "l2": ("l2", "oltp"), "l2olap": ("l2", "olap"),
-    "l3d": ("l3d", None), "l3s": ("l3s", None), "l4": ("l4", None),
-    "e2": ("e2", "hybrid"), "e2atom": ("e2", "atomicity"),
-    # The lifecycle table was not here, so a lifecycle cell that exceeded its
-    # budget would have left an engine off the table with no note, and the
-    # coverage gate had no lane to read its fields from.
-    "lifecycle": ("lifecycle", None),
-    "restart": ("restart", "restart"),
-}
-
-
 def row_size_class(row) -> str | None:
     """The size class (small, large or extra) of a FROZEN row, from its lane and size id, or None when the pair is not in SIZE_CLASS.
 
@@ -61,10 +49,11 @@ def row_size_class(row) -> str | None:
     return SIZE_CLASS.get((row.get("lane"), str(row.get("scale"))))
 
 
-def row_table(row) -> str:
-    """The id of the table a frozen row feeds (TABLE_LANE: lane and workload), else its lane. For the sentences of the gates, nothing else."""
+def row_table(row, table_lane) -> str:
+    """The id of the table a frozen row feeds (`table_lane` is export_web._TABLE_LANE: table id -> lane, workload), else its lane. For the
+    sentences of the gates, nothing else."""
     lane, workload = row.get("lane"), row.get("workload")
-    for tid, (table_lane, table_workload) in TABLE_LANE.items():
-        if table_lane == lane and (table_workload is None or table_workload == workload):
+    for tid, (table_lane_id, table_workload) in table_lane.items():
+        if table_lane_id == lane and (table_workload is None or table_workload == workload):
             return tid
     return str(lane)

@@ -5551,7 +5551,17 @@ try:
 except Exception:  # noqa: BLE001 - the page must still build without it
     LANES_RUNNER = {}
 
-_TABLE_LANE = _SC.TABLE_LANE   # table id -> (lane, workload): in size_classes.py, beside SIZE_CLASS
+_TABLE_LANE = {
+    "docs_oltp": ("l1tpc", "oltp"), "docs_olap": ("l1tpc", "olap"),
+    "l2": ("l2", "oltp"), "l2olap": ("l2", "olap"),
+    "l3d": ("l3d", None), "l3s": ("l3s", None), "l4": ("l4", None),
+    "e2": ("e2", "hybrid"), "e2atom": ("e2", "atomicity"),
+    # The lifecycle table was not here, so a lifecycle cell that exceeded its
+    # budget would have left an engine off the table with no note, and the
+    # coverage gate had no lane to read its fields from.
+    "lifecycle": ("lifecycle", None),
+    "restart": ("restart", "restart"),
+}
 
 
 def _table_scales(table_id):
@@ -7791,7 +7801,7 @@ def main() -> int:
     rows = _AI.select_build(rows)
     # ONE ENGINE COMMIT FOR BOTH BUILDS: a freeze whose native and JVM rows name two engines is refused, not printed side by side. The unit is the
     # size class (humemai/mmdbbench#134): the small rows may be on one release and the large rows on another, never two inside one size class.
-    _bad = _AI.pair_problems(rows, group=_SC.row_size_class, table_of=_SC.row_table)
+    _bad = _AI.pair_problems(rows, group=_SC.row_size_class, table_of=lambda r: _SC.row_table(r, _TABLE_LANE))
     if _bad:
         raise SystemExit("REFUSING: " + "; ".join(_bad))
     global _FROZEN_ROWS, _SPLIT

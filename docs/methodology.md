@@ -109,7 +109,7 @@ The engines do not get to the three models the same way. Each row of the cross-m
 | Qdrant + Neo4j | `separate product (Qdrant)` | `separate product (Neo4j)` | `node properties` |
 | SQLite + LanceDB + LadybugDB | `separate product (LanceDB)` | `separate product (LadybugDB)` | `table row` |
 
-`built in` means the engine has it without anything added. `extension` is an extension loaded into the engine. `separate process` is a second process beside the server (MongoDB Search). `separate product` is another database, joined by glue code with no transaction across the products. `node properties` means the record is the properties of a graph node. These rows stay on the table because the measured operation is the same; the line says what each engine provides.
+`built in` means the engine has it without anything added. `extension` is an extension loaded into the engine. `separate process` is a second process beside the server (MongoDB Search). `separate product` is another database, joined by glue code with no transaction across the products. `node properties` means the record is the properties of a graph node. `document` means the record is a document; in ArcadeDB, ArangoDB and SurrealDB that document is the graph node itself (these engines store a node as a document), not a second copy in a separate document store. These rows stay on the table because the measured operation is the same; the line says what each engine provides.
 
 ## Reading a result
 

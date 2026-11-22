@@ -122,7 +122,9 @@ def _rewrite_page_spec_inventory(exported: Path, spec: Path | None = None) -> No
     for t in payload["tables"]:
         e = t.get("entries", [])
         rows = sorted(set(x["backend"] for x in e))
-        sizes = sorted(set(str(x.get("scale_label") or x.get("scale")) for x in e), key=size_key)
+        # The label starts with the size class ("Small: 1M vectors"); the order is the corpus's, as before the class word was there.
+        corpus = {str(x.get("scale_label") or x.get("scale")): str(x.get("size_corpus") or x.get("scale_label") or x.get("scale")) for x in e}
+        sizes = sorted(corpus, key=lambda s: size_key(corpus[s]))
         cols = list(e[0]["metrics"].keys()) if e else []
         lines.append(f"| `{t.get('id')}` | {t.get('title', '')} | {', '.join(rows)} | {', '.join(sizes)} | {', '.join(cols)} |")
     block = "\n".join(lines) + "\n"

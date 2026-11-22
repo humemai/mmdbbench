@@ -72,7 +72,7 @@ A table id is the `id` of a table in the page payload. The site names each table
 
 ## Size ids
 
-A size id is the `scale` field of a row and a key of `MEM_BY_SCALE`, `TIMEOUT_BY_SCALE` and `HEAP_BY_SCALE` in `runner.py`. Those three tables are keyed by the size id alone, not by lane. The page label is `export_web.SCALE_LABELS`, keyed by lane and size.
+A size id is the `scale` field of a row and a key of `MEM_BY_SCALE`, `TIMEOUT_BY_SCALE` and `HEAP_BY_SCALE` in `runner.py`. Those three tables are keyed by the size id alone, not by lane. The page label is `export_web.SCALE_LABELS`, keyed by lane and size. The page also says whether a size is the small or the large one of its table: `export_web.SIZE_CLASS`, keyed the same way, gives each size its class (`small`, `large`, or `extra` for a size outside the pair), and the Size label on the page starts with that word (humemai/mmdbbench#131). A rename of a size id changes its key in both tables.
 
 | size id | used by (lane: page label) | proposed | suggestion | frozen rows | payload | written in |
 |---|---|---|---|---|---|---|

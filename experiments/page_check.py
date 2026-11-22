@@ -1712,7 +1712,7 @@ def _check_conditions(payload, rows):
     for g in (payload.get("condition_provenance") or {}).get("generated", []):
         generated.setdefault(g["text"], set()).update(g.get("values") or [])
     scale_strings = sorted({str(x) for t in payload.get("tables", []) for e in t.get("entries", [])
-                            for x in (e.get("scale"), e.get("scale_label")) if x}, key=len, reverse=True)
+                            for x in (e.get("scale"), e.get("scale_label"), e.get("size_corpus")) if x}, key=len, reverse=True)
     allowed_pats = [p for p, _ in CONDITION_ALLOWED] + [p for p, _ in CONDITION_EXEMPT] + [re.escape(s) for s in scale_strings]
     bad = 0
     groups = [("GLOBAL", payload.get("conditions") or [])]

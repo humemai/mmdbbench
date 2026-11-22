@@ -991,6 +991,167 @@ def scale_label(lane: str, scale: str) -> str:
             "  Add one: the page prints corpus sizes, not harness tier names.")
 
 
+# SMALL AND LARGE (humemai/mmdbbench#131, decided 2026-11-23). Every table has a small size and a large size, and the page says which a row is:
+# the class is a field of the row (`size_class`) and the first word of its Size label ("Small: ...", "Large: ..."). THIS IS THE ONE TABLE the
+# class comes from, keyed like SCALE_LABELS (test_small_and_large_sizes holds the two key sets equal, so a size with a label and no class cannot
+# reach the page). The words are small and large and nothing else.
+#   - Graph analytics has one size today, the full SF1 network: that is its SMALL size. Its large size has no id yet (PLANNED_LARGE).
+#   - A lane with more than two sizes keeps every size on the page. Two are the pair and the others are "extra": the sparse table's pair is the
+#     1M and 8.84M corpora (`small` is the same size id, with the same memory cap and timeout, as the dense table's small size), and 100k is extra;
+#     the session-cost table's pair is 1M and 10M, the dense table's two counts, and 10k and 100k are extra.
+#   - The restart table borrows each model's two sizes, so its classes are the ones of the lanes it borrows from.
+# NOT runner.LARGE_SCALES: that tuple is the stage generator's order of work (which cells run last), and it lists `sf1full` beside the two
+# largest corpora because the cell is long. What a reader calls small and large is this table.
+SIZE_CLASSES = ("small", "large", "extra")
+SIZE_CLASS = {
+    ("l3s", "tiny"): "extra",
+    ("l3s", "small"): "small",
+    ("l3s", "medium"): "large",
+    ("l3d", "small"): "small",
+    ("l3d", "deep10m"): "large",
+    ("e4", "e2"): "small",
+    ("l2", "sf1"): "small",
+    ("l2", "sf10"): "large",
+    ("l2", "sf1full"): "small",
+    ("l1tpc", "tpch1"): "small",
+    ("l1tpc", "tpch10"): "large",
+    ("e2", "e2"): "small",
+    ("e2", "e2_500k"): "large",
+    ("l4", "ts100"): "small",
+    ("l4", "ts1000"): "large",
+    ("lifecycle", "lc10k"): "extra",
+    ("lifecycle", "lc100k"): "extra",
+    ("lifecycle", "lc1m"): "small",
+    ("lifecycle", "lc10m"): "large",
+    ("restart", "tpch1"): "small",
+    ("restart", "tpch10"): "large",
+    ("restart", "sf1"): "small",
+    ("restart", "sf10"): "large",
+    ("restart", "small"): "small",
+    ("restart", "deep10m"): "large",
+    ("restart", "ts100"): "small",
+    ("restart", "ts1000"): "large",
+}
+# A small size whose large size has no id in the harness yet, and what the page calls that large size. It is planned and has never run.
+PLANNED_LARGE = {
+    ("l2", "sf1full"): "the full SF10 network",
+}
+# The two facts of the plan the page states (humemai/mmdbbench#114): the release whose final numbers are the small size of every table, and
+# the year of the full run of the large sizes. Typed here once; every sentence that says either one reads it from here.
+FINAL_SMALL_RELEASE = "26.12.1"
+LARGE_RUN_YEAR = "2027"
+# WHAT THE SMALL SIZES CANNOT SHOW, said in the same paragraph as the two sizes. No engine and no failure is named: it is a statement
+# about what a size can show, for every engine alike. It carries no number (the large size of a pair is about ten times its small one;
+# test_small_and_large_sizes holds "about ten times" against the lanes' own constants).
+SMALL_SIZE_LIMITS = (" The small sizes show correctness, the cost of each query, and the choices a query planner makes. They do not show how an "
+                     "engine behaves when the data no longer fits in memory, or at about ten times the size: the large sizes are for that.")
+# A table that is not in _TABLE_LANE and still prints a lane's sizes in its Size column.
+_SIZE_TABLE_LANE = {"l3smp": "l3s"}
+
+
+def size_class(lane: str, scale: str) -> str:
+    """small, large or extra for a lane's size id. Raises like scale_label: a size with no class would print with no word in front of it."""
+    try:
+        return SIZE_CLASS[(lane, scale)]
+    except KeyError:
+        raise SystemExit(
+            f"no SIZE_CLASS entry for lane {lane!r} size {scale!r}.\n"
+            "  Add one: every size on the page says whether it is the small or the large one.")
+
+
+def size_label(lane: str, scale: str) -> str:
+    """The Size label a reader sees: the class word, then the corpus (scale_label)."""
+    return f"{size_class(lane, scale).capitalize()}: {scale_label(lane, scale)}"
+
+
+def _release_of(version_name) -> str | None:
+    """The release in an entry's version_name ("arcadedb 26.11.1 · a3a5d1245" gives "26.11.1"), or None."""
+    m = re.search(r"\d+\.\d+\.\d+(?:-dev)?", str(version_name or ""))
+    return m.group(0) if m else None
+
+
+def _classify_sizes(payload):
+    """Every row says small or large, a table says when its large size has no rows, and the page says once how to read the two.
+
+    Run LAST, on the finished tables: the sentences under a table name a size by its corpus ("at 9.99M vectors"), and the builders and
+    gates before this point read `scale_label` as that corpus. Here each row of a table that prints a lane's sizes gets
+      size_class   small, large or extra (SIZE_CLASS)
+      size_corpus  the label as it was, the corpus alone
+      scale_label  the class word, then the corpus: what the Size column prints
+    and the table gets `sizes`, one record per size (with a record for a large size that has no rows). A table whose Size column is not a
+    corpus size (the durability table names an operation, the coverage table says "every size above") carries `size_class` null and an
+    empty `sizes`. Three kinds of generated sentence follow from the rows: the absent large size, the extra sizes, and the ArcadeDB
+    version of the rows of each size; and one paragraph joins the page's own conditions."""
+    lanes_with_sizes = {lane for lane, _ in SIZE_CLASS}
+    page_releases = collections.defaultdict(set)      # class -> ArcadeDB releases, over the whole page
+    for t in payload["tables"]:
+        tid = t.get("id")
+        lane = (_TABLE_LANE.get(tid) or (_SIZE_TABLE_LANE.get(tid),))[0]
+        t["sizes"] = []
+        if lane not in lanes_with_sizes:
+            for e in t.get("entries") or []:
+                e["size_class"] = None
+            continue
+        by_size = {}                                  # size id -> its record, in the order the table prints
+        releases = collections.defaultdict(set)       # class -> ArcadeDB releases, on this table
+        for e in t.get("entries") or []:
+            sid = str(e.get("size_id") or e.get("scale"))
+            if (lane, sid) not in SIZE_CLASS:
+                raise SystemExit(f"REFUSING: table {tid!r} prints a row at size {sid!r} of lane {lane!r}, which has no SIZE_CLASS entry. "
+                                 "Every size on the page says whether it is the small or the large one.")
+            cls = SIZE_CLASS[(lane, sid)]
+            if "size_corpus" not in e:
+                e["size_corpus"] = str(e.get("scale_label") or scale_label(lane, sid))
+                e["scale_label"] = f"{cls.capitalize()}: {e['size_corpus']}"
+            e["size_class"] = cls
+            rec = by_size.setdefault(sid, {"id": sid, "class": cls, "label": e["scale_label"], "rows": 0})
+            rec["rows"] += 1
+            if e.get("is_arcadedb") and _release_of(e.get("version_name")):
+                releases[cls].add(_release_of(e.get("version_name")))
+                page_releases[cls].add(_release_of(e.get("version_name")))
+        t["sizes"] = list(by_size.values())
+        if not by_size:
+            continue
+        notes = []
+        # THE LARGE SIZE WITH NO ROWS. A large size of this table that has an id and no row here (a size the table withholds is said by
+        # `withheld_scales`, not here), then a small size whose large size has no id yet.
+        only = _table_scales(tid)
+        absent = [(sid, scale_label(lane, sid)) for (ln, sid), cls in SIZE_CLASS.items()
+                  if ln == lane and cls == "large" and sid not in by_size
+                  and (not only or sid in only) and sid not in (t.get("withheld_scales") or [])]
+        absent += [(None, PLANNED_LARGE[(lane, sid)]) for sid in by_size if (lane, sid) in PLANNED_LARGE]
+        for sid, name in absent:
+            t["sizes"].append({"id": sid, "class": "large", "label": f"Large: {name}", "rows": 0})
+            notes.append(_gen(f"Large size ({name}): not run yet. The full benchmark with the large datasets is planned for {LARGE_RUN_YEAR}.",
+                              name, LARGE_RUN_YEAR))
+        extra = [rec["label"].split(": ", 1)[1] for rec in by_size.values() if rec["class"] == "extra"]
+        if extra:
+            notes.append(_gen(f"Beside its small and its large size, this table has {'an extra size' if len(extra) == 1 else 'extra sizes'}: "
+                              f"{_join_and(extra)}.", *extra))
+        parts = [f"{cls} size, {_join_and(sorted(releases[cls]))}" for cls in SIZE_CLASSES if releases.get(cls)]
+        if parts:
+            notes.append(_gen("Engine version of the ArcadeDB rows: " + "; ".join(parts) + ".",
+                              *[v for cls in SIZE_CLASSES for v in sorted(releases.get(cls) or ())]))
+        t["conditions"] = list(t.get("conditions") or []) + [n for n in notes if n not in (t.get("conditions") or [])]
+    if not any(t["sizes"] for t in payload["tables"]):
+        return
+    small, large = sorted(page_releases.get("small") or ()), sorted(page_releases.get("large") or ())
+    text = "Every table measured on a dataset has a small size and a large size, and the Size column of each row starts with that word."
+    text += SMALL_SIZE_LIMITS
+    if small == [FINAL_SMALL_RELEASE]:
+        text += f" The small sizes are measured on ArcadeDB {FINAL_SMALL_RELEASE}."
+    else:
+        text += (f" The final numbers, on ArcadeDB {FINAL_SMALL_RELEASE}, will be the small size of every table"
+                 + (f"; the small rows on this page are from ArcadeDB {_join_and(small)}." if small else "."))
+    if large:
+        text += (f" The large rows are from the ArcadeDB {_join_and(large)} campaign, and each table names the engine version of its "
+                 f"ArcadeDB rows by size.")
+    text += f" The full run of the large sizes is planned for {LARGE_RUN_YEAR}."
+    note = _gen(text, FINAL_SMALL_RELEASE, LARGE_RUN_YEAR, *small, *large)
+    if note not in payload["conditions"]:
+        payload["conditions"] = [note] + list(payload["conditions"])
+
+
 # The Mode column said "embedded" for Qdrant, Milvus, Elasticsearch, Neo4j and
 # PostgreSQL, every one of which runs as a server container that the benchmark
 # talks to over the wire. The rule was `"server" if "server" in backend`, which
@@ -3917,6 +4078,8 @@ def _l4_table(all_rows):
             # case-insensitive: the labels read "ArcadeDB (...)"
             "is_arcadedb": "arcadedb" in label.lower(),
             "scale": f"{_l4_points(_scale)} points",
+            # The lane's own size id, which `scale` is not on this table: the size class is looked up by it (_classify_sizes).
+            "size_id": _scale,
             # THE SIZE COLUMN NAMES THE CORPUS THAT RAN, from the row's own tier via
             # the lane's constant. The scale key stays as it is because page_check
             # and the figures address cells by it.
@@ -8239,6 +8402,9 @@ def main() -> int:
     if _mm:
         tables.append(_mm)
         payload["tables"].append(_mm)
+    # SMALL AND LARGE, after every table is finished (humemai/mmdbbench#131): the sentences above name a size by its corpus, and this
+    # is where a row's Size label gets its class word.
+    _classify_sizes(payload)
 
     # A table can draw on more than one artifact, so this is a LIST. It was a
     # single string, and on 2026-08-13 that made the page lie: the DEEP-10M

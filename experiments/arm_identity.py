@@ -215,29 +215,50 @@ def name_post_wheels(rows):
     return out
 
 
-def pair_problems(rows):
+def pair_problems(rows, group=None, table_of=None):
     """What stops a two-build freeze from being published, as a list of sentences (empty: fine).
 
     The two builds of one release are built from ONE engine commit. A freeze whose native and JVM rows name different engine_versions
     or different engine commits compares two engines, not two builds of one, so the page must not print them side by side. A `.postN` wheel
     row counts as its release (`post_releases`): the engine_commit is still compared as is, so a post row of another commit is refused.
+
+    `group` (humemai/mmdbbench#134) says which rows are compared with which: a function from a row to a hashable key, and the rows that
+    share a key are one unit. The exporter and the page check pass the size class of the row (`export_web.row_size_class`), because until the
+    large sizes are rerun a table holds two ArcadeDB releases, the small rows on one and the large rows on another: two releases in
+    DIFFERENT size classes pass, and two releases inside one size class are refused, as before. `table_of` (row to table id) only names the
+    tables in the sentence. With no `group` the whole freeze is one unit, as it always was.
     """
     out = []
     releases = post_releases(rows)
-    by = {}
+    groups = {}
     for r in rows:
         if built(r) and build_of(r):
-            by.setdefault(build_of(r), []).append(r)
-    if len(by) < 2:
+            groups.setdefault(group(r) if group else None, {}).setdefault(build_of(r), []).append(r)
+    if len({b for by in groups.values() for b in by}) < 2:
         return out
-    for field in ("engine_version", "engine_commit"):
-        # engine_version of a served row is the server's own build string ("server:<v> (build ...)"), not the wheel's: compare the wheels' versions
-        # on the in-process rows; the commit is one value for every ArcadeDB row, served ones included.
-        seen = {b: sorted({(release_version(r, releases) if field == "engine_version" else str(r.get(field) or "")) for r in rs
-                           if field != "engine_version" or in_process(r)} - {""}) for b, rs in by.items()}
-        flat = {v for vs in seen.values() for v in vs}
-        if len(flat) > 1:
-            out.append(f"the two ArcadeDB builds name different {field} values {seen}; one release is built from one engine commit")
+    for key in sorted(groups, key=str):
+        by = groups[key]
+        if len(by) < 2:
+            continue
+        for field in ("engine_version", "engine_commit"):
+            # engine_version of a served row is the server's own build string ("server:<v> (build ...)"), not the wheel's: compare the wheels' versions
+            # on the in-process rows; the commit is one value for every ArcadeDB row, served ones included.
+            seen_in = []   # (build, value, table)
+            for b, rs in by.items():
+                for r in rs:
+                    if field == "engine_version" and not in_process(r):
+                        continue
+                    v = release_version(r, releases) if field == "engine_version" else str(r.get(field) or "")
+                    if v:
+                        seen_in.append((b, v, table_of(r) if table_of else None))
+            seen = {b: sorted({v for bb, v, _t in seen_in if bb == b}) for b in by}
+            if len({v for _b, v, _t in seen_in}) > 1:
+                where = ""
+                if group is not None:
+                    tables = sorted({t for _b, _v, t in seen_in if t})
+                    where = (f"in the {key} size" if key else "among the rows with no size class") \
+                        + (f" (table {', '.join(tables)})" if tables else "") + ": "
+                out.append(f"{where}the two ArcadeDB builds name different {field} values {seen}; one release is built from one engine commit")
     out += server_settings_problems(rows)
     return out
 

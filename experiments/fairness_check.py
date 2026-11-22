@@ -37,6 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import publish_instrument  # noqa: E402
 import vendor_memory  # noqa: E402
+import overlay_merge  # noqa: E402
 RESULTS = str(publish_instrument.results_dir())
 FULL_CPUSET = "0-11"
 # Fallback only. Every served row records its own mem_split; this is for the
@@ -197,7 +198,7 @@ def _dense_rows():
     # skip the two ad-hoc reproducibility extras; here every file is a first
     # class build and nothing is skipped.
     import make_paper_tables as _T
-    for fp in sorted(glob.glob(os.path.join(_T.dense_mp_dir(), "mp_*_b*.json"))):
+    for fp in overlay_merge.files(_T.dense_mp_dir(), "mp_*_b*.json"):   # the lean client's file under the plain name (humemai/mmdbbench#62)
         try:
             d = json.load(open(fp))
         except Exception:

@@ -47,6 +47,7 @@ import bench_common  # noqa: E402  (INSTRUMENT, stamped on every row)
 import memory_probe  # noqa: E402  (memory per phase, instrument 2026-11 only)
 import vendor_memory  # noqa: E402  (Neo4j's and Elasticsearch's own memory rules, DECISIONS #202)
 import post1_rows  # noqa: E402  (build-only mode and the wheel label of a wheels-only rerun; inert unless the stage opts in)
+import overlay_merge  # noqa: E402  (the client in an overlay file name of a served ArcadeDB arm, humemai/mmdbbench#62)
 DATA = os.path.abspath(os.environ.get("BENCH_DATA", os.path.join(HERE, "data")))
 RESULTS = os.path.join(HERE, "results")
 RAW = os.path.join(RESULTS, "raw")
@@ -3387,7 +3388,8 @@ def arcadedb_body_limit_readback(cid, envs, from_env):
 # into a shell script is how one flag goes missing (F6 was exactly that). So
 # the runner grows a switch instead: the client command becomes
 # `python -u <driver>` and the driver writes results/<out-dir>/mp_<label>_b<rep>.json,
-# the file layout export_web and make_paper_tables already read.
+# the file layout export_web and make_paper_tables already read. For a served ArcadeDB arm the
+# label carries the client of the job (mp_arcsrv_clientlean_b<rep>.json, _driver_client below).
 MP_LABELS = {
     "arcadedb_dense_embedded": "fp32", "arcadedb_dense_embedded_int8": "int8",
     "arcadedb_dense_server": "arcsrv", "arcadedb_dense_server_int8": "arcsrv_int8",
@@ -3424,8 +3426,18 @@ MP_LABELS.update({
 })
 
 
+def _driver_client(job):
+    """The client an overlay file of this job is named for, '' for an arm with no client axis. A served ArcadeDB arm (ARCADEDB_HTTP_ARMS) runs one cell
+    as up to three jobs: the vendor driver ('official', the job with no `http_client`), the lean twin and the PostgreSQL-wire twin. They share the
+    arm, the size, the repetition and the output directory, so with one file name the last job to finish kept the file and the lean overlay of the
+    n=3 pass was lost (humemai/mmdbbench#62). The name therefore carries the client (overlay_merge.label_for); the readers ask overlay_merge.files()."""
+    if job["backend"] not in ARCADEDB_HTTP_ARMS:
+        return ""
+    return job.get("http_client") or overlay_merge.OFFICIAL
+
+
 def _driver_out(job, rep, container=False, scale=None):
-    label = MP_LABELS.get(job["backend"], job["backend"])
+    label = overlay_merge.label_for(MP_LABELS.get(job["backend"], job["backend"]), _driver_client(job))
     fmt = os.environ.get("BENCH_DRIVER_OUT_FMT", "mp_{label}_b{rep}.json")
     name = fmt.format(label=label, rep=rep, scale=scale or job.get("_scale", ""))
     rel = os.path.join(job["driver_out_dir"], name)
@@ -4727,7 +4739,8 @@ def main():
                     help="run this script inside the cell instead of the lane's "
                          "(e.g. dense_multipass_driver.py); needs --driver-out-dir")
     ap.add_argument("--driver-out-dir", default="",
-                    help="results/ subdirectory the driver writes mp_<label>_b<rep>.json into")
+                    help="results/ subdirectory the driver writes mp_<label>_b<rep>.json into (a served ArcadeDB arm: "
+                         "mp_<label>_client<lean|official|pgwire>_b<rep>.json, one file per client)")
     ap.add_argument("--results-file", default="runs.jsonl",
                     help="where rows are appended, relative to results/. Use a "
                          "scratch file for smoke runs: the canonical rule takes "

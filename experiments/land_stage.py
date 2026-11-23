@@ -581,8 +581,8 @@ def publish_branch(branch, message, site_files, tracked):
     return 0
 
 
-def apply_overlay_merge(specs, exclude_arms, pin, results=None):
-    """--overlay-merge LABEL:PIN:DIR (repeatable) and --overlay-exclude ARM or ARM@LABEL: build results/dense_mp5_<pin> and dense_mp5_small_<pin> from the
+def apply_overlay_merge(specs, exclude_arms, pin, results=None, large_pin=None):
+    """--overlay-merge LABEL:PIN:DIR (repeatable) and --overlay-exclude ARM or ARM@LABEL: build results/dense_mp5_<large pin> and dense_mp5_small_<pin> from the
     overlay directories of other sources (humemai/mmdbbench#28, #29), through overlay_merge.merge: the comparators of another engine pin, a
     catch-up directory of the same pin. DIR holds dense_mp5_<PIN> and/or dense_mp5_small_<PIN> (also with the host's `_2611` suffix). The
     directory a landing already holds is a source too (its label is `existing`), so nothing is overwritten silently; a name collision refuses.
@@ -590,7 +590,10 @@ def apply_overlay_merge(specs, exclude_arms, pin, results=None):
     `ARM` leaves the arm out of every source. `ARM@LABEL` (humemai/mmdbbench#147) leaves it out of the source labelled LABEL only: the old
     overlay (the comparators and ArcadeDB's old arms) and the new one (ArcadeDB's new arms) both hold `mp_fp32_*` and `mp_arcsrv_*`, and a
     global exclude took the new files out with the old. A LABEL that no source carries refuses, so a typo cannot keep a file the call
-    meant to drop."""
+    meant to drop.
+
+    The target of each size is the directory of its size class (humemai/mmdbbench#151): `dense_mp5_<large pin>` for the 9.99M size and
+    `dense_mp5_small_<pin>` for the 1M one; `large_pin` None is the landing's pin, the same two directories as before. Each source is read at its own PIN."""
     if not specs:
         return
     import overlay_merge
@@ -606,9 +609,9 @@ def apply_overlay_merge(specs, exclude_arms, pin, results=None):
         if _label.split("@", 1)[0] not in _known:
             sys.exit(f"REFUSING: --overlay-exclude {_arm}@{_label}: no source is labelled {_label!r} (the labels are {sorted(_known)}); "
                      f"nothing was merged.")
-    for stem in ("dense_mp5", "dense_mp5_small"):
-        target = results / f"{stem}_{pin}"
-        sources = [("existing@" + pin, target)] if target.is_dir() else []
+    for stem, tpin in (("dense_mp5", large_pin or pin), ("dense_mp5_small", pin)):
+        target = results / f"{stem}_{tpin}"
+        sources = [("existing@" + tpin, target)] if target.is_dir() else []
         for label, spin, d in parsed:
             src = next((c for c in (Path(d) / f"{stem}_{spin}", Path(d) / f"{stem}_{spin}{ROWS_SUFFIX}") if c.is_dir()), None)
             if src is None:
@@ -649,6 +652,62 @@ def apply_mp_arms(spec):
     if not spec.strip():
         return
     os.environ["BENCH_MP_ARMS"] = ",".join(x.strip() for x in spec.split(","))
+
+
+def apply_large_pin(value):
+    """--large-pin COMMIT: the commit of the release the LARGE rows are on (humemai/mmdbbench#151). Like apply_mp_builds it only writes the variable, so
+    the exporter and the gates of every step (they read BENCH_LARGE_ENGINE_COMMIT through size_classes.pin_of_size_class) and this script's own pulls
+    have one number and one reader. A flag given wins over a variable already set; an empty flag leaves the environment alone, so the default is the
+    variable and, with neither, the landing's pin (nothing moves for a landing whose two size classes are on one release)."""
+    value = (value or "").strip()
+    if value:
+        os.environ[size_classes.LARGE_PIN_VAR] = value
+
+
+def pull_overlay_arm(arm, pin, large_pin, results=None, scp=None):
+    """--overlay ARM: the arm's dense multipass files at both sizes into results/dense_mp5_<large pin> (the 9.99M size, the LARGE class) and
+    results/dense_mp5_small_<pin> (the 1M size, the small class), each from the host directory of its own pin (size_classes.pin_of_size_class,
+    humemai/mmdbbench#151). Before #151 both were at the landing's pin, so a landing whose large rows stay on an earlier release made an empty
+    dense_mp5_<new pin> and left the large overlay unpulled. One pin for both classes is the same two directories as before."""
+    import overlay_merge
+    results = Path(results) if results else RESULTS
+    for stem, p in (("dense_mp5", large_pin), ("dense_mp5_small", pin)):
+        d = f"{stem}_{p}"
+        (results / d).mkdir(exist_ok=True)
+        # two names per arm: the plain one, and the one a served ArcadeDB arm's lean job writes since humemai/mmdbbench#62 (the files named
+        # for the vendor driver and the PostgreSQL wire stay on the host: no table reads them). A pattern that matches nothing is not an error.
+        _src = f"{HOST}:{REMOTE}/{host_name(stem, p)}"
+        for _pat in (f"mp_{arm}_b*.json", f"mp_{arm}_clientlean_b*.json"):
+            (scp or sh)(["scp", "-q", f"{_src}/{_pat}", str(results / d)], check=False)
+        have = overlay_merge.files(results / d, f"mp_{arm}_b*.json")
+        print(f"  {d}: {len(have)} files for {arm}")
+
+
+def sparse_pulls(pin, large_pin):
+    """[(pin of the directory, glob of the files pulled into it)] for the sparse second pass (humemai/mmdbbench#151). The files of a tier sit in the
+    directory of its size class (`SIZE_CLASS[("l3s", tier)]`, the exporter's own rule): the medium size is LARGE, so with a large pin of its own
+    its files come from `sparse_mp_<large pin>` and the others from `sparse_mp_<pin>`. One pin for both classes is the one pull of every file."""
+    if large_pin == pin:
+        return [(pin, "sp_*.json")]
+    return [(large_pin if cls == "large" else pin, f"sp_*_{tier}.json") for (lane, tier), cls in size_classes.SIZE_CLASS.items() if lane == "l3s"]
+
+
+def pull_sparse_overlays(pin, large_pin, results=None, scp=None):
+    """The sparse second-pass files into results/sparse_mp_<pin> (and results/sparse_mp_<large pin> when the large rows are on another release), per
+    `sparse_pulls`. A directory that gets nothing is removed again: an empty one would read as present and move the failure somewhere less obvious."""
+    results = Path(results) if results else RESULTS
+    plan = sparse_pulls(pin, large_pin)
+    for p in dict.fromkeys(p for p, _glob in plan):
+        _sp = results / f"sparse_mp_{p}"
+        _sp.mkdir(exist_ok=True)
+        _globs = [g for q, g in plan if q == p]
+        for g in _globs:
+            (scp or sh)(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('sparse_mp', p)}/{g}", str(_sp)], check=False)
+        _files = sorted({f for g in _globs for f in _sp.glob(g)})
+        if _files:
+            print(f"  sparse_mp_{p}: {len(_files)} file(s)")
+        elif not any(_sp.glob("sp_*.json")):
+            _sp.rmdir()
 
 
 def main():
@@ -696,6 +755,14 @@ def main():
     ap.add_argument("--post1-reps", type=int, default=0, metavar="N",
                     help="also pull runs_page_<pin>_2611_post1.jsonl (the wheels-only rerun) and land, per cell, the rows of ONE wheel "
                          "(post1_rows.resolve at N repetitions); exits nonzero on a cell that would mix wheels or is short of repetitions. Off by default")
+    ap.add_argument("--large-pin", default="", metavar="COMMIT",
+                    help="engine commit of the release the LARGE rows are on, when it is not the one of --pin: until the large sizes are rerun the small "
+                         "rows move to the new pin and the large rows keep the release that measured them. The large overlays are read and pulled at it: "
+                         "the 9.99M dense overlay (dense_mp5_<COMMIT>, also the --overlay-merge target) and the medium files of the sparse second pass "
+                         "(sparse_mp_<COMMIT>); every other overlay stays at --pin (e4decomp_<pin> is the small e4 size). Sets BENCH_LARGE_ENGINE_COMMIT for the "
+                         "steps below and wins over it. Default: BENCH_LARGE_ENGINE_COMMIT, else --pin (a landing whose two size classes are on one "
+                         "release needs no flag and nothing moves; without it at a split landing the exporter refuses to write a page whose large entries lost "
+                         "their warm columns) (humemai/mmdbbench#146, #151)")
     ap.add_argument("--overlay-merge", action="append", default=[], metavar="LABEL:PIN:DIR",
                     help="build the dense overlay directories of this landing from another source's directories (the comparators of another "
                          "engine pin, a catch-up directory); repeatable; a name collision refuses (humemai/mmdbbench#28, #29)")
@@ -726,6 +793,7 @@ def main():
     args = ap.parse_args()
     apply_mp_builds(args.mp_builds)
     apply_mp_arms(args.mp_arms)
+    apply_large_pin(args.large_pin)
 
     # A LANDING PUSHES A BRANCH, NEVER `main`. The refusal comes before the pull, so a forgotten flag costs nothing: the first version of
     # this check sat at step 6, after the merge into the store, the gates and the site build.
@@ -739,6 +807,11 @@ def main():
     if not args.pin:
         sys.exit("REFUSING: no --pin, no BENCH_ENGINE_COMMIT, and the current payload does not name exactly one "
                  "engine commit. Pass --pin <commit> or set BENCH_ENGINE_COMMIT.")
+    # The pin the large overlays are read at: --large-pin (written to the environment above), else BENCH_LARGE_ENGINE_COMMIT, else the landing's pin,
+    # by the one rule of size_classes.pin_of_size_class. `env` below is copied from the environment, so the gates of step 4 read the same value.
+    large_pin = size_classes.pin_of_size_class("large", landing=args.pin)
+    if large_pin != args.pin:
+        print(f"  large pin {large_pin}: dense_mp5_{large_pin} and the medium files of sparse_mp_{large_pin} are the large overlays; the rest is at {args.pin}")
     if os.environ.get("BENCH_INSTRUMENT", PUBLISH_INSTRUMENT) != PUBLISH_INSTRUMENT:
         sys.exit(f"REFUSING: BENCH_INSTRUMENT={os.environ['BENCH_INSTRUMENT']!r}; this tooling lands "
                  f"{PUBLISH_INSTRUMENT} rows only (DECISIONS #196).")
@@ -794,17 +867,8 @@ def main():
     else:
         sh(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('runs_page', args.pin, '.jsonl')}", str(pulled)])
     for arm in args.overlay:
-        for d in (f"dense_mp5_{args.pin}", f"dense_mp5_small_{args.pin}"):
-            (RESULTS / d).mkdir(exist_ok=True)
-            # two names per arm: the plain one, and the one a served ArcadeDB arm's lean job writes since humemai/mmdbbench#62 (the files named
-            # for the vendor driver and the PostgreSQL wire stay on the host: no table reads them). A pattern that matches nothing is not an error.
-            _src = f"{HOST}:{REMOTE}/{host_name(d.rsplit('_', 1)[0], args.pin)}"
-            for _pat in (f"mp_{arm}_b*.json", f"mp_{arm}_clientlean_b*.json"):
-                sh(["scp", "-q", f"{_src}/{_pat}", str(RESULTS / d)], check=False)
-            import overlay_merge
-            have = overlay_merge.files(RESULTS / d, f"mp_{arm}_b*.json")
-            print(f"  {d}: {len(have)} files for {arm}")
-    apply_overlay_merge(args.overlay_merge, args.overlay_exclude, args.pin)
+        pull_overlay_arm(arm, args.pin, large_pin)
+    apply_overlay_merge(args.overlay_merge, args.overlay_exclude, args.pin, large_pin=large_pin)
 
     # THE E4 TABLE IS A DIRECTORY OF ARTIFACTS, NOT ROWS IN THE JSONL, and
     # nothing pulled it. `export_web` aborts outright when
@@ -820,17 +884,7 @@ def main():
     # would have published the sparse table and silently left its second-pass
     # table off the page. Pulled whenever sparse is part of what lands.
     if not _lanes or "l3s" in _lanes:
-        _sp = RESULTS / f"sparse_mp_{args.pin}"
-        _sp.mkdir(exist_ok=True)
-        sh(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('sparse_mp', args.pin)}/sp_*.json", str(_sp)],
-           check=False)
-        _files = sorted(_sp.glob("sp_*.json"))
-        if _files:
-            print(f"  sparse_mp_{args.pin}: {len(_files)} file(s)")
-        else:
-            # Same reason as e4 below: an empty directory would read as
-            # present and move the failure somewhere less obvious.
-            _sp.rmdir()
+        pull_sparse_overlays(args.pin, large_pin)
 
     _pycost = pull_pycost(args.pin, {l.strip() for l in args.only_lanes.split(",") if l.strip()})
 

@@ -55,8 +55,8 @@ def row_size_class(row) -> str | None:
     return SIZE_CLASS.get((row.get("lane"), str(row.get("scale"))))
 
 
-def pin_of_size_class(size_class: str) -> str:
-    """The engine commit whose overlay directories (`dense_mp5_<pin>`, `dense_mp5_small_<pin>`) a size class reads. One rule (humemai/mmdbbench#146).
+def pin_of_size_class(size_class: str, landing: str | None = None) -> str:
+    """The engine commit whose overlay directories (`dense_mp5_<pin>`, `dense_mp5_small_<pin>`, `sparse_mp_<pin>`) a size class reads. One rule (humemai/mmdbbench#146, #151).
 
     - `BENCH_ENGINE_COMMIT` is the pin of the run being landed, and it is the pin of the small and the extra classes: their rows are the landing's.
     - The large class reads `BENCH_LARGE_ENGINE_COMMIT`, the commit of the release the large rows are on, when the landing names it. Until the full
@@ -64,10 +64,15 @@ def pin_of_size_class(size_class: str) -> str:
       release, so the overlay of the large rows sits in a directory named by the OLD pin and is not found by the landing's pin.
     - Unset or blank, the large class reads the landing's pin: a landing whose two classes are on one release needs no variable and nothing moves.
 
+    - The sparse overlay is read by the same rule through the size class of its tier (`SIZE_CLASS[("l3s", tier)]`: tiny is extra, small is small, medium is large), so
+      `sparse_mp_<pin>` is two directories at a landing whose large rows are on an earlier release: the medium files in the large pin's, the others in the landing's
+      (humemai/mmdbbench#151). `e4decomp_<pin>` holds the small e4 size, so it is read at the landing's pin.
+    - `landing` is the landing's pin when it is not in the environment (`land_stage.py` takes it from `--pin`); None reads `BENCH_ENGINE_COMMIT`.
+
     Returns "" for an unset pin; the resolvers refuse that, as they always did. A class that is not in SIZE_CLASSES raises ValueError."""
     if size_class not in SIZE_CLASSES:
         raise ValueError(f"size class {size_class!r}: one of {', '.join(SIZE_CLASSES)}")
-    landing = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
+    landing = (os.environ.get("BENCH_ENGINE_COMMIT", "") if landing is None else landing).strip()
     if size_class == "large":
         return os.environ.get(LARGE_PIN_VAR, "").strip() or landing
     return landing

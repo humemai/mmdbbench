@@ -615,12 +615,16 @@ def _sparse_rows_identity():
 def _sparse_overlay_pass(tier, arm, warm):
     """p50 from the pinned sparse multipass overlay the second-pass table
     reads: results/sparse_mp_<pin>/sp_<arm>_<tier>.json, rep 0 cold, reps
-    1.. warm (median). None when the file is absent (100k was not run)."""
+    1.. warm (median). None when the file is absent (100k was not run).
+
+    <pin> is the pin of the tier's size class (make_paper_tables.sparse_tier_pin, humemai/mmdbbench#154): at a landing whose large rows stay on an earlier
+    release the medium files are in sparse_mp_<that pin> (BENCH_LARGE_ENGINE_COMMIT) and the small and tiny files in the landing's directory, as the page
+    reads them (export_web._sparse_multipass_table)."""
     import json as _json
     import make_paper_tables as _T
-    pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
-    if not pin:
+    if not os.environ.get("BENCH_ENGINE_COMMIT", "").strip():
         raise SystemExit("BENCH_ENGINE_COMMIT is unset: the sparse overlay is pinned only")
+    pin = _T.sparse_tier_pin(tier)
     import overlay_merge as _OM
     fp = _OM.pick(os.path.join(_T.RESULTS, f"sparse_mp_{pin}"), f"sp_{arm}_{tier}.json")
     if not os.path.isfile(fp):

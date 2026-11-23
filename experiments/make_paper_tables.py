@@ -825,27 +825,56 @@ def graph_table(rows):
 # would keep the failure mode alive, since the next missing directory would
 # re-arm it. _sparse_2681_rows below refuses instead of falling back.
 
+def sparse_tier_pin(tier):
+    """The engine commit a sparse tier is read at: the pin of its size class (size_classes.pin_of_size_class over SIZE_CLASS[("l3s", tier)];
+    humemai/mmdbbench#154), as the page reads it (export_web._sparse_multipass_table, #153). tiny is extra and small is small, so both are the landing's
+    BENCH_ENGINE_COMMIT; medium is large, so it is BENCH_LARGE_ENGINE_COMMIT when the landing names it (the large rows stay on the release that measured
+    them until the large sizes are rerun), else the landing's pin: one release for both classes needs no variable and nothing moves. The rows of the freeze
+    (_pinned_sparse_rows) and the overlay files of the figures (make_paper_figures._sparse_overlay_pass) take the pin from here, so they cannot disagree.
+    A tier that is not in SIZE_CLASS reads the landing's pin."""
+    return _SC.pin_of_size_class(_SC.SIZE_CLASS.get(("l3s", tier), "small"))
+
+
+_SPARSE_WHY = []   # why _pinned_sparse_rows last returned None, for the SystemExit of _sparse_2681_rows (cleared per call, like WITHHELD_RECALL)
+
+
+def _sparse_refused(why):
+    """Say why _pinned_sparse_rows refuses (stderr, and _SPARSE_WHY for the SystemExit that follows); the caller returns None."""
+    sys.stderr.write(why + "\n")
+    _SPARSE_WHY.append(why)
+
+
 def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
     """T4's ArcadeDB rows from the PINNED campaign, when it is complete.
 
     The paper corpus rows (8,841,823 x 30,109; load_canonical's PAPER_CORPUS
-    already drops everything else) at BENCH_ENGINE_COMMIT, all three tiers at
+    already drops everything else), each tier at the pin of its size class
+    (sparse_tier_pin: tiny and small at BENCH_ENGINE_COMMIT, medium at BENCH_LARGE_ENGINE_COMMIT
+    when the landing names it; humemai/mmdbbench#154), all three tiers at
     the landing's n reps (mp_builds(): BENCH_MP_BUILDS, default 3; the n=4 and
-    n=5 passes were dropped on 2026-11-14) and one engine_version, else None. Same all-or-nothing rule as
+    n=5 passes were dropped on 2026-11-14) and one engine_version per pin, else None. Same all-or-nothing rule as
     dense_mp_dir(): a partial re-run must not supersede a complete overlay
     tier by tier.
     """
-    pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip().lower()
-    if not pin:
+    del _SPARSE_WHY[:]
+    landing = os.environ.get("BENCH_ENGINE_COMMIT", "").strip().lower()
+    if not landing:
         return None
+    tiers = ("tiny", "small", "medium")
+    # EACH TIER AT THE PIN OF ITS SIZE CLASS. At the landing of 26.12.1 the small rows carry the new pin and the large (medium) rows stay on 26.11.1, so one
+    # pin for all three tiers left medium with no rows and the freeze stopped. The tiers that share a pin are one group and a group holds one engine identity;
+    # two pins (two releases, one per size class, PAGE-SPEC rule 3) are two groups with one each. With no large pin there is one group, as before.
+    pins = {t: sparse_tier_pin(t).lower() for t in tiers}
+    groups = {}
+    for t in tiers:
+        groups.setdefault(pins[t][:9], []).append(t)
     out = {}
     for r in load_canonical():
         if r.get("lane") != "l3s" or r.get("backend") != arm or r.get("error"):
             continue
-        if str(r.get("engine_commit") or "").lower()[:9] != pin[:9]:
+        if str(r.get("engine_commit") or "").lower()[:9] != pins.get(r["scale"], landing)[:9]:
             continue
         out.setdefault(r["scale"], []).append(r)
-    tiers = ("tiny", "small", "medium")
     n = mp_builds()   # reps per tier this landing holds: the one reader the dense overlay uses, not a literal 5
     # ABSENT IS NOT PARTIAL -- the same distinction dense_mp_dir() needed.
     # PARTIAL (some tiers at the landing's n reps, others short) is the all-or-nothing
@@ -856,7 +885,10 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
     # from stage 1. Refusing both alike blocked every landing until the sparse
     # stage finished. Empty dict means absent; None still means
     # partial or mixed, and still refuses.
-    if not out:
+    # Absent is read at the tiers the LANDING measured (the ones at its own pin), not at the carried large rows: a staged landing of 26.12.1 that
+    # names the large pin has the 26.11.1 medium rows in the store from the first stage on, and that is no reason to refuse before the sparse stage
+    # of the new release has run. Rows at the landing's pin and none at the large pin is a class with no rows at its pin: that refuses below.
+    if not any(out.get(t) for t in tiers if pins[t][:9] == landing[:9]):
         return {}
     # Both builds of one release at one pin: the page shows both (export_web reads the frozen rows itself); this path feeds the paper's
     # LaTeX table, which is one build, so it validates each build and returns the chosen one (below).
@@ -867,32 +899,42 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
         # BENCH_ENGINE_BACKEND names it for a one-build freeze. The tables loop over the builds and print both.
         _want = build or _AI.wanted_build()
         if _want is None:
-            sys.stderr.write("pinned sparse rows hold both builds: name the build (there is no single-build default)\n")
+            _sparse_refused("pinned sparse rows hold both builds: name the build (there is no single-build default)")
             return None
         for _b in sorted(_builds - ({_want} if _want != "all" else set())):
             _other = {t: [r for r in rs if _AI.build_of(r) == _b] for t, rs in out.items()}
-            if any(len(_other.get(t, [])) < n for t in tiers) or len({_AI.arm_identity(r) for t in tiers for r in _other[t]}) != 1:
-                sys.stderr.write(f"pinned sparse rows of the {_b} build are incomplete or span two identities\n")
+            if any(len(_other.get(t, [])) < n for t in tiers) or any(
+                    len({_AI.arm_identity(r) for t in ts for r in _other[t]}) != 1 for ts in groups.values()):
+                _sparse_refused(f"pinned sparse rows of the {_b} build are incomplete or span two identities")
                 return None
         if _want != "all":
             out = {t: [r for r in rs if _AI.build_of(r) == _want] for t, rs in out.items()}
     if any(len(out.get(t, [])) < n for t in tiers):
         missing = [t for t in tiers if len(out.get(t, [])) < n]
-        sys.stderr.write(f"pinned sparse rows incomplete at {missing}\n")
+        why = (f"pinned sparse rows incomplete at {missing}: "
+               + ", ".join(f"{t} has {len(out.get(t, []))} of {n} rows at {pins[t][:9]}" for t in missing))
+        if any(_SC.SIZE_CLASS.get(("l3s", t)) == "large" for t in missing):
+            # the one loud sentence for the large class: which variable names its pin and which flag of the landing sets it
+            why += (f" ({_SC.LARGE_PIN_VAR} names the commit of the release the large rows are on when it is not the landing's: "
+                    "set it, or pass land_stage.py --large-pin)")
+        _sparse_refused(why)
         return None
-    versions = {_AI.arm_identity(r) for t in tiers for r in out[t]}   # (engine_version, build): one engine, one build
-    if len(versions) != (len(_builds) if build == "all" else 1):
-        sys.stderr.write(f"pinned sparse rows span {sorted(versions, key=str)}\n")
+    # (engine_version, build): one engine, one build, inside each pin
+    versions = {pin: {_AI.arm_identity(r) for t in ts for r in out[t]} for pin, ts in groups.items()}
+    if any(len(v) != (len(_builds) if build == "all" else 1) for v in versions.values()):
+        _sparse_refused(f"pinned sparse rows span {sorted(set().union(*versions.values()), key=str)}")
         return None
     return out
 
 
 def _sparse_2681_rows(arm="arcadedb_sparse_embedded", build=None):
     """The pinned sparse rows, or refuse. There is no overlay fallback:
-    incomplete or mixed pinned rows stop the generation."""
+    incomplete or mixed pinned rows stop the generation. The refusal says why (the same words as the stderr line), so a landing that
+    stops here names the variable of the large class when that is the cause."""
     pinned = _pinned_sparse_rows(arm, build)
     if pinned is None:
-        raise SystemExit(f"pinned sparse rows for {arm} incomplete or mixed (see stderr); no fallback")
+        raise SystemExit(f"pinned sparse rows for {arm} incomplete or mixed (see stderr); no fallback"
+                         + (f": {_SPARSE_WHY[-1]}" if _SPARSE_WHY else ""))
     return pinned   # {} when the arm has not run at this pin (absent, not partial)
 
 

@@ -5838,13 +5838,18 @@ def _censored_cells():
     # BENCH_COMPARATOR_PIN (comma list, optional): the 2026-11 rows land as two files at two pins, the ArcadeDB arms at the page's pin and the
     # comparators at the pin their chain was launched with (humemai/mmdbbench#28). Without it every failed or censored comparator cell was
     # dropped here and its declared absence with it (page_check A1 BLANK, A3 MISSING).
-    _pins = [pin] + [p.strip() for p in os.environ.get("BENCH_COMPARATOR_PIN", "").split(",") if p.strip()]
+    _comparator_pins = [p.strip() for p in os.environ.get("BENCH_COMPARATOR_PIN", "").split(",") if p.strip()]
 
     def _same_pin(r):
         if not pin:
             return True
         got = str(r.get("engine_commit") or "")
-        return bool(got) and any(got.startswith(p) or p.startswith(got) for p in _pins)
+        # A ROW IS AT THE PIN OF ITS SIZE CLASS (humemai/mmdbbench#154, size_classes.pin_of_size_class): the landing's, and for a large-size row the pin of
+        # the large rows when the landing names it (BENCH_LARGE_ENGINE_COMMIT). At the landing of 26.12.1 the large cells shown are the 26.11.1 ones, so a
+        # timeout or failure at that pin is the cell's note; read at the landing's pin alone it was dropped and the cell read as one nobody ran. A pair
+        # that is not in SIZE_CLASS reads the landing's pin. With no large pin the two are one pin and nothing moves.
+        own = _SC.pin_of_size_class(_SC.row_size_class(r) or "small") or pin
+        return bool(got) and any(got.startswith(p) or p.startswith(got) for p in [own] + _comparator_pins)
 
     for r in rows:
         if not _same_pin(r):

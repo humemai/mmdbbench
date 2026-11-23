@@ -274,6 +274,19 @@ These open items moved here from section 7 (the owner's decision of 2026-11-11 o
 
 Not moved: row 19 (the disk column at the build point) stays open in its own row, and row 88 (product quantization) stays off by default, with the quantizer screen in humemai/mmdbbench#106. #114 also lists the decision whether the 2026-12 instrument (`BENCH_INSTRUMENT=2026-12`, humemai/mmdbbench#103 and #104) is on for the final numbers.
 
+**The final small-size chain (humemai/mmdbbench#136).** The rerun is the small size of every table, so its stages come from `--profile final-small`: the lanes of `--profile full --second-list` (graph, cross-model, documents, dense, sparse, time series, lifecycle) at the small and extra sizes only, and without the arms that no page table prints, the int8 dense arms and the `nocompact` sparse arms. The lean-client and PostgreSQL-wire twins of the served cells stay in. The sizes are the classes of `size_classes.SIZE_CLASS`, never `runner.LARGE_SCALES`: that tuple holds `sf1full`, a small size, and lacks `sf10`, `e2_500k`, `lc10m`, `ts1000` and `medium`. The profile carries its sizes and its second list, so `--sizes all` with it is refused and `--second-list` is implied. `--sizes small` also works with the other profiles (`--profile full --second-list --sizes small` keeps the int8 and `nocompact` arms), and `--sizes all` is their default: a call without the option writes the 26.11.1 pass byte for byte (`stage_drafts_2611.sha256`). A stage left with no scale is dropped (the JVM image-defaults arm, which runs at tpch10 only), and the title of a stage that lost a scale says so. It is one chain per wheel, as before. The pins in this call are made up, because `--check` needs none that is real:
+
+```
+BENCH_STAGE_REPO='$HOME/rerun-wt/jvm' uv run --no-project python make_2611_stages.py \
+    --arcadedb-release 26.12.1 --engine-commit <40 hex> --image-digest sha256:<64 hex> \
+    --wheel-name arcadedb_jvm-26.12.1-py3-none-manylinux_2_28_x86_64.whl --wheel-sha256 <64 hex> \
+    --wheel-url https://files.pythonhosted.org/<path>/arcadedb_jvm-26.12.1-py3-none-manylinux_2_28_x86_64.whl \
+    --go-marker '$HOME/conf/go-arcadedb-2612' --harness-sha <40 hex> --id-prefix <new prefix> \
+    --after none --status-file none --profile final-small --sizes small --check
+```
+
+The native chain is the same call with the `arcadedb-26.12.1-...` wheel, its own prefix and worktree, and `--native-image-digest`. Replace `--check` with `--out DIR` (and a real `--after` and `--status-file`) to write the drafts, and give `--check` a `--drafts DIR` to lint written ones: it refuses a script that runs a large size or an arm the profile drops. Each chain has 8 stages and 25 scripts at three passes, and 92 cells per build: l2 8, e2 6, l1tpc 6, l3d 4, l3s 16, l4 4 and lifecycle 48. The next change is humemai/mmdbbench#137, which gives the `restart` table and the `e4` decomposition stages of their own: the generator's stage table has none for them yet, so no chain of this profile covers those two tables.
+
 ## 8. Filing an engine weakness upstream, as a routine
 
 The maintainers want the losses: a benchmark that finds a weakness and says nothing has done half the work. The comparison is CURRENT ArcadeDB against the OTHER ENGINES, never ArcadeDB against its own past versions; a cross-version difference in our own rows is a question about our page and belongs to the landing checklist, not to their tracker.

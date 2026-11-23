@@ -20,6 +20,7 @@ import make_2611_stages as G  # noqa: E402
 COMMIT = "e854692736b48971f92dff78a1e727bc570bb6a2"
 WHEEL = "arcadedb_embedded-26.10.2-cp312-cp312-manylinux_2_34_x86_64.whl"
 REL_WHEEL = "arcadedb_embedded-26.11.1-cp312-cp312-manylinux_2_34_x86_64.whl"
+NATIVE_REL_WHEEL = "arcadedb-26.11.1-py3-none-manylinux_2_28_x86_64.whl"
 DIGEST = "sha256:" + "ab" * 32
 WSHA = "cd" * 32
 
@@ -377,17 +378,26 @@ def test_the_repetitions_default_to_the_target_and_more_than_it_are_refused(tmp_
 SHA_LIST = HERE / "stage_drafts_2611.sha256"
 GENERATIONS = {
     # case: (arguments, whether the comparator pair comes from the environment)
-    # the default profile (paper-2611) is what ships; --profile full is covered by the selection tests, not by a hash list
+    # the default profile (paper-2611) is what ships; the comparators under --profile full are covered by the selection tests, not by a hash list. ArcadeDB's two
+    # chains under --profile full --second-list are listed below, at every size
     "comparators": (["--after", "qR20", "--status-file", "none"], True),   # engine tiers on, the default
     "comparators-no-tiers": (["--no-tiers", "--after", "qR20", "--status-file", "none"], True),
     "comparators-paper-3reps": (["--order", "paper", "--reps", "3", "--after", "qR20", "--status-file", "none", "--id-prefix", "qU"], True),
     "arcadedb-release": (None, False),
+    # The native build's chain, and both chains on `--profile full --second-list`, at every size (the default of --sizes). The stages that `--sizes small` and
+    # `--profile final-small` are cut from must not move when those options change (humemai/mmdbbench#136): the lists below are main's output before them.
+    "arcadedb-release-native": (_release_args(**{"--wheel-name": NATIVE_REL_WHEEL, "--wheel-url": "https://files.pythonhosted.org/packages/x/" + NATIVE_REL_WHEEL})
+                                + ["--after", "none", "--id-prefix", "qN"], False),
+    "arcadedb-release-full-second": (_release_args() + ["--after", "none", "--id-prefix", "qV", "--profile", "full", "--second-list"], False),
+    "arcadedb-release-native-full-second": (_release_args(**{"--wheel-name": NATIVE_REL_WHEEL, "--wheel-url": "https://files.pythonhosted.org/packages/x/" + NATIVE_REL_WHEEL})
+                                            + ["--after", "none", "--id-prefix", "qN", "--profile", "full", "--second-list"], False),
 }
 
 
 def drafts_sha256(tmp_path):
-    """sha256 of every script four generations write, under the default profile (paper-2611): the comparators (default order with engine tiers, the same without
-    them, and paper order at 3 reps) and ArcadeDB alone on a release, the core lanes. One line per script, `<sha256>  <case>/<name>`, sorted."""
+    """sha256 of every script the generations of GENERATIONS write: under the default profile (paper-2611) the comparators (default order with engine tiers, the same
+    without them, and paper order at 3 reps) and ArcadeDB alone on a release, the JVM and the native chain, the core lanes; under `--profile full --second-list` both
+    ArcadeDB chains at every size. One line per script, `<sha256>  <case>/<name>`, sorted."""
     lines = []
     for case, (args, from_env) in GENERATIONS.items():
         out = tmp_path / case

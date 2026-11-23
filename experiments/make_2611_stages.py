@@ -50,6 +50,13 @@ of the image, the pinned wheel by sha256, the cap rule, the ALL-DONE trap. What 
     worktree of this repository pinned at that commit (BENCH_STAGE_REPO names it), so they check HEAD instead of pulling, and the
     pair install puts the wheel into the worktree's own wheel directory, which it creates, instead of archiving another release's.
     Without these arguments the stages are the ones of the 26.11.1 pass, byte for byte (stage_drafts_2611.sha256).
+  * THE SIZES AND THE FINAL PROFILE (humemai/mmdbbench#136, for the rerun of #114). `--sizes small` keeps the scales whose class in
+    `size_classes.SIZE_CLASS` is small or extra and drops a stage left with no scale. The class is the one of the frozen rows and the page, not
+    `runner.LARGE_SCALES`, which lists `sf1full` (a small size) and lacks `sf10`, `e2_500k`, `lc10m`, `ts1000` and `medium`. `--sizes all` is the
+    default and writes the 26.11.1 pass byte for byte. `--profile final-small` is the rerun's profile: the lanes of `full` with the second list,
+    less the arms the page does not print (the int8 and PQ dense arms, the `nocompact` sparse arms), at the small sizes only. It carries its
+    sizes and its second list, so `--sizes all` with it is refused and `--second-list` is implied; `--check` proves the stage list and
+    `--check --drafts DIR` the written scripts. The twins of the served cells (lean client, PostgreSQL wire) are the runner's, not dropped here.
   * THE INSTRUMENT. Every stage exports BENCH_INSTRUMENT=2026-11 before its first python call and aborts if the tree
     does not select it. Rows go to `runs_page_<pin>_2611.jsonl` (and the overlay directories carry the same suffix), so one
     file never holds two instruments. This generator re-executes itself with the variable set; a different value in the
@@ -76,13 +83,14 @@ Usage:
   python3 make_2611_stages.py --check [--drafts DIR]       # profile, selection, coverage and instrument proofs; lints DIR's scripts
   python3 make_2611_stages.py --project CELLS.tsv --check   # plus the projected hours per stage
   ARCADEDB_WHEEL=... ARCADEDB_SERVER_IMAGE=... ARCADEDB_ENGINE_COMMIT=<40 hex> \\
-      python3 make_2611_stages.py --after qR15 --status-file STATUS.txt --id-prefix qS --out DIR [--engines a,b] [--lanes graph,dense] [--profile paper-2611|full] [--second-list (full only)]
+      python3 make_2611_stages.py --after qR15 --status-file STATUS.txt --id-prefix qS --out DIR [--engines a,b] [--lanes graph,dense] [--profile paper-2611|full|final-small] [--second-list (full only)] [--sizes all|small]
   python3 make_2611_stages.py --arcadedb-release 26.11.1 --engine-commit <40 hex> --image-digest sha256:<64 hex> \\
       --wheel-name arcadedb_jvm-26.11.1-<tags>.whl --wheel-sha256 <64 hex> --wheel-url <https url> \\
       --after <last comparator stage> --status-file STATUS.txt --id-prefix qT --out DIR
   python3 make_2611_stages.py --check --drafts DIR [--status-file STATUS.txt]   # also: the drafts' first wait is not already in STATUS.txt
   BENCH_STAGE_REPO='$HOME/<worktrees>/jvm' python3 make_2611_stages.py --arcadedb-release 26.12.1 <the five pin arguments> \\
       --go-marker '$HOME/conf/go-arcadedb-2612' --harness-sha <40 hex> --id-prefix <new prefix> --after none --status-file STATUS.txt --out DIR   # a later release
+  (the same with --profile final-small, and the small sizes of every lane, second list included, are the rerun of humemai/mmdbbench#114)
 """
 from __future__ import annotations
 
@@ -101,6 +109,7 @@ import bench_common
 import cap_rule
 import runner
 import engine_pin
+import size_classes as _SC
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -468,26 +477,38 @@ MODES = ("comparators", "arcadedb")
 # THE PROFILE (the owner, 2026-10-25): the paper's experiments must finish by 2026-11-10, so the subset is narrowed in the open. A
 # dropped cell is LISTED (`--check` prints it, with its reason and count), never silently missing, and `--check` proves that none of
 # it is scheduled (profile_problems). `full` is the whole subset as it was before the profile. Each cell is dropped for the FIRST of
-# its reasons in DROP_ORDER, so the counts do not overlap.
+# its reasons in DROP_ORDER_ALL, so the counts do not overlap.
 DROP_SECOND_LIST = "second-list"
 DROP_NEO4J_MEMGRAPH_DENSE = "neo4j-memgraph-dense"
 DROP_QUANTIZED_DENSE = "quantized-dense"
-DROP_ORDER = (DROP_SECOND_LIST, DROP_NEO4J_MEMGRAPH_DENSE, DROP_QUANTIZED_DENSE)
+DROP_ORDER = (DROP_SECOND_LIST, DROP_NEO4J_MEMGRAPH_DENSE, DROP_QUANTIZED_DENSE)   # the paper-2611 profile's drops
+DROP_NOCOMPACT_SPARSE = "nocompact-sparse"   # the final-small profile's own (humemai/mmdbbench#136)
+DROP_ORDER_ALL = DROP_ORDER + (DROP_NOCOMPACT_SPARSE,)   # every reason a profile may name, in the order drop_reason tries them
+# the lane whose arms a drop names (the second list names whole lanes, so it has no entry)
+DROP_LANE = {DROP_NEO4J_MEMGRAPH_DENSE: "l3d", DROP_QUANTIZED_DENSE: "l3d", DROP_NOCOMPACT_SPARSE: "l3s"}
 DROP_WHY = {
     DROP_SECOND_LIST: "sparse, time series and lifecycle are out of scope for the paper (the comparators and the ArcadeDB chain alike)",
     DROP_NEO4J_MEMGRAPH_DENSE: "Neo4j and Memgraph stay in the graph lane (and cross-model where they are); their dense-lane cells are out",
     DROP_QUANTIZED_DENSE: "the dense lane is fp32 only: quantized arms are not like-for-like across engines, and quantization is out of the "
                           "paper's scope (ArcadeDB's own INT8 and BINARY are out by the owner's rule; jvector PQ, BQ and NVQ are studied after the paper)",
+    DROP_NOCOMPACT_SPARSE: "the sparse nocompact arm is the settle-step ablation that export_web.OFF_PAGE_ARMS keeps off the page: no table prints it, so the final "
+                           "pass does not spend cells on it",
 }
 PROFILES = {
     "paper-2611": {"drops": DROP_ORDER, "target_reps": TARGET_REPS,
                    "doc": "core lanes only, fp32 dense only, no Neo4j or Memgraph dense cell, target N=3 (the n=4 and n=5 passes are dropped)"},
     "full": {"drops": (), "target_reps": DEFAULT_REPS, "doc": "the whole subset: the second list with --second-list, every dense precision"},
+    # THE FINAL PROFILE (humemai/mmdbbench#136, for the rerun of #114): the lanes of `full` with the second list (sparse, time series, lifecycle), less
+    # the arms no page table prints, at the small sizes only. It carries its sizes and its second list: --sizes all with it is refused (resolve_sizes).
+    "final-small": {"drops": (DROP_QUANTIZED_DENSE, DROP_NOCOMPACT_SPARSE), "target_reps": TARGET_REPS, "sizes": "small", "second_list": True,
+                    "doc": "the small and extra sizes only (size_classes.SIZE_CLASS), the second list included, no int8 or PQ dense arm and no nocompact sparse arm"},
 }
 DEFAULT_PROFILE = "paper-2611"
 # the arm families QUANTIZATION.md names: `<engine>_dense_int8` (scalar or int8) and `<engine>_dense_pq` (product quantization, only under
 # BENCH_DENSE_PQ=1). The plain `<engine>_dense` arm is the fp32 one (LanceDB, outside the subset, is the exception and is not staged).
 QUANTIZED_DENSE = re.compile(r"_dense(_embedded|_server)?_(int8|pq)$")
+# the sparse ablation arm the page does not print (export_web.OFF_PAGE_ARMS): `arcadedb_sparse_embedded_nocompact`
+NOCOMPACT_SPARSE = re.compile(r"_sparse(_embedded|_server)?_nocompact$")
 # the arms ArcadeDB keeps in the dense lane under the profile: fp32, embedded and served
 ARCADEDB_FP32_DENSE = ("arcadedb_dense_embedded", "arcadedb_dense_server")
 
@@ -496,10 +517,14 @@ def is_quantized_dense(backend):
     return bool(QUANTIZED_DENSE.search(backend))
 
 
+def is_nocompact_sparse(backend):
+    return bool(NOCOMPACT_SPARSE.search(backend))
+
+
 def drop_reason(profile, lane, backend):
-    """Why `profile` drops this arm in this lane (one of DROP_ORDER), or None. Needs engine_of, defined below; called at run time."""
+    """Why `profile` drops this arm in this lane (one of DROP_ORDER_ALL), or None. Needs engine_of, defined below; called at run time."""
     drops = PROFILES[profile]["drops"]
-    for why in DROP_ORDER:
+    for why in DROP_ORDER_ALL:
         if why not in drops:
             continue
         if why == DROP_SECOND_LIST and lane in SECOND_LANES:
@@ -507,6 +532,8 @@ def drop_reason(profile, lane, backend):
         if lane == "l3d" and why == DROP_NEO4J_MEMGRAPH_DENSE and engine_of(backend) in ("neo4j", "memgraph"):
             return why
         if lane == "l3d" and why == DROP_QUANTIZED_DENSE and is_quantized_dense(backend):
+            return why
+        if lane == "l3s" and why == DROP_NOCOMPACT_SPARSE and is_nocompact_sparse(backend):
             return why
     return None
 
@@ -517,9 +544,12 @@ def profile_lanes(profile):
 
 
 def profile_skip(profile):
-    """The dense-lane arms (exact registered names) the profile drops, for subset_specs' and stage_problems' `skip`. Derived from
-    runner.LANES (subset engines only), so a newly registered int8 arm is dropped without anyone typing its name."""
-    return tuple(b for b in runner.LANES["l3d"][1] if engine_of(b) and drop_reason(profile, "l3d", b) is not None)
+    """The dense-lane and sparse-lane arms (exact registered names) the profile drops, for subset_specs' and stage_problems' `skip`. Derived from
+    runner.LANES (subset engines only), so a newly registered int8 arm is dropped without anyone typing its name. The second list drops the sparse
+    lane whole, so it names no arm here (the paper-2611 profile's skip is the dense arms alone, as it was)."""
+    dense = tuple(b for b in runner.LANES["l3d"][1] if engine_of(b) and drop_reason(profile, "l3d", b) is not None)
+    sparse = tuple(b for b in runner.LANES["l3s"][1] if engine_of(b) and drop_reason(profile, "l3s", b) not in (None, DROP_SECOND_LIST))
+    return dense + sparse
 
 
 def dropped_cells(profile):
@@ -561,21 +591,32 @@ def profile_problems(profile, stages, label=""):
                 out.append(f"{tag}{st[0]}: dense arm {b} is quantized; the {profile} profile is fp32 only")
             if lane == "l3d" and DROP_NEO4J_MEMGRAPH_DENSE in drops and re.match(r"(neo4j|memgraph)", b):
                 out.append(f"{tag}{st[0]}: {b} is a Neo4j/Memgraph dense cell, dropped by the {profile} profile")
+            if lane == "l3s" and DROP_NOCOMPACT_SPARSE in drops and is_nocompact_sparse(b):
+                out.append(f"{tag}{st[0]}: sparse arm {b} is the nocompact ablation, dropped by the {profile} profile")
     if DROP_QUANTIZED_DENSE in drops:
         dense = {b for st in stages if st[2] == "l3d" for b in stage_backends(st) if engine_of(b) == "arcadedb"}
         # the native chain runs the embedded half of the pair only: the served arm is the JVM chain's (served_arcadedb_arms)
         want = set(ARCADEDB_FP32_DENSE) - (set(build_less_served_arms()) if CHAIN_BUILD == "native" else set())
         if dense and dense != want:
             out.append(f"{tag}ArcadeDB's dense arms are {sorted(dense)}, expected exactly its fp32 {'arm' if len(want) == 1 else 'pair'} {sorted(want)}")
+    if DROP_NOCOMPACT_SPARSE in drops:
+        sparse = {b for st in stages if st[2] == "l3s" for b in stage_backends(st) if engine_of(b) == "arcadedb"}
+        want = {b for b in runner.LANES["l3s"][1] if engine_of(b) == "arcadedb" and drop_reason(profile, "l3s", b) is None}
+        want -= set(build_less_served_arms()) if CHAIN_BUILD == "native" else set()
+        if sparse and sparse != want:
+            out.append(f"{tag}ArcadeDB's sparse arms are {sorted(sparse)}, expected exactly {sorted(want)} (every arm but the nocompact ablation)")
     for why in drops:
         if why == DROP_SECOND_LIST:
             continue
-        if not any(drop_reason(profile, "l3d", b) == why for b in runner.LANES["l3d"][1] if engine_of(b)):
+        home = DROP_LANE[why]
+        if not any(drop_reason(profile, home, b) == why for b in runner.LANES[home][1] if engine_of(b)):
             out.append(f"{tag}the {why} drop matches no registered subset arm: the rule is stale")
     for b in profile_skip(profile):
-        elsewhere = [l for l, spec in runner.LANES.items() if l != "l3d" and b in spec[1]]
+        home = next(l for l in ("l3d", "l3s") if b in runner.LANES[l][1] and drop_reason(profile, l, b) not in (None, DROP_SECOND_LIST))
+        elsewhere = [l for l, spec in runner.LANES.items() if l != home and b in spec[1]]
         if elsewhere:
-            out.append(f"{tag}{b} is dropped from the dense lane by name but is also registered in {elsewhere}, which the arm-name skip would drop too")
+            out.append(f"{tag}{b} is dropped from the {home} lane by name but is also registered in {elsewhere}, which the arm-name skip would drop too")
+    out += [f"{tag}{p}" for p in size_problems(stages, PROFILES[profile].get("sizes", "all"))]
     return out
 
 
@@ -583,7 +624,7 @@ def profile_report(profile):
     """Lines that list what the profile drops: reason, lane cells per pass, and the arms (dense) or lanes (second list)."""
     cells = dropped_cells(profile)
     out = []
-    for why in DROP_ORDER:
+    for why in DROP_ORDER_ALL:
         if why not in cells:
             continue
         cs = cells[why]
@@ -592,6 +633,68 @@ def profile_report(profile):
         out.append(f"  dropped {len(cs):3} lane cells/pass  {why}: {what}")
         out.append(f"      why: {DROP_WHY[why]}")
     return out
+# THE SIZES (humemai/mmdbbench#136). `--sizes small` keeps the scales whose class in size_classes.SIZE_CLASS is small or extra and leaves the large ones out.
+# The class is the one of the frozen rows and the page (SIZE_CLASS), NOT runner.LARGE_SCALES: that tuple is the cap rule's and the PostgreSQL-wire twin's
+# notion of "big"; it lists sf1full (a small size of graph analytics) and lacks sf10, e2_500k, lc10m, ts1000 and medium. A scale with no class is refused,
+# never guessed, so a size added to the stage table forces a decision in size_classes.py. `all` keeps every scale, so the 26.11.1 drafts do not move.
+SIZES = ("all", "small")
+SIZE_KEEPS = {"small": ("small", "extra")}
+
+
+def scale_class(lane, scale):
+    """The size class (small, large or extra) of a staged (lane, scale) from size_classes.SIZE_CLASS, or None when the pair is not in it."""
+    return _SC.SIZE_CLASS.get((lane, scale))
+
+
+def scale_kept(lane, scale, sizes="all"):
+    """True when `sizes` keeps this scale of this lane (None and "all" keep every scale). A scale with no class is refused once a filter is on."""
+    if sizes in (None, "all"):
+        return True
+    cls = scale_class(lane, scale)
+    if cls is None:
+        raise SystemExit(f"REFUSING --sizes {sizes}: {lane}/{scale} has no class in size_classes.SIZE_CLASS (small, large or extra): classify it there first")
+    return cls in SIZE_KEEPS[sizes]
+
+
+def resolve_sizes(profile, sizes):
+    """The size filter of a call: `--sizes`, else the profile's own, else all. A profile that carries its sizes (final-small) refuses another value:
+    a chain of the final pass that ran the large sizes too would spend days of the one machine on cells the pass does not take."""
+    own = PROFILES[profile].get("sizes")
+    if own and sizes not in (None, own):
+        raise SystemExit(f"REFUSING: --sizes {sizes} with --profile {profile}: that profile is the {own}-size pass. Leave --sizes out or give --sizes {own}")
+    return own or sizes or "all"
+
+
+def size_table_problems():
+    """Every (lane, scale) the stage table stages has a class in size_classes.SIZE_CLASS (a new size must be classed before --sizes can place it)."""
+    return [f"{lane}/{sc}: staged in STAGES but has no class in size_classes.SIZE_CLASS (small, large or extra)"
+            for lane, sc in sorted({(s[2], x) for s in STAGES for x in s[4]}) if scale_class(lane, sc) is None]
+
+
+def size_problems(stages, sizes="all"):
+    """The size proof: every cell the stage list schedules is of a class `sizes` keeps. It reads the cells the stages carry, not the filter that made the list."""
+    if sizes in (None, "all"):
+        return []
+    out = []
+    for st in stages:
+        for lane, sc in sorted({(c.lane, c.scale) for c in stage_cells(st)}):
+            cls = scale_class(lane, sc)
+            if cls is None:
+                out.append(f"{st[0]}: runs {lane}/{sc}, which has no class in size_classes.SIZE_CLASS")
+            elif cls not in SIZE_KEEPS[sizes]:
+                out.append(f"{st[0]}: runs {lane}/{sc}, a {cls} size, but --sizes {sizes} keeps the {' and '.join(SIZE_KEEPS[sizes])} classes")
+    return out
+
+
+def size_report(sizes):
+    """Lines that list what the size filter keeps and what it leaves out: the (lane, scale) pairs of the stage table."""
+    if sizes in (None, "all"):
+        return []
+    pairs = sorted({(s[2], x) for s in STAGES for x in s[4]})
+    return [f"  kept    {', '.join(f'{l}/{x}' for l, x in pairs if scale_kept(l, x, sizes))}",
+            f"  dropped {', '.join(f'{l}/{x} ({scale_class(l, x)})' for l, x in pairs if not scale_kept(l, x, sizes))}"]
+
+
 # ORDER (the default, "biggest-last"): the core block first, the second list after it (lifecycle, sparse, time series).
 # Inside the core block the large tiers (LARGE_SCALES) run after every small tier, and the cells that dominate the hours
 # (BIGGEST: Memgraph's deep10m dense cells, SurrealDB's documents at tpch1, the full SF1 network's analytics) run last of
@@ -746,12 +849,13 @@ def _piece(s, title, backends, scales):
     return p
 
 
-def subset_specs(engines, lanes, order="biggest-last", skip=(), tiers=False):
+def subset_specs(engines, lanes, order="biggest-last", skip=(), tiers=False, sizes="all"):
     """STAGES, unnumbered, restricted to the lanes and to the arms of these engines (minus `skip`). A stage
     left with no arm is dropped; the host-side, restart and decomposition stages are not in the subset's lists. Order
     "paper" is the table order; "biggest-last" is described at BIGGEST. With `tiers`, a stage whose arms are of several engine
     tiers is split into one piece per tier (the arms keep their ENGINE_PRIORITY order), and every piece of Tier 1 comes before
-    every piece of Tier 2, each tier in the order the other options give (nothing is dropped or doubled: stage_problems proves it)."""
+    every piece of Tier 2, each tier in the order the other options give (nothing is dropped or doubled: stage_problems proves it). With `sizes` ("small"),
+    only the scales of the kept size classes stay (scale_kept) and a stage left with no scale is dropped; "all" leaves every stage as it was."""
     base = []
     for spec in STAGES:
         s = _spec10(spec)
@@ -760,9 +864,13 @@ def subset_specs(engines, lanes, order="biggest-last", skip=(), tiers=False):
         bes = [b for b in stage_backends(spec) if engine_of(b) in engines and b not in skip]
         if not bes:
             continue
+        scales = [x for x in s[4] if scale_kept(s[2], x, sizes)]
+        if not scales:
+            continue
+        title = s[1] + (f" ({sizes} sizes only)" if len(scales) < len(s[4]) else "")   # a title that says "both sizes" must not hide what the filter left out
         for t in (sorted({tier_of(b) for b in bes}) if tiers else [None]):
             part = [b for b in bes if t is None or tier_of(b) == t]
-            base.append(_piece(s, s[1], part, s[4]))
+            base.append(_piece(s, title, part, scales))
     if order == "paper":
         return sorted(base, key=stage_tier) if tiers else base   # stable: the table order inside a tier
     pieces = []   # (block, tier, index, spec)
@@ -798,10 +906,10 @@ def number(specs, prefix, start=1):
 
 
 # --------------------------------------------------------------------------------------------------------- proofs
-def stage_problems(stages, engines, lanes, skip=()):
+def stage_problems(stages, engines, lanes, skip=(), sizes="all"):
     """What is wrong with a stage list: an arm outside the engines asked for or outside the subset, a lane outside the lanes,
-    and the exactly-once proof: the cells the list schedules equal the cells STAGES schedules for these engines and
-    lanes (nothing lost, nothing doubled, nothing extra)."""
+    and the exactly-once proof: the cells the list schedules equal the cells STAGES schedules for these engines,
+    lanes and sizes (nothing lost, nothing doubled, nothing extra; `sizes` is the filter of subset_specs)."""
     out = arm_problems()
     for st in stages:
         if st[2] not in lanes:
@@ -819,6 +927,9 @@ def stage_problems(stages, engines, lanes, skip=()):
         s[8] = [b for b in stage_backends(spec) if engine_of(b) in engines and b not in skip]
         if not s[8]:   # an empty roster would mean "every arm of the lane" to stage_backends
             continue
+        s[4] = [x for x in s[4] if scale_kept(spec[2], x, sizes)]
+        if not s[4]:
+            continue
         for c in stage_cells(tuple(s)):
             want[c] += 1
     have = collections.Counter(c for st in stages for c in stage_cells(st))
@@ -826,7 +937,7 @@ def stage_problems(stages, engines, lanes, skip=()):
         out.append(f"cell {c.label} is scheduled {have[c]} times, expected {want[c]}")
     for c in sorted(want - have):
         out.append(f"cell {c.label} is in no stage")
-    return out
+    return out + size_problems(stages, sizes)
 
 
 def instrument_problems(env=None):
@@ -844,6 +955,7 @@ def instrument_problems(env=None):
 
 
 _BACKENDS = re.compile(r'^BACKENDS="([^"]*)"', re.M)
+_CELL_LABEL = re.compile(r'^[ \t]*run_(?:cell|overlay) "([A-Za-z0-9]+)/([A-Za-z0-9_]+)/', re.M)   # the `<lane>/<scale>/...` label of a cell call
 
 
 _NATIVE_WHEEL = re.compile(r"dist/arcadedb-\d")
@@ -891,9 +1003,10 @@ def chain_served_problems(*dirs):
     return out
 
 
-def lint_draft(text, name, engines=None, profile=None):
+def lint_draft(text, name, engines=None, profile=None, sizes=None):
     """Problems in one emitted stage script: it must export the instrument, name no other, write the 2611 rows file and
-    run only subset arms (of `engines` when given), and, under a `profile`, no lane and no dense arm it drops. The pair-install
+    run only subset arms (of `engines` when given), and, under a `profile`, no lane and no dense or sparse arm it drops, and, under `sizes` (or the
+    sizes the profile carries), no cell of a size class they leave out. The pair-install
     script has no runner cells and is only checked for the instrument not being named wrongly."""
     out = []
     pair = "build_matched_pair.sh" in text
@@ -953,6 +1066,12 @@ def lint_draft(text, name, engines=None, profile=None):
                 why = drop_reason(profile, lane.group(1), b)
                 if why:
                     out.append(f"{name}: runs {b} on lane {lane.group(1)}, which the {profile} profile drops ({why})")
+        sizes = sizes or PROFILES.get(profile, {}).get("sizes") or "all"
+        if sizes != "all":
+            for lane_, scale_ in sorted(set(_CELL_LABEL.findall(text))):
+                cls = scale_class(lane_, scale_)
+                if cls not in SIZE_KEEPS[sizes]:
+                    out.append(f"{name}: runs {lane_}/{scale_}, a {cls or 'classless'} size, but --sizes {sizes} keeps the {' and '.join(SIZE_KEEPS[sizes])} classes")
     return out
 
 
@@ -1002,7 +1121,7 @@ def prefix_problems(prefix, status_file):
 _TIER_TAG = re.compile(r"\[engine tier (\d+), rep pass (\d+) of (\d+)\]")
 
 
-def lint_drafts(directory, engines=None, status_file=None, profile=None):
+def lint_drafts(directory, engines=None, status_file=None, profile=None, sizes=None):
     """Lint every script in a folder, and check the chain: each stage waits for the one before it in id order.
     With a STATUS file, the first stage's wait must not already be true there, and no draft's own marker may be there either."""
     files = sorted(glob.glob(os.path.join(directory, "*.sh")))
@@ -1021,7 +1140,7 @@ def lint_drafts(directory, engines=None, status_file=None, profile=None):
     for f in files:
         name = os.path.basename(f)
         text = open(f, encoding="utf-8").read()
-        out += lint_draft(text, name, engines, profile)
+        out += lint_draft(text, name, engines, profile, sizes)
         m = _BACKENDS.search(text)
         if m and tiered:
             ts = {tier_of(b) for b in m.group(1).split()}
@@ -1848,12 +1967,13 @@ def pass_plan(stages, reps, tiers=False):
     return out
 
 
-def plan_problems(stages, reps, plan, tiers):
+def plan_problems(stages, reps, plan, tiers, sizes="all"):
     """What is wrong with the run order `plan` (pass_plan's output) of `stages`: a stage that mixes engine tiers, an order that is not
     schedule_order (T1 passes 1-3, T2 passes 1-3, then T1 and T2 alternating from pass 4), a tier that skips, repeats or splits a
     pass, a pass that is not whole before the next starts (so some prefix would not be a complete set of equal replicates), an id
     that repeats or does not rise, and the exactly-once proof per pass: for every pass p the plan runs exactly the cells of the
-    stages that run a rep p, once each (so every subset arm is in one stage per workload per rep)."""
+    stages that run a rep p, once each (so every subset arm is in one stage per workload per rep). `stages` is the filtered list (subset_specs' `sizes`),
+    and with `sizes` the plan itself is held to the kept size classes, so a cell of a left-out size cannot run in any pass."""
     out = []
     ids = [s[0] for s, _ in plan]
     if len(set(ids)) != len(ids):
@@ -1899,7 +2019,7 @@ def plan_problems(stages, reps, plan, tiers):
         out.append(f"cell {c.label} at pass {p} is scheduled {have[(c, p)]} times, expected {want[(c, p)]}")
     for (c, p) in sorted(want - have):
         out.append(f"cell {c.label} at pass {p} is in no stage")
-    return out
+    return out + size_problems(list({s[0]: s for s, _ in plan}.values()), sizes)
 
 
 def _after_arg(text):
@@ -2110,7 +2230,11 @@ def main(argv=None) -> int:
     ap.add_argument("--profile", choices=tuple(PROFILES), default=DEFAULT_PROFILE,
                     help=f"which cells the subset keeps (default {DEFAULT_PROFILE}): " + "; ".join(f"{k}: {v['doc']}" for k, v in PROFILES.items())
                          + ". Every dropped cell is listed by --check, with its reason")
-    ap.add_argument("--second-list", action="store_true", help="add the second list: sparse, time series, lifecycle (--profile full only)")
+    ap.add_argument("--second-list", action="store_true",
+                    help="add the second list: sparse, time series, lifecycle (--profile full; final-small has it already)")
+    ap.add_argument("--sizes", choices=SIZES, default=None,
+                    help="which sizes the chain runs (default: the profile's own, `all` for paper-2611 and full): small keeps the scales whose class in "
+                         "size_classes.SIZE_CLASS is small or extra and leaves the large ones out; final-small is small and refuses all")
     ap.add_argument("--reps", type=int, default=DEFAULT_REPS,
                     help=f"repetitions per cell, 1 to {MAX_REPS} (default {DEFAULT_REPS}: the target is N={TARGET_REPS}; the n=4 and n=5 passes are dropped)")
     ap.add_argument("--order", choices=("biggest-last", "paper"), default="biggest-last",
@@ -2159,7 +2283,8 @@ def main(argv=None) -> int:
     mode = "arcadedb" if a.arcadedb_release else "comparators"
     pins = release_pins(a) if a.arcadedb_release else None
     engines = parse_engines(a.engines, mode)
-    lanes = parse_lanes(a.lanes, a.second_list, a.profile)
+    sizes = resolve_sizes(a.profile, a.sizes)
+    lanes = parse_lanes(a.lanes, a.second_list or bool(PROFILES[a.profile].get("second_list")), a.profile)
 
     jp = check_jpype_pin()
     for p in jp:
@@ -2176,21 +2301,25 @@ def main(argv=None) -> int:
     GO_ARCADEDB_MARKER, GO_RELEASE, HARNESS_SHA = rerun_params(a, mode)
     skip = (tuple(profile_skip(a.profile)) + ((TIMESCALEDB,) if a.without_timescaledb else ())
             + (tuple(build_less_served_arms()) if CHAIN_BUILD == "native" else ()))
-    specs = subset_specs(engines, lanes, a.order, skip, a.tiers)
+    specs = subset_specs(engines, lanes, a.order, skip, a.tiers, sizes)
     pair_id = f"{a.id_prefix}00" if mode == "arcadedb" else None
     stages = number(specs, a.id_prefix)
     plan = pass_plan(stages, a.reps, a.tiers)
-    problems = (stage_problems(stages, engines, lanes, skip) + check_coverage()[0] + tier_table_problems()
-                + plan_problems(stages, a.reps, plan, a.tiers) + profile_problems(a.profile, stages))
+    problems = (stage_problems(stages, engines, lanes, skip, sizes) + check_coverage()[0] + tier_table_problems() + size_table_problems()
+                + plan_problems(stages, a.reps, plan, a.tiers, sizes) + profile_problems(a.profile, stages))
     # the proof covers BOTH chains whatever the arguments select: the comparators and ArcadeDB are generated by separate runs
     for m_ in MODES:
-        both = number(subset_specs(parse_engines(None, m_), list(profile_lanes(a.profile)), a.order, skip, a.tiers), a.id_prefix)
+        both = number(subset_specs(parse_engines(None, m_), list(profile_lanes(a.profile)), a.order, skip, a.tiers, sizes), a.id_prefix)
         problems += profile_problems(a.profile, both, f"{m_} chain")
     print(f"engines: {', '.join(engines)}\nlanes: {', '.join(lanes)}\n{len(stages)} stages, order {a.order}, "
           f"engine tiers {'on' if a.tiers else 'off'}")
     print(f"profile {a.profile}: {PROFILES[a.profile]['doc']}")
     for ln in profile_report(a.profile) or ["  nothing dropped (the whole subset)"]:
         print(ln)
+    if sizes != "all":
+        print(f"sizes {sizes}: the {' and '.join(SIZE_KEEPS[sizes])} classes of size_classes.SIZE_CLASS; the large sizes are left out")
+        for ln in size_report(sizes):
+            print(ln)
     for st in stages:
         bes = stage_backends(st)
         print(f"  {st[0]}  {st[2]:9} {','.join(st[4]) or '-':26} {len(bes):2} arms  tier {stage_tier(st)}  {st[1]}")
@@ -2200,7 +2329,7 @@ def main(argv=None) -> int:
             print(f"  engine tier {t}: {len({s[1].split(' [')[0] for s, _ in runs})} stages x passes = {len(runs)} runs")
         print("  schedule: " + ", ".join(f"T{t} p{p}" for t, p in schedule_order({stage_tier(s) for s in stages}, a.reps)))
     if a.check and a.drafts:
-        problems += lint_drafts(a.drafts, set(engines), status_file, a.profile)
+        problems += lint_drafts(a.drafts, set(engines), status_file, a.profile, sizes)
         if a.also_drafts:
             problems += chain_served_problems(a.drafts, *a.also_drafts)
     for p in problems:
@@ -2239,7 +2368,7 @@ def main(argv=None) -> int:
         write_pair(a.out, pair_id, a, after)
         first_after = pair_id
     emit_all(a.out, stages, pins, first_after, a.reps, a.tiers)
-    drafts = lint_drafts(a.out, set(engines), None, a.profile)
+    drafts = lint_drafts(a.out, set(engines), None, a.profile, sizes)
     for p in drafts:
         print(f"  PROBLEM {p}")
     return 1 if drafts else 0

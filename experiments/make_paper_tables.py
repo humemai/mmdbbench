@@ -95,6 +95,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 import publish_instrument as _PI
 import arm_identity as _AI
 import overlay_merge as _OM
+import size_classes as _SC
 import io_stat_correction as _IOC
 RESULTS = str(_PI.results_dir())
 
@@ -1065,10 +1066,15 @@ def dense_mp_dir():
     """results/dense_mp5_<pin>: complete, or absent, or refuse. PINNED ONLY: a
     fallback to an older overlay would publish an older engine's numbers
     quietly when the pinned one was incomplete. One
-    resolver for the table, the figures, the exporter and the checks."""
-    pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
-    if not pin:
+    resolver for the table, the figures, the exporter and the checks.
+
+    This is the overlay of the 9.99M size, which is the LARGE size class, so it is keyed by the pin of the large class
+    (size_classes.pin_of_size_class, humemai/mmdbbench#146): BENCH_LARGE_ENGINE_COMMIT when the landing names it, else the landing's own
+    pin. The large rows keep the release that measured them until the full benchmark of the large sizes, while the small rows
+    (dense_mp_small_dir) move to the new pin."""
+    if not os.environ.get("BENCH_ENGINE_COMMIT", "").strip():
         raise SystemExit("BENCH_ENGINE_COMMIT is unset: the dense overlay is pinned only")
+    pin = _SC.pin_of_size_class("large")
     n = mp_builds()
     cand = os.path.join(RESULTS, f"dense_mp5_{pin}")
     # ABSENT IS NOT PARTIAL, and conflating them blocked the campaign's own
@@ -1100,8 +1106,9 @@ def dense_mp_dir():
 def dense_mp_small_dir():
     """results/dense_mp5_small_<pin>: the 1M multipass overlay. Absent is
     allowed until qDB lands (the size then reads single-pass rows, cold only);
-    a partial directory refuses, like dense_mp_dir()."""
-    pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
+    a partial directory refuses, like dense_mp_dir(). The 1M size is the SMALL size class: it is keyed by the landing's own pin
+    (size_classes.pin_of_size_class)."""
+    pin = _SC.pin_of_size_class("small")
     if not pin:
         raise SystemExit("BENCH_ENGINE_COMMIT is unset: the dense overlay is pinned only")
     n = mp_builds()

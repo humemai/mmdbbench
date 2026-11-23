@@ -474,6 +474,15 @@ class Base:
         that into `row_extra` instead and leaves this empty."""
         return {}
 
+    # True while the arm still owes a read-back that only the CLOSED database can answer (ArcadeEmbedded: the `addHierarchy` stamp
+    # from schema.json, humemai/mmdbbench#31). A driver that never closes its engine closes it for this and nothing else.
+    hierarchy_unresolved = False
+
+    def readbacks_after_close(self):
+        """The read-backs that need the engine CLOSED, as {field: value}. Called by the lane after `close()` and after `close_s` is
+        recorded, so it sits in no timer and no timed phase. Empty for every arm that has none."""
+        return {}
+
     # INGEST AND INDEX AS TWO TIMERS (DECISIONS #74 item 2, #66): an adapter
     # whose engine has the boundary sets both inside build() (or index_s in
     # post_build() where the index is waited for there); main() records them
@@ -561,6 +570,8 @@ class Base:
 
 class ArcadeEmbedded(Base):
     name = "arcadedb_dense_embedded"
+    DB_PATH = "/tmp/l3d_arcade"          # the database directory: connect() creates it, the schema.json read-back reads it after close
+    HIERARCHY_INDEX = "Article[embedding]"
     # Extra METADATA entries that follow the quantization key (the PQ arm's subspaces and clusters)
     _quant_extra = ""
     ID_INDEX_DDL = "CREATE INDEX ON Article (vid) UNIQUE_HASH"
@@ -647,7 +658,7 @@ class ArcadeEmbedded(Base):
         if pct:
             extra = f"{extra} -Darcadedb.vectorIndex.graphBuildCacheMaxHeapPercent={pct}"
         self.db = arcadedb.create_database(
-            "/tmp/l3d_arcade",
+            self.DB_PATH,
             jvm_kwargs={"heap_size": heap,
                         "jvm_args": extra.strip() or None})
         self.version = _arcadedb_import.dist_version()
@@ -687,7 +698,29 @@ class ArcadeEmbedded(Base):
         # The layered graph the CREATE INDEX statement asks for, as the engine
         # records it for the index it built (CAMPAIGN section 7 row 21,
         # override_registry.py). Read after the build timer, not inside build().
-        return bench_common.arcadedb_hierarchy_readback(self.db, "Article[embedding]")
+        #
+        # THE SETTING IN FORCE, FROM THE FIRST SOURCE THAT ANSWERS (humemai/mmdbbench#31, bench_common's block on the stamp): the
+        # `metadata` of `SELECT FROM schema:index:<name>`, else the Java schema object on the JVM wheel. Neither exists on the native
+        # wheel of an engine without ArcadeData/arcadedb#13097, and then `readbacks_after_close` reads schema.json once the lane has
+        # closed the database; this method records nothing for it, so the row carries no stamp and no error until that read has run.
+        stamp, self._hierarchy_tried = bench_common.arcadedb_hierarchy_live(
+            self.db, self.HIERARCHY_INDEX, lambda sql: self.db.query("sql", sql).to_list(), bench_common.engine_backend())
+        self._hierarchy_stamp = stamp
+        return dict(stamp or {})
+
+    _hierarchy_stamp = None
+    _hierarchy_tried = None      # None until readbacks() has run; then the 'source: reason' lines of the sources that gave nothing
+
+    @property
+    def hierarchy_unresolved(self):
+        return self._hierarchy_tried is not None and self._hierarchy_stamp is None
+
+    def readbacks_after_close(self):
+        # Source 3 of the stamp: the database directory's schema.json, which holds the setting on both wheels once the database is
+        # closed. A small file read, after the last timed phase and after `close_s`; with no stamp and no source it records the error.
+        if not self.hierarchy_unresolved:
+            return {}
+        return bench_common.arcadedb_hierarchy_after_close(self.DB_PATH, self.HIERARCHY_INDEX, self._hierarchy_tried)
 
     def engine_stats(self):
         """The engine's own counters for this run.
@@ -3525,6 +3558,9 @@ def main():
             _t = time.perf_counter()
             b.close()
             out["close_s"] = round(time.perf_counter() - _t, 3)
+    # Read-backs that need the CLOSED database (the `addHierarchy` stamp from schema.json on a wheel with no other source,
+    # humemai/mmdbbench#31): after the close phase is over and `close_s` is on the row, so no timer and no probe phase holds it.
+    out.update(b.readbacks_after_close())
     # `reconnects` on every SurrealDB row, zero when nothing happened
     # (DECISIONS #91): a dropped connection has to be visible as a number on
     # the row, not as a traceback in a log nobody reads until a cell dies.

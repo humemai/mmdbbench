@@ -775,20 +775,156 @@ def neo4j_readback(session, checkpoint=False):
     return out
 
 
-def arcadedb_hierarchy_readback(db, index_name):
-    """The embedded engine's own record of the vector index it built: the
-    per-bucket LSMVectorIndex serialises every setting, `addHierarchy` among
-    them. The served engine has no such read (its schema queries carry no index
-    metadata), see arcadedb_hierarchy_requested."""
-    out = {}
+# THE addHierarchy STAMP (humemai/mmdbbench#31). F15 wants every embedded dense row to say whether its LSM_VECTOR index was built with
+# `addHierarchy`, and to say where it learned that. Three sources, tried in this order; the first that answers is the stamp, and the
+# row's `arcadedb_add_hierarchy_source` is its name:
+#
+#   schema:index  `metadata.addHierarchy` of `SELECT FROM schema:index:`<name>``, on either wheel. The engine reports the value in force,
+#                 defaults included, once ArcadeData/arcadedb#13097 is in the release; before that the row has no `metadata` and this
+#                 source gives way to the next.
+#   java-schema   the per-bucket index's own JSON through the Java schema object. The JVM wheel only: the native wheel has no Java objects
+#                 and the call raises NotOnNativeYet, which is how #31 began.
+#   schema.json   the file the engine keeps in the database directory. It holds the setting on both wheels, but only once the database is
+#                 closed, so this one is read AFTER the cell's close, outside every timer (readbacks_after_close on the adapter).
+#
+# The first two are read while the database is open, by `readbacks()` after the build timer, exactly where the Java read always was. The
+# third is read by the lane after `close()` and after `close_s` is recorded. A cell that no source can answer records
+# `arcadedb_readback_error` with a message naming each source and why it gave nothing, and prints it; it never writes an empty stamp, and the
+# row still lands with its measured numbers, so F15 fails it by name instead of the cell's hours being lost.
+HIERARCHY_SOURCE_SQL = "schema:index"
+HIERARCHY_SOURCE_JAVA = "java-schema"
+HIERARCHY_SOURCE_FILE = "schema.json"
+HIERARCHY_SOURCES = (HIERARCHY_SOURCE_SQL, HIERARCHY_SOURCE_JAVA, HIERARCHY_SOURCE_FILE)
+
+
+class HierarchyStampError(RuntimeError):
+    """No source could say whether the vector index was built with `addHierarchy`. The message names every source and why it gave nothing."""
+
+
+def _hierarchy_bool(v):
+    """A boolean from what an engine or a JSON file hands over. Strict: `bool("false")` is True, and a stamp must not be."""
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in ("true", "false"):
+        return s == "true"
+    raise ValueError(f"{v!r} is not a boolean")
+
+
+def parse_index_name(index_name):
+    """'Article[embedding]' -> ('Article', ['embedding']); ('Part[a,b]' gives both properties). Raises ValueError for any other shape."""
+    m = re.fullmatch(r"([^\[\]]+)\[([^\[\]]+)\]", str(index_name))
+    if not m:
+        raise ValueError(f"{index_name!r} is not a type-level index name like 'Article[embedding]'")
+    return m.group(1), [p.strip() for p in m.group(2).split(",")]
+
+
+def hierarchy_index_statement(index_name):
+    """The statement of source 1. The name is quoted with backticks, the way the engine's own tests ask for an index with brackets."""
+    if "`" in str(index_name):
+        raise ValueError(f"index name {index_name!r} holds a backtick")
+    return f"SELECT FROM schema:index:`{index_name}`"
+
+
+def hierarchy_from_sql_rows(rows):
+    """Source 1, from the rows of `hierarchy_index_statement`: (value, "") when `metadata.addHierarchy` is there, else (None, why not)."""
+    rows = list(rows or [])
+    if not rows:
+        return None, "the statement returned no row"
+    row = rows[0]
+    meta = row.get("metadata") if hasattr(row, "get") else None
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except ValueError:
+            return None, "`metadata` is a string that is not JSON"
+    if not hasattr(meta, "get"):
+        return None, "the row has no `metadata` map (the engine predates ArcadeData/arcadedb#13097)"
+    if "addHierarchy" not in meta:
+        return None, "`metadata` has no `addHierarchy`"
+    try:
+        return _hierarchy_bool(meta["addHierarchy"]), ""
+    except ValueError as e:
+        return None, f"`metadata.addHierarchy` {e}"
+
+
+def hierarchy_from_schema_json(db_dir, index_name):
+    """Source 3: `addHierarchy` of the LSM_VECTOR index on `index_name` from `<db_dir>/schema.json`. Raises HierarchyStampError saying
+    what the file lacks. The file lists one entry per bucket under `types.<type>.indexes`; a type with several buckets has several, and
+    they must agree."""
+    type_name, props = parse_index_name(index_name)
+    path = os.path.join(db_dir, "schema.json")
+    try:
+        with open(path) as fh:
+            schema = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise HierarchyStampError(f"cannot read {path}: {type(e).__name__}: {e}") from e
+    entries = ((schema.get("types") or {}).get(type_name) or {}).get("indexes") or {}
+    found = {name: ix for name, ix in entries.items()
+             if isinstance(ix, dict) and str(ix.get("type")) == "LSM_VECTOR" and list(ix.get("properties") or []) == props}
+    if not found:
+        raise HierarchyStampError(f"{path} lists no LSM_VECTOR index on {type_name}({', '.join(props)})")
+    values = {}
+    for name, ix in sorted(found.items()):
+        if "addHierarchy" not in ix:
+            raise HierarchyStampError(f"{path}: the entry {name} has no `addHierarchy`")
+        try:
+            values[name] = _hierarchy_bool(ix["addHierarchy"])
+        except ValueError as e:
+            raise HierarchyStampError(f"{path}: the entry {name} has `addHierarchy` {e}") from e
+    if len(set(values.values())) != 1:
+        raise HierarchyStampError(f"{path}: the bucket entries of {index_name} disagree on `addHierarchy`: {values}")
+    return next(iter(values.values()))
+
+
+def _hierarchy_stamp(value, source):
+    return {"arcadedb_add_hierarchy": bool(value), "arcadedb_add_hierarchy_source": source}
+
+
+def arcadedb_hierarchy_live(db, index_name, query, wheel):
+    """Sources 1 and 2, read while the database is open: (stamp, tried). `stamp` is the two row fields, or None when neither source answered;
+    `tried` is one 'source: reason' line per source that gave nothing, kept for the message of source 3. `query(sql)` returns the rows
+    of a SELECT as dicts; `wheel` is `bench_common.engine_backend()`. Source 2 is not even attempted on the native wheel."""
+    tried = []
+    try:
+        value, why = hierarchy_from_sql_rows(query(hierarchy_index_statement(index_name)))
+    except Exception as e:  # noqa: BLE001 - a reason on the row, never a swallowed error
+        value, why = None, f"{type(e).__name__}: {e}"
+    if value is not None:
+        return _hierarchy_stamp(value, HIERARCHY_SOURCE_SQL), tried
+    tried.append(f"{HIERARCHY_SOURCE_SQL}: {why}")
+    if wheel == "native":
+        tried.append(f"{HIERARCHY_SOURCE_JAVA}: not on the native wheel (the Java schema object raises NotOnNativeYet there)")
+        return None, tried
     try:
         sub = db.schema.get_index_by_name(index_name).getIndexesOnBuckets()[0]
         meta = json.loads(str(sub.toJSON().toString()))
-        out["arcadedb_add_hierarchy"] = bool(meta["addHierarchy"])
-        out["arcadedb_add_hierarchy_source"] = "index metadata read back from the engine"
+        return _hierarchy_stamp(_hierarchy_bool(meta["addHierarchy"]), HIERARCHY_SOURCE_JAVA), tried
     except Exception as e:  # noqa: BLE001
-        out["arcadedb_readback_error"] = f"{type(e).__name__}: {e}"
-    return out
+        tried.append(f"{HIERARCHY_SOURCE_JAVA}: {type(e).__name__}: {e}")
+    return None, tried
+
+
+def arcadedb_hierarchy_closed(db_dir, index_name, tried):
+    """Source 3, for the database directory of a CLOSED database: the stamp, or HierarchyStampError naming every source tried (`tried`
+    from `arcadedb_hierarchy_live`, then this one)."""
+    try:
+        return _hierarchy_stamp(hierarchy_from_schema_json(db_dir, index_name), HIERARCHY_SOURCE_FILE)
+    except HierarchyStampError as e:
+        raise HierarchyStampError(
+            f"`addHierarchy` of {index_name} could not be read back by any source, so the row would carry no stamp for the override "
+            f"(FAIRNESS F15): " + "; ".join(list(tried) + [f"{HIERARCHY_SOURCE_FILE}: {e}"])) from e
+
+
+def arcadedb_hierarchy_after_close(db_dir, index_name, tried, err=None):
+    """What a lane calls after it closed the engine: the stamp from schema.json, or `arcadedb_readback_error` with the message of
+    HierarchyStampError, also printed to stderr. It never ends the cell (the measured row is worth keeping), and it never returns an
+    empty stamp: the row has either `arcadedb_add_hierarchy` or the error that F15 prints beside NOT STAMPED."""
+    try:
+        return arcadedb_hierarchy_closed(db_dir, index_name, tried)
+    except HierarchyStampError as e:
+        print(f"HIERARCHY STAMP MISSING: {e}", file=err if err is not None else sys.stderr, flush=True)
+        return {"arcadedb_readback_error": str(e)}
 
 
 def parse_index_kinds(stamp):

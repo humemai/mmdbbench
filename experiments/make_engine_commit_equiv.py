@@ -14,6 +14,11 @@ VERSION-STRING change when, after replacing every occurrence of the old or the n
 placeholder in both lines, the two lines are equal and they were not equal before. That covers <version> in the poms, "version" in
 studio/package.json and package-lock.json and the docker identifiers (arcadedata/arcadedb:26.10.2 -> :26.11.1) in server.json. A hunk whose
 removed and added line counts differ, a pair that is equal only without the replacement of any other number, and every other line are NON-VERSION lines.
+A changed FILE that the lines cannot judge is a NON-VERSION finding too, one per file, listed with its kind as `file-level: <kind>`: a binary file change,
+a created or a deleted empty file, a mode change, a type change, a symlink change, a submodule change, and a change with no hunk lines. A rename or a copy
+is read as a delete and an add (--no-renames), so its lines are classified like every other line. A changed line that begins with `--` or `++` counts like
+any other line: only the lines before the first hunk of a file are headers. Every git call ignores the diff configuration of the user and of the checkout
+(prefixes, renames, external diff, textconv, algorithm, colour, quoting), so the same two commits give the same answer on every host.
 The rule accepts the pair only at 0 non-version lines AND exactly one commit between BASE and HEAD (`git log BASE..HEAD`); any other result
 writes RESULT: REFUSED, no JSON, and exits 1.
 
@@ -31,15 +36,24 @@ import sys
 from pathlib import Path
 
 
+# The options of every diff call: nothing the classification reads depends on a git configuration (diff.noprefix, diff.renames, diff.algorithm,
+# diff.interHunkContext, diff.external, diff.submodule, diff.ignoreSubmodules, textconv drivers, colour).
+DIFF_OPTS = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none", "--submodule=short",
+             "--diff-algorithm=myers", "--indent-heuristic", "--inter-hunk-context=0", "--src-prefix=a/", "--dst-prefix=b/"]
+
+
 def git(repo, *a):
-    return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, check=True).stdout
+    """stdout of one git command as text: no newline translation, invalid UTF-8 becomes U+FFFD, names are not octal-escaped (core.quotepath=off)."""
+    out = subprocess.run(["git", "-c", "core.quotepath=off", "-C", repo, *a], capture_output=True, check=True).stdout
+    return out.decode("utf-8", "replace")
 
 
-def classify(diff, old, new):
-    """(version_lines, non_version [(file, line)]) from a -U0 diff."""
+def classify(diff, old, new, seen=None):
+    """(version_lines, non_version [(file, line)]) from a -U0 diff. `seen`, a set, collects every file that has at least one removed or added line."""
     tok = re.compile("(?:" + re.escape(old) + "|" + re.escape(new) + r")(?:-SNAPSHOT)?")
     ver, non, cur = 0, [], None
     rem, add = [], []
+    in_hunk = False
 
     def flush():
         nonlocal ver
@@ -54,20 +68,58 @@ def classify(diff, old, new):
         rem.clear()
         add.clear()
 
-    for line in diff.splitlines():
+    for line in diff.split("\n"):
         if line.startswith("diff --git"):
             flush()
+            in_hunk = False
             cur = line.split(" b/", 1)[1]
         elif line.startswith("@@"):
             flush()
-        elif line.startswith(("---", "+++", "index ", "new file", "deleted file", "similarity", "rename ", "old mode", "new mode", "Binary")):
+            in_hunk = True
+        elif not in_hunk and line.startswith(("---", "+++", "index ", "new file", "deleted file", "similarity", "rename ", "old mode", "new mode", "Binary")):
             continue
         elif line.startswith("-"):
             rem.append(line[1:])
+            if seen is not None:
+                seen.add(cur)
         elif line.startswith("+"):
             add.append(line[1:])
+            if seen is not None:
+                seen.add(cur)
     flush()
     return ver, non
+
+
+def file_findings(repo, base, head, with_lines):
+    """([(path, "file-level: <kind>")], [every changed path]). `git diff --raw -z` lists each changed file with its status and modes, `--numstat -z` marks
+    the binary ones. A file with no removed or added line (not in `with_lines`) is a binary file, an empty file created or deleted, or a change the lines
+    do not carry. Whatever the lines show of a mode, type, symlink (120000) or submodule (160000) change, the file is a finding of its own."""
+    raw = git(repo, "diff", "--raw", "-z", *DIFF_OPTS, base, head).split("\0")
+    binary = {t[4:] for t in git(repo, "diff", "--numstat", "-z", *DIFF_OPTS, base, head).split("\0") if t.startswith("-\t-\t")}
+    found, names, i = [], [], 0
+    while i + 1 < len(raw):
+        if not raw[i].startswith(":"):
+            i += 1
+            continue
+        oldmode, newmode, _, _, status = raw[i][1:].split(" ")[:5]
+        path = raw[i + 1]
+        i += 2
+        names.append(path)
+        kinds = []
+        if status[0] == "T":
+            kinds.append("type change")
+        elif status[0] == "M" and oldmode != newmode:
+            kinds.append("mode change")
+        if "120000" in (oldmode, newmode):
+            kinds.append("symlink change")
+        if "160000" in (oldmode, newmode):
+            kinds.append("submodule change")
+        if path in binary:
+            kinds.append("binary file change")
+        elif path not in with_lines and not kinds:
+            kinds.append({"A": "created empty file", "D": "deleted empty file"}.get(status[0], "change with no hunk lines"))
+        found.extend((path, f"file-level: {k}") for k in kinds)
+    return found, names
 
 
 def evidence_lines(status, saved):
@@ -101,11 +153,13 @@ def main():
     if not re.fullmatch(r"\d+\.\d+\.\d+", a.release):
         sys.exit("REFUSING: the equivalence is for a RELEASE pair (A.B.C), never a dev pair")
     base, head = (git(a.repo, "rev-parse", x).strip() for x in (a.base, a.head))
-    stat = git(a.repo, "diff", "--stat=140", base, head)
-    names = git(a.repo, "diff", "--name-only", base, head).split()
-    shortstat = git(a.repo, "diff", "--shortstat", base, head).strip()
-    subj = git(a.repo, "log", "--format=%h %s", f"{base}..{head}").strip().splitlines()
-    ver, non = classify(git(a.repo, "diff", "-U0", "--no-color", base, head), a.old_release, a.release)
+    stat = git(a.repo, "diff", "--stat=140", *DIFF_OPTS, base, head)
+    shortstat = git(a.repo, "diff", "--shortstat", *DIFF_OPTS, base, head).strip()
+    subj = git(a.repo, "log", "--no-show-signature", "--format=%h %s", f"{base}..{head}").strip().splitlines()
+    with_lines = set()
+    ver, non = classify(git(a.repo, "diff", "-U0", *DIFF_OPTS, base, head), a.old_release, a.release, with_lines)
+    found, names = file_findings(a.repo, base, head, with_lines)
+    non = found + non
     ok = not non and len(subj) == 1
     ev, ev_src = evidence_lines(a.status, str(Path(a.out_md).with_suffix(".status-lines.txt")))
     md = [f"# ENGINE-COMMIT-EQUIV-{a.release}",
@@ -136,7 +190,8 @@ def main():
           "",
           f"A removed/added line pair is a version-string change when it is equal after replacing every `{a.old_release}` and `{a.release}` (optionally followed by `-SNAPSHOT`) with a placeholder and was not equal before. "
           "That covers the poms, `studio/package.json`, `studio/package-lock.json` and the docker identifiers of `server.json` "
-          f"(`arcadedata/arcadedb:{a.old_release}` to `:{a.release}`). A hunk with unequal removed and added counts, and any other line, is a non-version line.",
+          f"(`arcadedata/arcadedb:{a.old_release}` to `:{a.release}`). A hunk with unequal removed and added counts, and any other line, is a non-version line. "
+          "A changed file the lines cannot judge (a binary change, an empty file created or deleted, a mode, type, symlink or submodule change) is listed with its kind and is a non-version finding too.",
           "",
           f"- version-string changed lines: {ver}",
           f"- non-version changed lines: {len(non)}",

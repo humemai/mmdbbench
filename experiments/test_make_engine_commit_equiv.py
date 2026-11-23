@@ -2,8 +2,8 @@
 
 Each test builds a throwaway git repository in a temporary directory (a base commit, then one or more head commits), runs the tool on it as a
 subprocess, and reads the exit status, the markdown and the JSON entry. No engine repository, no image, no network: git is the only program the
-tests start. Git reads no user or system configuration (GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM), so a developer's diff.noprefix or signing
-setting changes nothing, and the identity of the throwaway commits is set with -c on every git command.
+tests start. Git reads no user or system configuration (GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM) except in the one test that gives the tool a
+hostile configuration on purpose, and the identity of the throwaway commits is set with -c on every git command.
 Run with `python -m pytest test_make_engine_commit_equiv.py -q` from this directory.
 """
 import json
@@ -30,6 +30,10 @@ BASE_FILES = {
     "studio/package.json": f'{{\n  "name": "studio",\n  "version": "{OLD}",\n  "private": true\n}}\n',
     "server.json": f'{{\n  "image": "arcadedata/arcadedb:{OLD}",\n  "port": 2480\n}}\n',
     "src/Engine.txt": "line one\nline two\nline three\n",
+    "src/Query.sql": "select 1;\n-- a comment line\nselect 2;\n",       # a removed line of this file reads `--- a comment line` in a diff
+    "src/Page.txt": f"title {OLD}\x0cOLD\n",                              # a form feed inside a line: some line splitters cut it in two
+    "blob.bin": b"\x00\x01\x02\xff" * 8,
+    "empty.txt": "",
 }
 VERSION_BUMP = {
     "pom.xml": BASE_FILES["pom.xml"].replace(f"{NEW}-SNAPSHOT", NEW),
@@ -43,18 +47,29 @@ def _git(repo, *args):
     return subprocess.run(["git", *IDENT, "-C", str(repo), *args], capture_output=True, text=True, check=True, env=ENV).stdout.strip()
 
 
-def _commit(repo, files, message):
-    for name, text in files.items():
+def _write(repo, files):
+    for name, data in files.items():
         p = repo / name
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text)
+        if isinstance(data, bytes):
+            p.write_bytes(data)
+        else:
+            p.write_text(data)
     _git(repo, "add", *files)                         # explicit paths
+
+
+def _commit(repo, step, message):
+    """One commit. `step` is a dict of file -> new text (or bytes), or a function that changes and stages the repository itself."""
+    if callable(step):
+        step(repo)
+    else:
+        _write(repo, step)
     _git(repo, "commit", "-q", "-m", message)
     return _git(repo, "rev-parse", "HEAD")
 
 
 def _pair(root, *head_steps):
-    """(repo, base, head) in a new directory under `root`: the base commit, then one head commit per step (a dict of file -> new text).
+    """(repo, base, head) in a new directory under `root`: the base commit, then one head commit per step (see _commit).
     No step means the version bump."""
     repo = root / "engine"
     repo.mkdir(parents=True)
@@ -72,10 +87,10 @@ def _out(root):
     return out
 
 
-def _run(repo, base, head, out, *extra, release=NEW, old=OLD):
+def _run(repo, base, head, out, *extra, release=NEW, old=OLD, env=ENV):
     cmd = [sys.executable, str(TOOL), "--repo", str(repo), "--base", base, "--head", head, "--release", release, "--old-release", old,
            "--out-md", str(out / "equiv.md"), "--out-json", str(out / "equiv.json"), *extra]
-    return subprocess.run(cmd, capture_output=True, text=True, env=ENV, timeout=60)
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
 
 
 # ---- accepted
@@ -185,6 +200,99 @@ def test_a_dev_version_is_refused_before_anything_is_written(tmp_path):
     r = _run(repo, base, head, out, release=f"{NEW}.dev0")
     assert r.returncode == 1 and "REFUSING: the equivalence is for a RELEASE pair" in r.stderr
     assert list(out.iterdir()) == []
+
+
+# ---- a changed file that has no lines to classify is a finding of its own
+def _bump_and(change):
+    """A head step: the version bump and `change(repo)` in one commit."""
+    def step(repo):
+        _write(repo, VERSION_BUMP)
+        change(repo)
+    return step
+
+
+def _refused_at_file_level(root, change, kinds):
+    """The version bump plus `change` is refused. `kinds` is [(path, kind)]: each is named in the markdown and on stderr. No JSON file. Returns the markdown."""
+    repo, base, head = _pair(root, _bump_and(change))
+    out = _out(root)
+    r = _run(repo, base, head, out)
+    assert r.returncode == 1, r.stdout
+    md = (out / "equiv.md").read_text()
+    assert f"RESULT: REFUSED {NEW} pin={base} equivalent={head} version_string_lines=6 non_version_lines=" in md
+    for path, kind in kinds:
+        assert f"  - `{path}`: `file-level: {kind}`" in md, (path, kind)
+        assert f"  {path}: file-level: {kind}" in r.stderr, (path, kind)
+    assert not (out / "equiv.json").exists()
+    return md
+
+
+def test_a_binary_file_change_is_refused(tmp_path):
+    md = _refused_at_file_level(tmp_path, lambda repo: _write(repo, {"blob.bin": b"\xff\xfe\x00" * 8}), [("blob.bin", "binary file change")])
+    assert "non_version_lines=1\n" in md                                        # a binary file has no lines: the file is the only finding
+
+
+def test_a_rename_is_refused_whatever_the_file_holds(tmp_path):
+    def move(src, dst):
+        return lambda repo: _git(repo, "mv", src, dst)
+
+    # a text file is read as a delete and an add: 3 removed lines and 3 added lines, no pair, no file-level finding
+    md = _refused_at_file_level(tmp_path / "text", move("src/Engine.txt", "src/Renamed.txt"), [])
+    assert "non_version_lines=6\n" in md and "file-level:" not in md
+    assert "  - `src/Engine.txt`: `-line one`" in md and "  - `src/Renamed.txt`: `+line one`" in md
+    # an empty file and a binary file have no lines: each side of the rename is a finding
+    _refused_at_file_level(tmp_path / "empty", move("empty.txt", "empty-moved.txt"),
+                           [("empty.txt", "deleted empty file"), ("empty-moved.txt", "created empty file")])
+    _refused_at_file_level(tmp_path / "binary", move("blob.bin", "blob-moved.bin"),
+                           [("blob.bin", "binary file change"), ("blob-moved.bin", "binary file change")])
+
+
+def test_a_mode_change_is_refused(tmp_path):
+    md = _refused_at_file_level(tmp_path, lambda repo: _git(repo, "update-index", "--chmod=+x", "src/Engine.txt"), [("src/Engine.txt", "mode change")])
+    assert "non_version_lines=1\n" in md
+
+
+def test_an_empty_file_created_or_deleted_is_refused(tmp_path):
+    md = _refused_at_file_level(tmp_path / "created", lambda repo: _write(repo, {"new-empty.txt": ""}), [("new-empty.txt", "created empty file")])
+    assert "non_version_lines=1\n" in md
+    _refused_at_file_level(tmp_path / "deleted", lambda repo: _git(repo, "rm", "-q", "empty.txt"), [("empty.txt", "deleted empty file")])
+
+
+def test_a_symlink_is_refused(tmp_path):
+    def link(repo):
+        os.symlink(f"engine-{NEW}.jar", repo / "engine.jar")
+        _git(repo, "add", "engine.jar")
+
+    _refused_at_file_level(tmp_path, link, [("engine.jar", "symlink change")])
+
+
+# ---- what the lines of a hunk can hide
+def test_a_removed_line_that_begins_with_dashes_and_a_change_after_a_form_feed_are_seen(tmp_path):
+    # the removed line `-- a comment line` reads `--- a comment line` in the diff: only a header line may be skipped for its dashes
+    repo, base, head = _pair(tmp_path / "dashes", {**VERSION_BUMP, "src/Query.sql": "select 1;\nselect 2;\n"})
+    out = _out(tmp_path / "dashes")
+    assert _run(repo, base, head, out).returncode == 1
+    md = (out / "equiv.md").read_text()
+    assert "version_string_lines=6 non_version_lines=1\n" in md and "  - `src/Query.sql`: `--- a comment line`" in md
+    # the version string before a form feed changes and so does the text after it: that is one line (not two), and the pair is not a version change
+    repo, base, head = _pair(tmp_path / "formfeed", {**VERSION_BUMP, "src/Page.txt": f"title {NEW}\x0cNEW\n"})
+    out = _out(tmp_path / "formfeed")
+    assert _run(repo, base, head, out).returncode == 1
+    assert "version_string_lines=6 non_version_lines=2\n" in (out / "equiv.md").read_text()
+
+
+# ---- the tool reads the same bytes whatever the configuration of git says
+def test_a_hostile_git_configuration_changes_nothing(tmp_path):
+    repo, base, head = _pair(tmp_path)
+    plain_out, hostile_out = _out(tmp_path / "plain"), _out(tmp_path / "hostile")
+    plain = _run(repo, base, head, plain_out)
+    cfg = tmp_path / "hostile.gitconfig"
+    cfg.write_text("[diff]\n\tnoprefix = true\n\trenames = copies\n\talgorithm = patience\n\tinterHunkContext = 5\n\tsubmodule = log\n"
+                   "\tignoreSubmodules = all\n\texternal = /bin/false\n[color]\n\tui = always\n[core]\n\tquotepath = true\n[log]\n\tshowSignature = true\n")
+    hostile = _run(repo, base, head, hostile_out, env={**ENV, "GIT_CONFIG_GLOBAL": str(cfg)})
+    assert plain.returncode == hostile.returncode == 0, hostile.stderr
+    assert hostile.stdout == plain.stdout and "3 files, 6 version-string lines, 0 non-version lines" in hostile.stdout
+    assert (hostile_out / "equiv.json").read_text() == (plain_out / "equiv.json").read_text()
+    assert (hostile_out / "equiv.md").read_text() == (plain_out / "equiv.md").read_text()
 
 
 # ---- the classification itself (a -U0 diff of one line pair)

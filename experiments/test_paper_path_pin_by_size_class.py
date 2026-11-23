@@ -123,13 +123,16 @@ def test_without_the_large_pin_the_freeze_refuses_and_the_refusal_names_the_vari
         assert VAR in text and FLAG in text and "medium has 0 of 3 rows at " + NEW in text, text
 
 
-def test_a_large_class_with_no_rows_at_the_large_pin_refuses_even_when_the_variable_is_named():
+def test_a_large_class_with_no_rows_at_all_is_absent_and_rows_at_a_third_commit_refuse():
+    """CHANGED by humemai/mmdbbench#157; the first half of the #155 test asserted a refusal that is wrong for the real landing. The rerun of 26.12.1 is the small
+    sizes only and the store has no `l3s` row at the 26.11.1 commit, so `medium` has no row at either pin: a tier that was not run is a dash on the table, and
+    refusing it stopped the landing for a tier nobody owes. A tier with SOME rows still refuses (the partial test below), and so does a tier whose rows are at
+    another commit (the second half here), which is what a forgotten or wrong large pin looks like."""
     rows = _rows(tiers=("tiny", "small"))                                                      # the old pin's medium rows are not in the store
     res, err = _freeze(rows)
-    assert res is None and "incomplete at ['medium']" in err and f"medium has 0 of 3 rows at {OLD}" in err, err
-    assert VAR in err and FLAG in err
-    _written, stop = _sparse_table(rows)
-    assert stop is not None and "no fallback" in stop and VAR in stop and FLAG in stop, stop
+    assert res is not None and {t: len(res[t]) for t in res} == {"tiny": 3, "small": 3} and f"medium has no rows at {OLD}: absent" in err, (res, err)
+    written, stop = _sparse_table(rows)
+    assert stop is None and "t4_sparse.tex" in written, stop
     elsewhere = _rows(large_pin="ffffffff1")                                                   # medium rows at a third commit: not the large pin either
     res, err = _freeze(elsewhere)
     assert res is None and VAR in err, err

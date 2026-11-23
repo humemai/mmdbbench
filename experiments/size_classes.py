@@ -16,6 +16,8 @@ import os
 SIZE_CLASSES = ("small", "large", "extra")
 # The variable a landing sets when its large rows stay on an earlier release than the run being landed (see pin_of_size_class).
 LARGE_PIN_VAR = "BENCH_LARGE_ENGINE_COMMIT"
+# The commits the comparators' own chain was launched with (comma list, optional), when they are not the landing's: their rows and their sparse overlay files carry that pin.
+COMPARATOR_PIN_VAR = "BENCH_COMPARATOR_PIN"
 SIZE_CLASS = {
     ("l3s", "tiny"): "extra",
     ("l3s", "small"): "small",
@@ -76,6 +78,22 @@ def pin_of_size_class(size_class: str, landing: str | None = None) -> str:
     if size_class == "large":
         return os.environ.get(LARGE_PIN_VAR, "").strip() or landing
     return landing
+
+
+def comparator_pins() -> list:
+    """The commits of BENCH_COMPARATOR_PIN, as a list (blank entries dropped; unset or blank is [])."""
+    return [p.strip() for p in os.environ.get(COMPARATOR_PIN_VAR, "").split(",") if p.strip()]
+
+
+def row_at_pin(row, landing: str | None = None, comparator_pins=()) -> bool:
+    """True when the row names the engine commit of its size class, or one of `comparator_pins` (prefix either way: a stamp may be shorter than the pin).
+
+    The class of the row is `row_size_class`, a pair that is not in SIZE_CLASS reads the small class, and the commit of a class is `pin_of_size_class`
+    (`landing` None reads BENCH_ENGINE_COMMIT). A row with no commit is at no pin. `export_web._censored_cells` keeps a row of the run log by this
+    test, and `land_stage.py` asks it before the merge which failed comparator rows the exporter would drop (humemai/mmdbbench#157): one test, two readers."""
+    got = str(row.get("engine_commit") or "")
+    own = pin_of_size_class(row_size_class(row) or "small", landing=landing)
+    return bool(got) and any(got.startswith(p) or p.startswith(got) for p in [own, *comparator_pins] if p)
 
 
 def row_table(row, table_lane) -> str:

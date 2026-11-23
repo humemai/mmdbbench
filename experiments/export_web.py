@@ -3048,6 +3048,9 @@ def _e4_table():
     _commits = {str(m.get("engine_commit") or "").strip()
                 for m in (meta, meta.get("docker_client_conditions") or {})}
     _at_pin = bool(_pin) and all(c and (c.startswith(_pin) or _pin.startswith(c)) for c in _commits)
+    # The engine is named as the page names it everywhere else ("ArcadeDB"): the lowercase form of _engine_identity is the key of the roster, and
+    # page_check reads it in prose as a raw backend key (humemai/mmdbbench#156).
+    _e4_engine = re.sub(r"^arcadedb\b", "ArcadeDB", str(_engine_identity(meta.get('engine_version'), meta.get('engine_commit'))))
     return {
         "id": "e4",
         "title": "What the client/server split costs",
@@ -3057,11 +3060,11 @@ def _e4_table():
                     str(meta.get('engine_version')), str(meta.get('ts_utc'))[:10])]
               if str(meta.get("engine_version") or "") and not _at_pin else []),
             _gen(f"Every number is milliseconds. One engine build "
-                 f"({_engine_identity(meta.get('engine_version'), meta.get('engine_commit'))}) in all three deployments, "
+                 f"({_e4_engine}) in all three deployments, "
                  f"{meta.get('reps')} repetitions after {meta.get('warmup')} warmup, "
                  f"identical cpuset {meta.get('cpuset')}, memory cap {meta.get('mem_cap')} "
                  f"and heap {meta.get('heap')}.",
-                 str(_engine_identity(meta.get('engine_version'), meta.get('engine_commit'))),
+                 _e4_engine,
                  str(meta.get('reps')), str(meta.get('warmup')), str(meta.get('cpuset')),
                  str(meta.get('mem_cap')), str(meta.get('heap'))),
             *_e4_client_sentences(meta),

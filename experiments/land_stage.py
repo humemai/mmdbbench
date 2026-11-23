@@ -310,6 +310,68 @@ def _at_pin(row, pin):
     return bool(c and pin and (c.startswith(pin) or pin.startswith(c)))
 
 
+def unlisted_comparator_commits(store_rows, landing_rows, pin, scope=None, comparator_pins=()):
+    """{commit: [cell, ...]} for the FAILED rows of comparators (not ArcadeDB) that `export_web._censored_cells` would drop, sorted (humemai/mmdbbench#157).
+
+    The exporter keeps a row of the run log only at the pin of its size class (`size_classes.row_at_pin`, the same test: the landing's pin, the large pin
+    for a large size) or at one of `comparator_pins` (BENCH_COMPARATOR_PIN). A failed cell (a row with an `error`) read at none of those loses its `envelope` or
+    `censored` entry, and its declared outcome with it. Rows read: the store and the rows about to merge, of the instrument that publishes, in `scope` (empty
+    or None: every lane). A row with no engine commit is listed as `(none)`."""
+    scope = set(scope or ())
+    found = {}
+    for r in list(store_rows) + list(landing_rows):
+        if instrument_of(r) != PUBLISH_INSTRUMENT or arm_identity.is_arcadedb(r) or not r.get("error"):
+            continue
+        if scope and r.get("lane") not in scope:
+            continue
+        if size_classes.row_at_pin(r, landing=pin, comparator_pins=comparator_pins):
+            continue
+        commit = str(r.get("engine_commit") or "").strip()[:9] or "(none)"
+        found.setdefault(commit, set()).add(f"{r.get('lane')} {r.get('scale')} {r.get('workload')} {r.get('backend')}")
+    return {c: sorted(cells) for c, cells in sorted(found.items())}
+
+
+def format_unlisted_comparator_commits(found, pin, large_pin, comparator_pins=()):
+    """The refusal sentence of `unlisted_comparator_commits`: each commit with its cell count and the first three cells, the pins that were read, and the variable that fixes it."""
+    listed = ", ".join(dict.fromkeys([pin, large_pin, *comparator_pins]))
+    per = "; ".join(f"{c}: {len(cells)} cell(s), e.g. {', '.join(cells[:3])}" for c, cells in found.items())
+    commits = ",".join(c for c in found if c != "(none)")
+    return (f"REFUSING: the store holds failed comparator cells at engine commit(s) that are none of the pins this landing reads ({listed}; "
+            f"{size_classes.COMPARATOR_PIN_VAR} {'is ' + ','.join(comparator_pins) if comparator_pins else 'is unset'}): {per}. The exporter keeps a row only at one of "
+            f"those pins, so the payload would lose the envelope and censored entries of these cells and page_check would print MISSING for them. If the commit is the one "
+            f"the comparators' chain was launched with, export {size_classes.COMPARATOR_PIN_VAR}={','.join(filter(None, [*comparator_pins, commits]))} and run again. Nothing was merged.")
+
+
+_COMMIT_IN_VERSION = re.compile("\u00b7\\s*([0-9a-f]{7,40})\\b")   # "arcadedb 26.11.1 \u00b7 a3a5d1245": the identity sentence of an entry (export_web._engine_identity)
+
+
+def published_large_commits(payload_path, pin):
+    """{commit: entries}: the large-size ArcadeDB entries of the published payload whose engine commit is not `pin` (prefix either way), or {} (humemai/mmdbbench#157).
+
+    The size class of an entry is `size_classes.row_size_class` over its table's lane (`page_check._table_lanes`, the exporter's table map read by ast, as the other
+    gates do) and its size id. An entry whose version names no commit (the native served entry of an old landing) is not counted. {} when there is no payload yet."""
+    try:
+        payload = json.loads(Path(payload_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    import page_check
+    lanes = page_check._table_lanes()
+    pin = (pin or "").strip().lower()
+    found = {}
+    for t in payload.get("tables") or []:
+        lane = (lanes.get(t.get("id")) or (None,))[0]
+        for e in t.get("entries") or []:
+            if not lane or not e.get("is_arcadedb"):
+                continue
+            if size_classes.row_size_class({"lane": lane, "scale": str(e.get("size_id") or e.get("scale"))}) != "large":
+                continue
+            m = _COMMIT_IN_VERSION.search(str(e.get("version_name") or ""))
+            commit = m.group(1).lower() if m else ""
+            if commit and not (commit.startswith(pin) or pin.startswith(commit)):
+                found[commit[:9]] = found.get(commit[:9], 0) + 1
+    return found
+
+
 def stale_small_cells(store_rows, landing_rows, pin, scope=None, max_rep=0):
     """The small-class ArcadeDB cells that have a repetition with no rc=0 row at `pin`: [(name, {rep: why})], sorted by name.
 
@@ -692,9 +754,14 @@ def sparse_pulls(pin, large_pin):
     return [(large_pin if cls == "large" else pin, f"sp_*_{tier}.json") for (lane, tier), cls in size_classes.SIZE_CLASS.items() if lane == "l3s"]
 
 
-def pull_sparse_overlays(pin, large_pin, results=None, scp=None):
+def pull_sparse_overlays(pin, large_pin, results=None, scp=None, comparator_pins=()):
     """The sparse second-pass files into results/sparse_mp_<pin> (and results/sparse_mp_<large pin> when the large rows are on another release), per
-    `sparse_pulls`. A directory that gets nothing is removed again: an empty one would read as present and move the failure somewhere less obvious."""
+    `sparse_pulls`. A directory that gets nothing is removed again: an empty one would read as present and move the failure somewhere less obvious.
+
+    `comparator_pins` (BENCH_COMPARATOR_PIN; humemai/mmdbbench#157): the comparators' chain writes its sparse files into `sparse_mp_<its own pin>_2611`, not into the landing's
+    directory, and `export_web` reads the six arms of a small tier from one directory. The files of those host directories that are not ArcadeDB's (`sp_arc_*` stays
+    where it was measured: an old release's file must not stand in for a new one) are copied into the directory of their tier's class unless the landing already holds a
+    file of that name. A comparator pin that is the landing's own is the directory pulled above."""
     results = Path(results) if results else RESULTS
     plan = sparse_pulls(pin, large_pin)
     for p in dict.fromkeys(p for p, _glob in plan):
@@ -708,6 +775,23 @@ def pull_sparse_overlays(pin, large_pin, results=None, scp=None):
             print(f"  sparse_mp_{p}: {len(_files)} file(s)")
         elif not any(_sp.glob("sp_*.json")):
             _sp.rmdir()
+    for cp in comparator_pins:
+        if cp and not any(cp.startswith(q) or q.startswith(cp) for q in (pin, large_pin)):
+            _tmp = results / f".sparse_comparators_{cp}"
+            _tmp.mkdir(exist_ok=True)
+            for _p, g in plan:
+                (scp or sh)(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('sparse_mp', cp)}/{g}", str(_tmp)], check=False)
+            _took = []
+            for f in sorted(_tmp.glob("sp_*.json")):
+                _dest = results / f"sparse_mp_{next(q for q, g in plan if f.match(g))}"
+                if f.name.startswith("sp_arc_") or (_dest / f.name).exists():
+                    continue
+                _dest.mkdir(exist_ok=True)
+                shutil.copyfile(f, _dest / f.name)
+                _took.append(f"{_dest.name}/{f.name}")
+            shutil.rmtree(_tmp)
+            print(f"  comparators' sparse files at {cp}: {len(_took)} file(s) copied into the directory of their tier's class" if _took
+                  else f"  comparators' sparse files at {cp}: none to add from {HOST}:sparse_mp_{cp}")
 
 
 def main():
@@ -720,9 +804,10 @@ def main():
         print(f"(re-running under {PY})", flush=True)
         os.execv(PY, [PY, str(Path(__file__).resolve())] + sys.argv[1:])
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pin", default=os.environ.get("BENCH_ENGINE_COMMIT") or current_pin(),
-                    help="engine commit whose rows are pulled (default: BENCH_ENGINE_COMMIT, else the one commit "
-                         "the current payload was built from)")
+    ap.add_argument("--pin", default=os.environ.get("BENCH_ENGINE_COMMIT"),
+                    help="engine commit whose rows are pulled (default: BENCH_ENGINE_COMMIT; there is no other default: the one commit the "
+                         "current payload names is the build already published, so before the first landing of a new release it is the OLD "
+                         "commit, and a landing that took it pulled the old rows file without a word) (humemai/mmdbbench#157)")
     ap.add_argument("--only-lanes", default="",
                     help="comma list of lanes to land (e.g. l4,e4); rows of every other lane "
                          "are left on the host for a later landing. A STAGED LANDING NEEDS "
@@ -805,6 +890,11 @@ def main():
     # Step 1 pulls `runs_page_<pin>_2611.jsonl` by exact name, so a landing with no pin would fetch nothing, and a
     # guessed one would fetch another build's rows. Refuse instead of guessing.
     if not args.pin:
+        _guess = current_pin()
+        if _guess:
+            sys.exit(f"REFUSING: no --pin and no BENCH_ENGINE_COMMIT. The current payload names {_guess} alone, but that is the build already published, "
+                     f"not the one being landed: before the first landing of a new release it is the OLD commit, and a landing that took it would pull "
+                     f"{host_name('runs_page', _guess, '.jsonl')} and merge the old rows again. Pass --pin <commit> or set BENCH_ENGINE_COMMIT.")
         sys.exit("REFUSING: no --pin, no BENCH_ENGINE_COMMIT, and the current payload does not name exactly one "
                  "engine commit. Pass --pin <commit> or set BENCH_ENGINE_COMMIT.")
     # The pin the large overlays are read at: --large-pin (written to the environment above), else BENCH_LARGE_ENGINE_COMMIT, else the landing's pin,
@@ -815,6 +905,17 @@ def main():
     if os.environ.get("BENCH_INSTRUMENT", PUBLISH_INSTRUMENT) != PUBLISH_INSTRUMENT:
         sys.exit(f"REFUSING: BENCH_INSTRUMENT={os.environ['BENCH_INSTRUMENT']!r}; this tooling lands "
                  f"{PUBLISH_INSTRUMENT} rows only (DECISIONS #196).")
+    # A FORGOTTEN LARGE PIN REFUSES HERE, BEFORE ANYTHING IS PULLED OR WRITTEN (humemai/mmdbbench#157). It used to refuse in step 4, after the merge into
+    # results/runs.jsonl and a wrong dense_mp5_<pin> directory, with a sentence that did not name the pin.
+    if not os.environ.get(size_classes.LARGE_PIN_VAR, "").strip():
+        _held = published_large_commits(SITE_PAYLOAD, args.pin)
+        if _held:
+            _n = sum(_held.values())
+            sys.exit(f"REFUSING: the published page holds {_n} large-size ArcadeDB entr{'y' if _n == 1 else 'ies'} at engine commit "
+                     f"{', '.join(sorted(_held))}, not at the pin {args.pin}, and no large pin is set, so this landing would read the large overlays "
+                     f"(dense_mp5_{args.pin}, the medium files of sparse_mp_{args.pin}) at the new pin and write the large rows under it. Pass --large-pin "
+                     f"<commit of the large rows> (here {sorted(_held)[0]}), or set {size_classes.LARGE_PIN_VAR}. A landing of large rows rerun at the pin says "
+                     f"so with --large-pin {args.pin}. Nothing was pulled or merged.")
     site_files = SITE_FILES
 
     SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -884,7 +985,7 @@ def main():
     # would have published the sparse table and silently left its second-pass
     # table off the page. Pulled whenever sparse is part of what lands.
     if not _lanes or "l3s" in _lanes:
-        pull_sparse_overlays(args.pin, large_pin)
+        pull_sparse_overlays(args.pin, large_pin, comparator_pins=size_classes.comparator_pins())
 
     _pycost = pull_pycost(args.pin, {l.strip() for l in args.only_lanes.split(",") if l.strip()})
 
@@ -980,6 +1081,14 @@ def main():
     for _line in format_stale_small_cells(
             stale_small_cells(_read_jsonl(RESULTS / "runs.jsonl"), keep, args.pin, scope=_lanes, max_rep=args.max_rep), args.pin):
         print(_line)
+
+    # A FAILED COMPARATOR CELL AT A COMMIT THE EXPORTER DOES NOT READ REFUSES HERE, BEFORE THE MERGE (humemai/mmdbbench#157). The comparators' chain has a pin of its
+    # own (BENCH_COMPARATOR_PIN), and the exporter keeps a row of the run log only at the pin of its size class or at one of those: with the variable unset the
+    # failed cells of the comparators were dropped, the payload lost their `envelope` and `censored` entries and page_check printed MISSING, three gates away.
+    _unlisted = unlisted_comparator_commits(_read_jsonl(RESULTS / "runs.jsonl"), keep, args.pin, scope=_lanes,
+                                            comparator_pins=size_classes.comparator_pins())
+    if _unlisted:
+        sys.exit(format_unlisted_comparator_commits(_unlisted, args.pin, large_pin, size_classes.comparator_pins()))
 
     if args.dry_run:
         # STOP BEFORE ANYTHING WRITES. Without --apply this script still runs

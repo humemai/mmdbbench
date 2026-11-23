@@ -331,7 +331,9 @@ def server_settings_problems(rows):
             if str(a.get(k)) != str(b.get(k)):
                 out.append(f"{arm} at {scale} ({cls or 'any class'}): server setting {k} is {a.get(k)!r} on the native server and "
                            f"{b.get(k)!r} on the JVM server")
-    return out
+    # ONE SENTENCE ONCE, in the order it first appeared (humemai/mmdbbench#157): the commit sentence is built per ROW, so a landing whose native server reports
+    # a commit that has no registry entry yet printed the same six sentences seven times over (4,560 characters in one line), and the six were the finding.
+    return list(dict.fromkeys(out))
 
 
 def refuse_pooled_builds(rs, where):

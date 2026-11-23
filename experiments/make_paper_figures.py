@@ -959,6 +959,11 @@ def f4_one_vs_n(rows):
 
     def sparse_row(label, tier, warm_tier):
         ours_c = _sparse_overlay_p50(tier)
+        if ours_c is None:
+            # A TIER OF ARCADEDB WITH NO ROW AT ITS PIN IS ABSENT (humemai/mmdbbench#157): the landing of 26.12.1 reruns the small sizes only, so `medium` has no
+            # row at either pin. A row of the figure with no first-pass value of ours is not drawn, and comparators that have rows do not turn that into a refusal.
+            print(f"f4 {label}: SKIPPED, ArcadeDB has no sparse rows at its pin for {tier}")
+            return None
         ours_rec = None
         import make_paper_tables as _T
         g = _T._sparse_2681_rows().get(tier) or []

@@ -868,11 +868,12 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
     groups = {}
     for t in tiers:
         groups.setdefault(pins[t][:9], []).append(t)
-    out = {}
+    out, elsewhere = {}, {}   # elsewhere: tier -> the commits of its rows that are not at its pin
     for r in load_canonical():
         if r.get("lane") != "l3s" or r.get("backend") != arm or r.get("error"):
             continue
         if str(r.get("engine_commit") or "").lower()[:9] != pins.get(r["scale"], landing)[:9]:
+            elsewhere.setdefault(r["scale"], set()).add(str(r.get("engine_commit") or "").lower()[:9])
             continue
         out.setdefault(r["scale"], []).append(r)
     n = mp_builds()   # reps per tier this landing holds: the one reader the dense overlay uses, not a literal 5
@@ -890,6 +891,15 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
     # of the new release has run. Rows at the landing's pin and none at the large pin is a class with no rows at its pin: that refuses below.
     if not any(out.get(t) for t in tiers if pins[t][:9] == landing[:9]):
         return {}
+    # A TIER WITH NO ROW AT ITS PIN IS ABSENT, NOT PARTIAL (humemai/mmdbbench#157), the same distinction one level down. The landing of 26.12.1 reruns the small
+    # sizes only and the store has no l3s row at all at the 26.11.1 commit, so `medium` has no rows at either pin: it is a dash on the table and in the figure,
+    # and every check below runs over the tiers that have rows (`need`). A tier with some rows, fewer than the landing's n, is partial and refuses, as before. A
+    # tier with rows ONLY at another commit is not absent either: that is what a forgotten or wrong large pin looks like, so it refuses with the sentence that
+    # names the variable and the flag (a tier of that arm that was never run has no row at any commit).
+    need = [t for t in tiers if out.get(t) or elsewhere.get(t)]
+    for t in tiers:
+        if t not in need:
+            sys.stderr.write(f"pinned sparse rows: {t} has no rows at {pins[t][:9]}: absent, a dash on the table\n")
     # Both builds of one release at one pin: the page shows both (export_web reads the frozen rows itself); this path feeds the paper's
     # LaTeX table, which is one build, so it validates each build and returns the chosen one (below).
     _builds = {_AI.build_of(r) for t in out for r in out[t]}
@@ -903,14 +913,19 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
             return None
         for _b in sorted(_builds - ({_want} if _want != "all" else set())):
             _other = {t: [r for r in rs if _AI.build_of(r) == _b] for t, rs in out.items()}
-            if any(len(_other.get(t, [])) < n for t in tiers) or any(
-                    len({_AI.arm_identity(r) for t in ts for r in _other[t]}) != 1 for ts in groups.values()):
-                _sparse_refused(f"pinned sparse rows of the {_b} build are incomplete or span two identities")
+            if any(len(_other.get(t, [])) < n for t in need) or any(
+                    len({_AI.arm_identity(r) for t in ts for r in _other.get(t, [])}) != 1 for ts in groups.values() if any(_other.get(t) for t in ts)):
+                _hint = ""
+                if any(_SC.SIZE_CLASS.get(("l3s", t)) == "large" and len(_other.get(t, [])) < n for t in need):
+                    # the one loud sentence of the large class, as the single-build refusal below says it (humemai/mmdbbench#157)
+                    _hint = (f" ({_SC.LARGE_PIN_VAR} names the commit of the release the large rows are on when it is not the landing's: "
+                             "set it, or pass land_stage.py --large-pin)")
+                _sparse_refused(f"pinned sparse rows of the {_b} build are incomplete or span two identities" + _hint)
                 return None
         if _want != "all":
             out = {t: [r for r in rs if _AI.build_of(r) == _want] for t, rs in out.items()}
-    if any(len(out.get(t, [])) < n for t in tiers):
-        missing = [t for t in tiers if len(out.get(t, [])) < n]
+    if any(len(out.get(t, [])) < n for t in need):
+        missing = [t for t in need if len(out.get(t, [])) < n]
         why = (f"pinned sparse rows incomplete at {missing}: "
                + ", ".join(f"{t} has {len(out.get(t, []))} of {n} rows at {pins[t][:9]}" for t in missing))
         if any(_SC.SIZE_CLASS.get(("l3s", t)) == "large" for t in missing):
@@ -920,8 +935,8 @@ def _pinned_sparse_rows(arm="arcadedb_sparse_embedded", build=None):
         _sparse_refused(why)
         return None
     # (engine_version, build): one engine, one build, inside each pin
-    versions = {pin: {_AI.arm_identity(r) for t in ts for r in out[t]} for pin, ts in groups.items()}
-    if any(len(v) != (len(_builds) if build == "all" else 1) for v in versions.values()):
+    versions = {pin: {_AI.arm_identity(r) for t in ts for r in out.get(t, [])} for pin, ts in groups.items()}
+    if any(len(v) != (len(_builds) if build == "all" else 1) for v in versions.values() if v):   # a pin whose tiers are all absent has no identity to hold
         _sparse_refused(f"pinned sparse rows span {sorted(set().union(*versions.values()), key=str)}")
         return None
     return out

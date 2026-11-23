@@ -50,7 +50,9 @@ REPO = HERE.parent
 SITE = Path(os.environ.get("BENCH_LAND_SITE") or REPO.parent / "humem.ai")
 sys.path.insert(0, str(HERE))
 from make_2611_stages import ROWS_SUFFIX  # noqa: E402  (the stage generator names what a stage writes; one place)
-from publish_instrument import PUBLISH_INSTRUMENT, refuse_other_instruments  # noqa: E402
+from publish_instrument import PUBLISH_INSTRUMENT, instrument_of, refuse_other_instruments  # noqa: E402
+import arm_identity  # noqa: E402  (build_of: which build an ArcadeDB row ran on)
+import size_classes  # noqa: E402  (row_size_class: the one classifier of small, large and extra)
 
 
 def host_name(stem, pin, ext=""):
@@ -209,7 +211,7 @@ def _warn_rows_predate_lane_changes(lanes, pin):
               f"(BUGS F98 shipped past all six gates this way).")
 
 
-def _published_lanes(payload_path, pin=None):
+def _published_lanes(payload_path, pin=None, scope=()):
     """The lanes whose tables are already on the page being republished.
 
     Derived from the payload's own table ids through export_web's table->lane
@@ -218,6 +220,13 @@ def _published_lanes(payload_path, pin=None):
     `multimodel` are summaries over the others, `e4` and `pycost` read pinned
     artifacts -- and contribute no lane, which is right: they are rebuilt from
     whatever lanes are in scope rather than pinning a lane themselves.
+
+    `scope` is the landing's own --only-lanes set. The exporter reads BENCH_ONLY_LANES at import and refuses at module scope when
+    `e4decomp_<pin>/` is absent and the scope is empty or names e4, so the import must see the scope. Until humemai/mmdbbench#147 it did
+    not: the scope reaches the gates in the subprocess `env` dict, this process had none, and the FIRST scoped landing at a new pin (no
+    e4decomp directory yet, nothing pulled yet) ended here with `e4decomp_<pin> missing` and rc 1, before any pull, although a landing
+    scoped away from e4 needs no such directory. The exporter's refusal is a SystemExit, which `except Exception` does not catch, so it
+    also left as that one line with no word about which step had asked. Both are handled below.
     """
     try:
         payload = json.loads(Path(payload_path).read_text(encoding="utf-8"))
@@ -233,8 +242,20 @@ def _published_lanes(payload_path, pin=None):
     _had = os.environ.get("BENCH_ENGINE_COMMIT")
     if pin and not _had:
         os.environ["BENCH_ENGINE_COMMIT"] = pin
+    # The scope is lent the same way, and put back the same way. The landing's own scope wins over a value already in the
+    # environment: the gates of step 4 get the landing's scope too (the `env` dict of main()).
+    _scope = ",".join(sorted(scope)) if scope else ""
+    _had_scope = os.environ.get("BENCH_ONLY_LANES")
+    if _scope:
+        os.environ["BENCH_ONLY_LANES"] = _scope
     try:
         from export_web import _TABLE_LANE
+    except SystemExit as exc:
+        # A refusal of the exporter's own (a missing artifact directory, an unset pin) is not "export_web did not import": say that it
+        # refused, with the scope and the pin it saw and its own words, so the cause is in the output and not guessed from a bare line.
+        raise SystemExit(
+            f"REFUSING: cannot read which lanes {payload_path} already carries: export_web refused to import "
+            f"(scope [{_scope or 'none: the whole store'}], pin {pin or 'none'}): {exc}. Nothing was pulled or merged.") from exc
     except Exception as exc:  # noqa: BLE001
         # AN EMPTY ANSWER HERE IS NOT HARMLESS. It used to return set() "so a
         # landing does not die on this helper", and a landing then scoped the
@@ -250,11 +271,109 @@ def _published_lanes(payload_path, pin=None):
     finally:
         if pin and not _had:
             os.environ.pop("BENCH_ENGINE_COMMIT", None)
+        if _scope:
+            if _had_scope is None:
+                os.environ.pop("BENCH_ONLY_LANES", None)
+            else:
+                os.environ["BENCH_ONLY_LANES"] = _had_scope
     out = set()
     for t in payload.get("tables") or []:
         got = _TABLE_LANE.get(t.get("id"))
         if got:
             out.add(got[0])
+    return out
+
+
+def _read_jsonl(path):
+    """The rows of a jsonl file that parse, as a list; [] when the file is absent. A line that does not parse is skipped, as the freeze does."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    rows = []
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict):
+                rows.append(r)
+    return rows
+
+
+def _at_pin(row, pin):
+    """True when the row names the pin's engine commit (prefix either way, the test of screen_pulled_rows). A row with no commit is not at the pin."""
+    c = str(row.get("engine_commit") or "").strip().lower()
+    pin = (pin or "").strip().lower()
+    return bool(c and pin and (c.startswith(pin) or pin.startswith(c)))
+
+
+def stale_small_cells(store_rows, landing_rows, pin, scope=None, max_rep=0):
+    """The small-class ArcadeDB cells that have a repetition with no rc=0 row at `pin`: [(name, {rep: why})], sorted by name.
+
+    A cell is the freeze's key without the repetition and without n_docs: (lane, scale, workload, arm, build, durability class) and, for the
+    Graph Analytical View arm that ran without the view, `nogav`. The durability class is in it because a failed strict row must not hide
+    behind a relaxed row of the same cell; n_docs is not, so a row of a retired corpus in the store (it never reaches the freeze) neither
+    adds a cell nor stands in for a missing one. The rows read are the store (`store_rows`, results/runs.jsonl as it is before the merge) and the rows this
+    landing is about to merge (`landing_rows`), of the instrument that publishes, at a small size (`size_classes.row_size_class`) of an
+    ArcadeDB arm (`arm_identity.is_arcadedb`; build `-` for an arm with none), in `scope` (the lanes the freeze will hold; empty or
+    None: every lane) and, with `max_rep`, of repetitions 1..max_rep. Each repetition seen for a cell at any pin is owed a row at the pin.
+
+    WHY (humemai/mmdbbench#147). The freeze drops every row with rc != 0 BEFORE it keeps the newest row of a key, so a repetition that
+    failed at the pin, or never ran at it, does not supersede the row of an older release: that row stays canonical, and the pair gate
+    (`arm_identity.pair_problems`) then refuses the size class because its two builds name different engine versions, naming the tables
+    and not the cell. This names the cells before the merge. `why` says whether a row at the pin failed (and with what rc) or there is
+    none, and which older row the freeze would keep."""
+    scope = set(scope or ())
+    cells = {}
+    for r in list(store_rows) + list(landing_rows):
+        if instrument_of(r) != PUBLISH_INSTRUMENT or not arm_identity.is_arcadedb(r) or size_classes.row_size_class(r) != "small":
+            continue
+        if scope and r.get("lane") not in scope:
+            continue
+        rep = r.get("rep")
+        if not isinstance(rep, int) or isinstance(rep, bool) or (max_rep and rep > max_rep):
+            continue
+        name = (str(r.get("lane")), str(r.get("scale")), str(r.get("workload")), str(r.get("backend")),
+                arm_identity.build_of(r) or "-", str(r.get("durability_class") or "relaxed"), "nogav" if r.get("gav") is False else "")
+        cells.setdefault(name, {}).setdefault(rep, []).append(r)
+    stale = []
+    for name in sorted(cells):
+        why = {}
+        for rep, rs in sorted(cells[name].items()):
+            here = [r for r in rs if _at_pin(r, pin)]
+            if any(r.get("rc") == 0 for r in here):
+                continue
+            older = [r for r in rs if not _at_pin(r, pin) and r.get("rc") == 0]
+            kept = max(older, key=lambda r: str(r.get("ts_utc"))) if older else None
+            kept_text = (f"the freeze keeps {kept.get('engine_version') or '?'} at {str(kept.get('engine_commit') or '?')[:9]}"
+                         if kept else "no rc=0 row at any pin")
+            if here:
+                last = max(here, key=lambda r: str(r.get("ts_utc")))
+                why[rep] = f"failed at the pin (rc={last.get('rc')}), {kept_text}"
+            else:
+                why[rep] = f"no row at the pin, {kept_text}"
+        if why:
+            stale.append((name, why))
+    return stale
+
+
+def format_stale_small_cells(stale, pin, limit=80):
+    """The warning block for `stale_small_cells`: [] when there is none, else a header, one line per cell (at most `limit`) and a count of the rest."""
+    if not stale:
+        return []
+    out = [f"\n  WARNING: {len(stale)} small-class ArcadeDB cell(s) have a repetition with no rc=0 row at the pin {pin}. The freeze drops a "
+           f"failed row before it keeps the newest row of a key, so such a repetition keeps its row of an older release, and the pair gate "
+           f"then refuses the size class naming its tables and not the cell. Rerun these cells, or declare them, before the gate:"]
+    for name, why in stale[:limit]:
+        lane, scale, workload, arm, build, durability, nogav = name
+        who = (f"{lane} {scale} {workload} {arm} [{build}]" + ("" if durability == "relaxed" else f" {durability}")
+               + (" (no view)" if nogav else ""))
+        out.append(f"    {who}: " + "; ".join(f"rep {rep} {text}" for rep, text in sorted(why.items())))
+    if len(stale) > limit:
+        out.append(f"    ... and {len(stale) - limit} more cell(s)")
     return out
 
 
@@ -463,10 +582,15 @@ def publish_branch(branch, message, site_files, tracked):
 
 
 def apply_overlay_merge(specs, exclude_arms, pin, results=None):
-    """--overlay-merge LABEL:PIN:DIR (repeatable) and --overlay-exclude ARM: build results/dense_mp5_<pin> and dense_mp5_small_<pin> from the
+    """--overlay-merge LABEL:PIN:DIR (repeatable) and --overlay-exclude ARM or ARM@LABEL: build results/dense_mp5_<pin> and dense_mp5_small_<pin> from the
     overlay directories of other sources (humemai/mmdbbench#28, #29), through overlay_merge.merge: the comparators of another engine pin, a
     catch-up directory of the same pin. DIR holds dense_mp5_<PIN> and/or dense_mp5_small_<PIN> (also with the host's `_2611` suffix). The
-    directory a landing already holds is a source too, so nothing is overwritten silently; a name collision refuses."""
+    directory a landing already holds is a source too (its label is `existing`), so nothing is overwritten silently; a name collision refuses.
+
+    `ARM` leaves the arm out of every source. `ARM@LABEL` (humemai/mmdbbench#147) leaves it out of the source labelled LABEL only: the old
+    overlay (the comparators and ArcadeDB's old arms) and the new one (ArcadeDB's new arms) both hold `mp_fp32_*` and `mp_arcsrv_*`, and a
+    global exclude took the new files out with the old. A LABEL that no source carries refuses, so a typo cannot keep a file the call
+    meant to drop."""
     if not specs:
         return
     import overlay_merge
@@ -477,6 +601,11 @@ def apply_overlay_merge(specs, exclude_arms, pin, results=None):
         if len(parts) != 3 or not all(parts):
             sys.exit(f"REFUSING: --overlay-merge {spec!r} must be LABEL:PIN:DIR")
         parsed.append(parts)
+    _known = {label for label, _spin, _d in parsed} | {"existing"}
+    for _arm, _label in overlay_merge.parse_exclude(exclude_arms)[1]:
+        if _label.split("@", 1)[0] not in _known:
+            sys.exit(f"REFUSING: --overlay-exclude {_arm}@{_label}: no source is labelled {_label!r} (the labels are {sorted(_known)}); "
+                     f"nothing was merged.")
     for stem in ("dense_mp5", "dense_mp5_small"):
         target = results / f"{stem}_{pin}"
         sources = [("existing@" + pin, target)] if target.is_dir() else []
@@ -570,8 +699,13 @@ def main():
     ap.add_argument("--overlay-merge", action="append", default=[], metavar="LABEL:PIN:DIR",
                     help="build the dense overlay directories of this landing from another source's directories (the comparators of another "
                          "engine pin, a catch-up directory); repeatable; a name collision refuses (humemai/mmdbbench#28, #29)")
-    ap.add_argument("--overlay-exclude", action="append", default=[], metavar="ARM",
-                    help="with --overlay-merge: leave this arm's overlay files out (its JVM and native files)")
+    ap.add_argument("--overlay-exclude", action="append", default=[], metavar="ARM[@LABEL]",
+                    help="with --overlay-merge: leave an arm's overlay files out (its JVM and native files). ARM leaves it out of every "
+                         "source. ARM@LABEL leaves it out of the one source called LABEL (the LABEL of its --overlay-merge, or `existing` "
+                         "for the directory this landing already holds) and keeps it from the others: the old overlay (the comparators and "
+                         "ArcadeDB's old arms) and the new one (ArcadeDB's new arms) both hold mp_fp32_* and mp_arcsrv_*, so "
+                         "--overlay-exclude fp32@old --overlay-exclude arcsrv@old drops the old files only (humemai/mmdbbench#147). "
+                         "Repeatable; a LABEL no source carries refuses")
     ap.add_argument("--post-file", default="", metavar="FILE",
                     help="the rerun's rows as one local file (merge the worktrees' files first, tools/merge_fourarm_rows.py), instead of pulling "
                          "runs_page_<pin>_2611_<postN>.jsonl from the host")
@@ -640,7 +774,7 @@ def main():
     # published row therefore passes every gate on every landing, which is the
     # property that makes republishing safe at all.
     if _lanes:
-        _already = _published_lanes(SITE_PAYLOAD, pin=args.pin)
+        _already = _published_lanes(SITE_PAYLOAD, pin=args.pin, scope=_lanes)
         if _already - _lanes:
             print(f"  cumulative: landing {','.join(sorted(_lanes))} and keeping "
                   f"{','.join(sorted(_already - _lanes))} already on the page")
@@ -786,6 +920,12 @@ def main():
     if cens:
         print(f"  NOTE {len(cens)} rows carry a censored query (budget hit); they land with the flag and the page shows "
               f"them as censored: {sorted({(r.get('lane'), r.get('backend')) for r in cens})}")
+
+    # A FAILED OR MISSING SMALL CELL IS NAMED HERE, BEFORE THE GATE THAT REFUSES FOR IT NAMES ONLY TABLES (humemai/mmdbbench#147). A warning, not a
+    # refusal: whether a cell is owed (an arm the rerun leaves out on purpose) is a judgment this cannot make. It prints on a dry run too.
+    for _line in format_stale_small_cells(
+            stale_small_cells(_read_jsonl(RESULTS / "runs.jsonl"), keep, args.pin, scope=_lanes, max_rep=args.max_rep), args.pin):
+        print(_line)
 
     if args.dry_run:
         # STOP BEFORE ANYTHING WRITES. Without --apply this script still runs

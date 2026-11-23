@@ -285,6 +285,124 @@ def test_an_unscoped_landing_and_one_scoped_with_e4_still_need_the_e4_artifacts(
         assert done.returncode != 0 and f"e4decomp_{PIN} missing" in done.stderr
 
 
+# ---------------------------------------------------------------------------------------------------- the first scoped landing at a new pin (#147)
+@pytest.fixture
+def fresh_exporter():
+    """The in-process read of the published lanes imports export_web, whose module scope reads BENCH_ONLY_LANES and the pin once: a
+    cached import would hide the failure. The cached module is put back afterwards."""
+    saved = sys.modules.pop("export_web", None)
+    yield
+    sys.modules.pop("export_web", None)
+    if saved is not None:
+        sys.modules["export_web"] = saved
+
+
+def _payload_of(tmp_path, ids):
+    p = tmp_path / "payload.json"
+    p.write_text(json.dumps({"tables": [{"id": t} for t in ids]}))
+    return p
+
+
+def _results_without_e4(tmp_path, monkeypatch):
+    """A results tree with no e4decomp directory, and none of the BENCH_ variables of the environment this suite runs in."""
+    for k in [k for k in os.environ if k.startswith("BENCH_")]:
+        monkeypatch.delenv(k)
+    results = tmp_path / "results"
+    results.mkdir()
+    monkeypatch.setenv("BENCH_RESULTS_DIR", str(results))
+    return results
+
+
+def test_the_first_scoped_landing_at_a_new_pin_reads_the_published_lanes_before_any_pull(landing, fresh_exporter, capsys):
+    """Before #147 `land_stage --only-lanes l2` at a pin with no e4decomp directory ended with the one line `e4decomp_<pin> missing` and rc 1,
+    before the pull, though a landing scoped away from e4 needs no such directory."""
+    shutil.rmtree(landing["results"] / f"e4decomp_{PIN}")
+    landing["host"].put_rows([r for r in _fixture_rows() if r["lane"] == "l2"][:20])
+    L.SITE_PAYLOAD.parent.mkdir(parents=True)
+    L.SITE_PAYLOAD.write_text(json.dumps({"tables": [{"id": "l2"}, {"id": "e2"}]}))
+    assert _land(landing, "--only-lanes", "l2", "--dry-run") == 0
+    out = capsys.readouterr().out
+    assert "cumulative: landing l2 and keeping e2 already on the page" in out and "DRY RUN" in out
+    assert "BENCH_ONLY_LANES" not in os.environ                                # lent for the import, not left behind
+
+
+def test_the_published_lanes_import_sees_the_landings_scope_and_the_environment_is_put_back(tmp_path, monkeypatch, fresh_exporter):
+    _results_without_e4(tmp_path, monkeypatch)
+    payload = _payload_of(tmp_path, ["l2", "e2", "l3d", "e4"])                 # e4 names no lane
+    assert L._published_lanes(payload, pin=PIN, scope={"l2"}) == {"l2", "e2", "l3d"}
+    assert "BENCH_ONLY_LANES" not in os.environ and "BENCH_ENGINE_COMMIT" not in os.environ
+    monkeypatch.setenv("BENCH_ONLY_LANES", "l4")                               # a value that was there is restored, not dropped
+    sys.modules.pop("export_web")
+    assert L._published_lanes(payload, pin=PIN, scope={"l2", "e2"}) == {"l2", "e2", "l3d"}
+    assert os.environ["BENCH_ONLY_LANES"] == "l4"
+
+
+@pytest.mark.parametrize("scope, shown", [((), "none: the whole store"), (("l2", "e4"), "e4,l2")])
+def test_a_refusal_of_the_exporter_at_that_import_is_reported_with_its_cause(tmp_path, monkeypatch, fresh_exporter, scope, shown):
+    """No scope, or a scope that names e4, still needs the directory: the exporter refuses with a SystemExit, which `except Exception` did not catch."""
+    _results_without_e4(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        L._published_lanes(_payload_of(tmp_path, ["l2"]), pin=PIN, scope=scope)
+    msg = str(exc.value)
+    assert msg.startswith("REFUSING: cannot read which lanes") and "export_web refused to import" in msg
+    assert f"scope [{shown}]" in msg and f"pin {PIN}" in msg and f"e4decomp_{PIN} missing; E4 is pinned only" in msg
+    assert "BENCH_ONLY_LANES" not in os.environ and "BENCH_ENGINE_COMMIT" not in os.environ
+
+
+# ---------------------------------------------------------------------------------------------------- two chains, one pin, one landing (#147)
+def test_two_worktrees_land_from_a_pre_created_union_of_the_sparse_and_e4_files(landing, capsys):
+    """PUBLISHING.md, "Two chains, one pin, one landing": the scp calls for the sparse and e4 files are check=False and a directory that
+    holds files is kept, so a landing reads the union of the two worktrees that was copied in before the run."""
+    results = landing["results"]
+    for d in (f"sparse_mp_{PIN}", f"e4decomp_{PIN}"):
+        shutil.rmtree(results / d, ignore_errors=True)
+    sp, e4 = results / f"sparse_mp_{PIN}", results / f"e4decomp_{PIN}"
+    sp.mkdir()
+    e4.mkdir()
+    for name in ("sp_arcadedb_sparse_small.json", "sp_arcadedb_sparse_native_small.json"):     # the JVM worktree's file, the native one's
+        (sp / name).write_text(json.dumps([{"from": name}]))
+    for rep in (1, 2, 3):                                                                      # the e4 artifacts exist in the JVM worktree only
+        (e4 / f"decomp3m_{PIN}_rep{rep}.json").write_text(json.dumps({"rep": rep}))
+    landing["host"].put_rows(_fixture_rows()[:20])                    # the host has the rows file and neither directory
+    before = {p.name: p.read_bytes() for d in (sp, e4) for p in d.iterdir()}
+    assert _land(landing, "--dry-run") == 0
+    out = capsys.readouterr().out
+    assert f"sparse_mp_{PIN}: 2 file(s)" in out and f"e4decomp_{PIN}: 3 rep file(s)" in out
+    assert {p.name: p.read_bytes() for d in (sp, e4) for p in d.iterdir()} == before
+
+
+def test_the_e4_pull_name_is_the_one_e4_decomp_writes_and_export_web_reads():
+    """The e4 directory has no `_2611` suffix, unlike the sparse and dense ones, and that is right: it is written and read under this name."""
+    assert "/e4decomp_{args.pin}/decomp3m_*.json" in (HERE / "land_stage.py").read_text()
+    assert 'f"e4decomp_{pin}"' in (HERE / "e4_decomp.py").read_text()
+    assert 'f"e4decomp_{os.environ.get(' in (HERE / "export_web.py").read_text()
+
+
+# ---------------------------------------------------------------------------------------------------- a failed or missing small cell is named (#147)
+def test_a_failed_and_a_missing_small_cell_are_named_before_the_merge_and_the_landing_goes_on(landing, capsys):
+    """The pair gate names the tables of the size class, not the cell; the landing names the cells first and does not stop."""
+    fixture = [r for r in _fixture_rows() if r["backend"] in ("arcadedb_embedded", "arcadedb_server", "arcadedb_graph_embedded")]
+    old = [dict(r, engine_commit="a3a5d1245", engine_version="26.11.1", ts_utc="2026-11-10T10:00:00+00:00") for r in fixture]
+    _write(landing["results"] / "runs.jsonl", old)                                        # the store: the 26.11.1 rows of every cell
+    new = [dict(r, rc=1) if (r["backend"] == "arcadedb_server" and r["rep"] == 3) else r
+           for r in fixture if r["backend"] != "arcadedb_graph_embedded"]                 # server rep 3 failed; the graph arm never ran
+    landing["host"].put_rows(new)
+    assert _land(landing, "--dry-run") == 0
+    out = capsys.readouterr().out
+    assert "WARNING: " in out and f"no rc=0 row at the pin {PIN}" in out
+    lines = [l.strip() for l in out.splitlines() if l.startswith("    ") and "arcadedb_" in l]
+    assert lines and all(l.startswith(("l1tpc tpch1", "l2 sf1")) for l in lines), lines
+    assert any(l.startswith("l1tpc tpch1 oltp arcadedb_server [jvm]") and "rep 3 failed at the pin (rc=1)" in l
+               and "the freeze keeps 26.11.1 at a3a5d1245" in l for l in lines), lines
+    assert any(l.startswith("l2 sf1 oltp arcadedb_graph_embedded [jvm]") and "rep 1 no row at the pin" in l for l in lines), lines
+    assert not any("arcadedb_embedded [jvm]" in l for l in lines), lines                  # every repetition of the embedded cells landed
+    assert "DRY RUN: " in out                                                             # a warning, not a refusal
+    # with every cell present at the pin there is no block
+    landing["host"].put_rows([dict(r, rc=0) for r in fixture])
+    assert _land(landing, "--dry-run") == 0
+    assert "WARNING: " not in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------------------------------- the whole chain
 def _chain_available():
     if shutil.which("pdftotext") is None or shutil.which("gs") is None:

@@ -10,7 +10,10 @@ replace another of the same name:
 - the one replacement it allows: a file measured through the benchmark's own lean HTTP client replaces a file of the same name measured
   through the vendor driver or the PostgreSQL wire (a served ArcadeDB twin of the 26.11.1 campaign wrote the same name as the headline job,
   and the page prints only the lean one; the exporter refuses the others), and the manifest says so;
-- `exclude_arms` leaves an arm out (its JVM and native files), for a landing that does not print it;
+- `exclude_arms` leaves an arm out (its JVM and native files), for a landing that does not print it. An entry is `ARM`, which leaves the arm
+  out of every source, or `ARM@LABEL` (humemai/mmdbbench#147), which leaves it out of the one source called LABEL and keeps it from the others:
+  the overlay of an old pin (the comparators and ArcadeDB's old arms) and the one of the new pin (ArcadeDB's new arms) both hold `mp_fp32_*`,
+  and only the old files may go;
 - MANIFEST.txt beside the files says which source, pin and client each file came from.
 
 THE CLIENT IN THE FILE NAME (humemai/mmdbbench#62). A served ArcadeDB arm runs one cell as up to three jobs (the vendor driver, the lean twin, the
@@ -131,8 +134,34 @@ def pick(directory, plain):
     return got[0] if got else os.path.join(str(directory), plain)
 
 
+def parse_exclude(specs):
+    """The `--overlay-exclude` values as (arms, per_source): `arms` is the set of ARM entries (left out of every source, the form that always
+    existed) and `per_source` the list of (arm, label) from `ARM@LABEL` entries. An empty ARM or an empty LABEL refuses."""
+    arms, per_source = set(), []
+    for spec in specs:
+        arm, at, label = str(spec).partition("@")
+        if not arm or (at and not label):
+            raise SystemExit(f"REFUSING: --overlay-exclude {spec!r} must be ARM or ARM@LABEL")
+        if at:
+            per_source.append((arm, label))
+        else:
+            arms.add(arm)
+    return arms, per_source
+
+
+def is_excluded(arm, source_label, arms, per_source):
+    """True when `arm` of the source called `source_label` is left out. A source label is `LABEL@PIN` (`comparators@e85469273`); an
+    `ARM@LABEL` entry names the source by LABEL alone, or by the whole `LABEL@PIN`."""
+    if arm is None:
+        return False
+    if arm in arms:
+        return True
+    return any(a == arm and l in (source_label, source_label.split("@", 1)[0]) for a, l in per_source)
+
+
 def merge(sources, out, exclude_arms=()):
     """Merge `sources` [(label, directory)], in order, into directory `out`; returns the manifest lines. Refuses on a name collision.
+    `exclude_arms` takes `ARM` and `ARM@LABEL` entries (`parse_exclude`).
 
     The decision is made ONCE per plain file name (`plain_name`: a file named for the lean client and a plain file of the same arm and repetition are
     candidates for one place), over every candidate, so it does not depend on the order of the sources (humemai/mmdbbench#87): identical
@@ -140,10 +169,11 @@ def merge(sources, out, exclude_arms=()):
     that differs refuses and names all candidates. The chosen file keeps its own name. A file NAMED for the vendor driver or the PostgreSQL wire is not
     merged (no table reads it; it stays on the host) and the manifest lists it."""
     out = Path(out)
+    arms, per_source = parse_exclude(exclude_arms)
     cands, left = {}, []
     for label, d in sources:
         for fp in sorted(Path(d).glob("mp_*_b*.json")):
-            if arm_of(fp.name) in set(exclude_arms):
+            if is_excluded(arm_of(fp.name), label, arms, per_source):
                 continue
             if client_in_name(fp.name) not in ("", LEAN):
                 left.append(f"{label}/{fp.name}")

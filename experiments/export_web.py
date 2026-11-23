@@ -3194,6 +3194,11 @@ SPARSE_MP_ARMS = [
     ("milvus", "milvus_sparse", "Milvus"),
     ("qdrant", "qdrant_sparse", "Qdrant"),
 ]
+# THE TWO ARMS THE 2026-11 SUBSET LEAVES OUT (make_2611_stages.OUTSIDE: Elasticsearch and Milvus, humemai/mmdbbench#157). No chain of the rerun runs them, so a
+# small tier cannot hold their files. Every other arm of SPARSE_MP_ARMS is required of a tier, as before; these two are required only when the overlay holds a file of
+# them at some tier (all-or-nothing, as the dense optional arms are: none is absent, some is a refusal naming the missing files). With none the page declares them not run
+# (`_oct_conditions`, the l3s block).
+SPARSE_MP_BY_PRESENCE = ("elastic", "milvus")
 
 
 def _sparse_multipass_table():
@@ -3210,6 +3215,9 @@ def _sparse_multipass_table():
     of the same overlay. This one cannot, so it says so instead.
     """
     entries = []
+    _roots = [_pinned_dir("sparse_mp", size_class=_SC.SIZE_CLASS[("l3s", t)]) for t in ("medium", "small", "tiny")]
+    _run = {arm for arm, _b, _l in SPARSE_MP_ARMS
+            if arm not in SPARSE_MP_BY_PRESENCE or any(r.is_dir() and _OM.files(r, f"sp_{arm}_*.json") for r in _roots)}
     # 100k joined the second-pass run (qDP); its files are
     # optional so the table renders before they land, and the sparse
     # condition says whether 100k has a second pass by looking, not by text.
@@ -3219,7 +3227,7 @@ def _sparse_multipass_table():
         # release for both classes is one directory, as before. An absent directory is a tier not run at its pin; a partial one refuses.
         _cls = _SC.SIZE_CLASS[("l3s", tier)]
         root = _pinned_dir("sparse_mp", size_class=_cls,
-                           expected=None if tier == "tiny" else [f"sp_{arm}_{tier}.json" for arm, _b, _l in SPARSE_MP_ARMS])
+                           expected=None if tier == "tiny" else [f"sp_{arm}_{tier}.json" for arm, _b, _l in SPARSE_MP_ARMS if arm in _run])
         if not root.is_dir():
             continue
         _sp_units = []
@@ -5604,6 +5612,14 @@ def _oct_conditions(table):
             why = _R("l3s", key)
             tail.append(why)
             _declare_absence("l3s", engine, None, "unexpressible", why)
+        # THE ARMS NO CHAIN OF THE RERUN RUNS (humemai/mmdbbench#157): Elasticsearch and Milvus are outside the 2026-11 subset (make_2611_stages.OUTSIDE). With no row and no
+        # second-pass file of them the table says so plainly, and the absence is declared; no reason is given because none was recorded.
+        for engine in ("Elasticsearch", "Milvus"):
+            if any(n.startswith(engine) for n in names):
+                continue      # an arm arrived; the declaration would be false
+            why = _gen(f"{engine} was not run at this release.", engine)
+            tail.append(why)
+            _declare_absence("l3s", engine, None, "not measured", why)
     if tid == "lifecycle" and any(n == "Dense vectors (embedded)" for n in names):
         tail.append(_R("lifecycle", "vector_stats"))
     if tid == "lifecycle" and any("SurrealDB" in n for n in names):

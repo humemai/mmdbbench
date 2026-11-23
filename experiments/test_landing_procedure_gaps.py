@@ -321,9 +321,9 @@ def test_the_sparse_table_prints_a_dash_for_an_absent_tier_and_numbers_for_the_r
 
 
 @contextlib.contextmanager
-def _results(tiers_by_dir):
+def _results(tiers_by_dir, skip=()):
     """A scratch results tree for the exporter and the paper path with `sparse_mp_<pin>` directories holding six arms' files for the tiers given:
-    {pin: tiers}. Yields (exporter, make_paper_figures, directory). matplotlib is stubbed when it is not installed."""
+    {pin: tiers}, less the arm tokens in `skip`. Yields (exporter, make_paper_figures, directory). matplotlib is stubbed when it is not installed."""
     import export_web as X
     import make_paper_tables as M
     if importlib.util.find_spec("matplotlib") is not None:
@@ -340,6 +340,8 @@ def _results(tiers_by_dir):
             root = Path(d) / f"sparse_mp_{pin}"
             root.mkdir()
             for arm, backend, _label in X.SPARSE_MP_ARMS:
+                if arm in skip:
+                    continue
                 for tier in tiers:
                     passes = [{"backend": backend, "scale": tier, "lane": "l3s_mp", "rep": i, "build_s": 100.0, "n_docs": 1000, "engine_version": "26.12.1",
                                "query_p50_ms": 80.0 if i == 0 else 10.0 + i, "query_p99_ms": 300.0 if i == 0 else 20.0 + i} for i in range(6)]
@@ -450,6 +452,58 @@ def test_a_file_the_landing_already_holds_wins_and_a_pin_that_is_the_landings_ad
     assert set(got[f"sparse_mp_{NEW}"]) == {"sp_arc_int8_small.json", "sp_arc_int8_tiny.json"} and len(calls) == 3, (got, calls)     # no variable: as before
     got, calls = _pull([COMP], large_pin=NEW)                                                    # one release for both classes: one directory, every tier of the comparators
     assert set(got) == {f"sparse_mp_{NEW}"} and "sp_qdrant_medium.json" in got[f"sparse_mp_{NEW}"] and "sp_arc_int8_native_tiny.json" not in got[f"sparse_mp_{NEW}"], got
+
+
+# ------------------------------------------------------------------------------------------------ 4b. the arms of a small sparse tier
+RERUN = {"arcadedb_sparse_embedded", "arcadedb_sparse_embedded_fp32", "arcadedb_sparse_server", "qdrant_sparse"}     # the required arms the rerun runs
+LEFT_OUT = ("elastic", "milvus")                                                                                      # make_2611_stages.OUTSIDE: no chain runs them
+
+
+def test_a_small_tier_is_complete_with_the_arms_the_rerun_runs_and_needs_no_file_of_the_two_it_leaves_out():
+    with _results({NEW: ("small", "tiny")}, skip=LEFT_OUT) as (X, _F, _d):
+        by_tier = {}
+        for e in X._sparse_multipass_table()["entries"]:
+            by_tier.setdefault(e["scale"], []).append(e)
+        assert {t: len(v) for t, v in by_tier.items()} == {"small": 4, "tiny": 4}, {t: len(v) for t, v in by_tier.items()}
+        assert all({e["backend_key"] for e in v} == RERUN for v in by_tier.values())
+    with _results({NEW: ("small", "tiny")}) as (X, _F, _d):                                      # all six present: the six are read, as before
+        assert len(X._sparse_multipass_table()["entries"]) == 12
+
+
+def test_a_missing_file_of_an_arm_the_rerun_runs_still_refuses_with_the_file_named():
+    with _results({NEW: ("small", "tiny")}, skip=LEFT_OUT) as (X, _F, d):
+        (d / f"sparse_mp_{NEW}" / "sp_qdrant_small.json").unlink()
+        msg = _refusal(X._sparse_multipass_table)
+        assert f"sparse_mp_{NEW} has 1 of 4 files missing (sp_qdrant_small.json)" in msg, msg
+        (d / f"sparse_mp_{NEW}" / "sp_arc_srv_small.json").unlink()
+        assert "2 of 4 files missing" in _refusal(X._sparse_multipass_table)
+
+
+def test_an_arm_left_out_is_all_or_nothing_once_any_file_of_it_exists():
+    with _results({NEW: ("small", "tiny")}, skip=LEFT_OUT) as (X, _F, d):
+        (d / f"sparse_mp_{NEW}" / "sp_milvus_tiny.json").write_text("[]")                       # one file of Milvus, at another tier
+        msg = _refusal(X._sparse_multipass_table)
+        assert f"sparse_mp_{NEW} has 1 of 5 files missing (sp_milvus_small.json)" in msg, msg
+
+
+def test_the_two_arms_left_out_are_declared_not_run_on_the_payload_and_never_when_an_arm_arrived():
+    import export_web as X
+
+    def entry(label, key):
+        return {"backend": label, "backend_key": key, "scale": "small", "is_arcadedb": key.startswith("arcadedb"), "metrics": {"p50 ms": {"median": 1.0}}}
+    table = {"id": "l3s", "entries": [entry("ArcadeDB (embedded, int8)", "arcadedb_sparse_embedded"), entry("Qdrant", "qdrant_sparse")], "columns": ["p50 ms"], "conditions": []}
+    with mock.patch.object(X, "_FROZEN_ROWS", []), mock.patch.dict(X._DECLARED_ABSENCES, clear=True):
+        _head, tail = X._oct_conditions(table)
+        said = [t for t in tail if t.endswith("was not run at this release.")]
+        assert said == ["Elasticsearch was not run at this release.", "Milvus was not run at this release."], said            # plainly, with no reason invented
+        declared = [a for a in X._DECLARED_ABSENCES["l3s"] if a["kind"] == "not measured"]
+        assert [(a["backend"], a["column"], a["why"]) for a in declared] == [("Elasticsearch", None, said[0]), ("Milvus", None, said[1])], declared
+        assert all(rec in X._GENERATED for rec in ({"text": said[0], "values": ["Elasticsearch"]}, {"text": said[1], "values": ["Milvus"]}))
+    table["entries"].append(entry("Elasticsearch", "elasticsearch_sparse"))
+    with mock.patch.object(X, "_FROZEN_ROWS", []), mock.patch.dict(X._DECLARED_ABSENCES, clear=True):
+        _head, tail = X._oct_conditions(table)
+        assert [t for t in tail if t.endswith("was not run at this release.")] == ["Milvus was not run at this release."]    # an arm that arrived is not declared absent
+        assert [a["backend"] for a in X._DECLARED_ABSENCES["l3s"] if a["kind"] == "not measured"] == ["Milvus"]
 
 
 # ------------------------------------------------------------------------------------------------ 5. the pin of a landing is always given

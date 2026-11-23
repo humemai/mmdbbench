@@ -1547,6 +1547,18 @@ def _rate(count_fields, seconds_field):
     return fn
 
 
+def _rate_all(count_fields, seconds_field):
+    """`_rate` for a table whose rows count the records in SEVERAL fields that only make the real count together: a row that lacks one of them has no rate (a dash),
+    not a quietly smaller one (humemai/mmdbbench#140: Graph OLAP counted persons and friendships and left out the message half of the full network)."""
+    def fn(r):
+        parts = [_num(r.get(f)) for f in count_fields]
+        t = _num(r.get(seconds_field))
+        n = sum(parts) if all(p is not None for p in parts) else 0
+        return (n / t) if (n and t) else None
+    fn.__name__ = f"rate({'+'.join(count_fields)})/{seconds_field}"
+    return fn
+
+
 def _per_million(table_id):
     """A per-row callable for the column "peak memory GiB per million <records>" (humemai/mmdbbench#133): the row's memory reading (`_peak_mem`,
     the one the `peak memory GiB` column prints) over the records of the table's own ingest count, per million. A value for a SMALL-size row
@@ -1718,7 +1730,7 @@ OCT_TABLE_METRICS = {
         ("lsqb_q8_p50_ms", "LSQB Q8 p50 ms"),
         ("lsqb_q9_p50_ms", "LSQB Q9 p50 ms"),
         ("cold_first_query_ms", "cold first query ms"),
-        (_rate(("n_persons_ingested", "n_edges_ingested"), "build_s"), "ingest vertices+edges/s"),
+        (_rate_all(("n_persons_ingested", "n_edges_ingested", "msg_vertices", "msg_edges"), "build_s"), "ingest vertices+edges/s"),
         ("build_s", "ingest total s"),
         ("gav_build_s", "view build s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
@@ -2641,7 +2653,7 @@ LANES = {
         "only_scales": {"sf1full"},
         "only_workload": "olap",
         # p50 first, with p99 beside it (F29).
-        "metrics": [(_rate(("n_persons_ingested", "n_edges_ingested"), "build_s"), "ingest vertices+edges/s"),
+        "metrics": [(_rate_all(("n_persons_ingested", "n_edges_ingested", "msg_vertices", "msg_edges"), "build_s"), "ingest vertices+edges/s"),
                     ("build_s", "ingest total s"),
                     ("friend_age_by_city_p50_ms", "average friend age p50 ms"),
                     ("friend_age_by_city_p99_ms", "average friend age p99 ms"),

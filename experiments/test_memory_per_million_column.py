@@ -135,9 +135,9 @@ def test_every_table_with_a_peak_memory_and_an_ingest_rate_has_the_column_over_t
     assert ("build_docs_per_s", "ingest+index vectors/s") in EW.OCT_TABLE_METRICS["l3d"] and MPM.RECORDS["l3d"][1] == ("n_docs",)
     assert ("build_docs_per_s", "ingest+index vectors/s") in EW.OCT_TABLE_METRICS["l3s"] and MPM.RECORDS["l3s"][1] == ("n_docs",)
     assert ("ingest_pts_per_s", "ingest points/s") in EW.OCT_TABLE_METRICS["l4"] and MPM.RECORDS["l4"][1] == ("n_points",)
-    # ... except graph analytics, whose rate counts persons and friendships while its one size is the full network: the message half is added.
-    assert rate_fields("l2olap") == ("n_persons_ingested", "n_edges_ingested")
-    assert MPM.RECORDS["l2olap"][1] == rate_fields("l2olap") + ("msg_vertices", "msg_edges")
+    # graph analytics: its one size is the full network, so the rate and the per-million column both count the message half too (#140: the rate used to count persons and friendships only)
+    assert rate_fields("l2olap") == ("n_persons_ingested", "n_edges_ingested", "msg_vertices", "msg_edges")
+    assert MPM.RECORDS["l2olap"][1] == rate_fields("l2olap")
     # the units are the types the rate columns name
     for tid, word in (("l1tpc", "documents"), ("l2", "vertices+edges"), ("l2olap", "vertices+edges"), ("e2", "vertices+edges"),
                       ("l3d", "vectors"), ("l3s", "vectors"), ("l4", "points")):
@@ -251,6 +251,17 @@ def test_every_number_in_the_new_sentences_has_a_source():
     assert PC._check_conditions(payload, []) == 0
 
 
+def test_the_graph_olap_ingest_rate_counts_the_whole_network_and_a_row_without_the_message_half_has_none():
+    # humemai/mmdbbench#140: the rate counted persons and friendships only, about 89 times fewer than the cell loads; the four fields of the whole network are counted now
+    fn = next(f for f, label in EW.OCT_TABLE_METRICS["l2olap"] if label == "ingest vertices+edges/s")
+    row = {"n_persons_ingested": "9892", "n_edges_ingested": "180623", "msg_vertices": "3163871", "msg_edges": "13581644", "build_s": "100"}
+    assert abs(fn(row) - (9892 + 180623 + 3163871 + 13581644) / 100) < 1e-6
+    for field in ("n_persons_ingested", "n_edges_ingested", "msg_vertices", "msg_edges"):
+        partial = {k: v for k, v in row.items() if k != field}
+        assert fn(partial) is None, field
+    assert fn({**row, "build_s": "0"}) is None and fn({**row, "build_s": ""}) is None
+
+
 if __name__ == "__main__":
     test_a_small_size_row_gets_gib_per_million_from_its_memory_and_its_record_count()
     test_a_large_size_row_and_an_extra_size_row_get_no_value()
@@ -260,4 +271,5 @@ if __name__ == "__main__":
     test_the_two_limits_are_under_a_table_that_has_the_column_and_under_no_other()
     test_the_engines_that_have_a_second_size_are_read_from_the_payload()
     test_every_number_in_the_new_sentences_has_a_source()
+    test_the_graph_olap_ingest_rate_counts_the_whole_network_and_a_row_without_the_message_half_has_none()
     print("ok")

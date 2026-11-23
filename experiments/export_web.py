@@ -168,12 +168,15 @@ _UNUSABLE_VERSION = re.compile(
     re.I)
 
 
-def _pinned_dir(name, expected=None):
+def _pinned_dir(name, expected=None, size_class="small"):
     """results/<name>_<pin>, complete, or refuse. Pinned only: a fallback to results/<name> would publish
-    an older overlay when the pinned one is incomplete, which is a wrong number, not a safety net."""
-    pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
-    if not pin:
+    an older overlay when the pinned one is incomplete, which is a wrong number, not a safety net.
+
+    The pin is the one of `size_class` (size_classes.pin_of_size_class, humemai/mmdbbench#151): the landing's, and for the large class the pin of the
+    large rows when the landing names it (BENCH_LARGE_ENGINE_COMMIT)."""
+    if not os.environ.get("BENCH_ENGINE_COMMIT", "").strip():
         raise SystemExit(f"BENCH_ENGINE_COMMIT is unset: {name} is pinned only")
+    pin = _SC.pin_of_size_class(size_class)
     cand = RESULTS / f"{name}_{pin}"
     # ABSENT IS NOT PARTIAL. A PARTIAL directory is what this refusal is for:
     # an incomplete overlay standing in for a complete one is a wrong number,
@@ -190,7 +193,9 @@ def _pinned_dir(name, expected=None):
         missing = [f for f in expected if not os.path.isfile(_OM.pick(cand, f))]
         if missing:
             raise SystemExit(f"{cand.name} has {len(missing)} of {len(expected)} files missing "
-                             f"({', '.join(missing[:4])}{' ...' if len(missing) > 4 else ''}); no fallback")
+                             f"({', '.join(missing[:4])}{' ...' if len(missing) > 4 else ''}); no fallback"
+                             + (" (the overlay of the large class is read at BENCH_LARGE_ENGINE_COMMIT when the landing names it: land_stage.py --large-pin)"
+                                if size_class == "large" else ""))
     return cand
 
 
@@ -3204,16 +3209,19 @@ def _sparse_multipass_table():
     The dense table CAN carry both columns because both of its passes come out
     of the same overlay. This one cannot, so it says so instead.
     """
-    root = _pinned_dir("sparse_mp", expected=[
-        f"sp_{arm}_{tier}.json"
-        for tier in ("medium", "small") for arm, _b, _l in SPARSE_MP_ARMS])
-    if not root.is_dir():
-        return None
     entries = []
     # 100k joined the second-pass run (qDP); its files are
     # optional so the table renders before they land, and the sparse
     # condition says whether 100k has a second pass by looking, not by text.
     for tier in ("medium", "small", "tiny"):
+        # A TIER READS THE DIRECTORY OF ITS SIZE CLASS (humemai/mmdbbench#151, size_classes.pin_of_size_class). The medium size is LARGE: at a landing
+        # whose large rows stay on an earlier release its files are in `sparse_mp_<that pin>`, while the small and tiny files are in the landing's. One
+        # release for both classes is one directory, as before. An absent directory is a tier not run at its pin; a partial one refuses.
+        _cls = _SC.SIZE_CLASS[("l3s", tier)]
+        root = _pinned_dir("sparse_mp", size_class=_cls,
+                           expected=None if tier == "tiny" else [f"sp_{arm}_{tier}.json" for arm, _b, _l in SPARSE_MP_ARMS])
+        if not root.is_dir():
+            continue
         _sp_units = []
         for arm, backend, label in SPARSE_MP_ARMS + SPARSE_MP_OPTIONAL_ARMS:
             for _ob, _fps in _overlay_files_by_build(root, f"sp_{arm}", f"_{tier}.json", backend):
@@ -3242,7 +3250,7 @@ def _sparse_multipass_table():
                 "deployment": deployment_of(backend),
                 "image": None,
                 "version_name": _engine_version(label, _row_engine_string(cold[0]) or _campaign_engine_string(backend),
-                                                commit=_overlay_commit()),
+                                                commit=_overlay_commit(_cls)),
                 "host": "mini",
                 "metrics": {
                     "cold p50 ms": {"median": round(c, 3), "min": round(c, 3),
@@ -7280,11 +7288,12 @@ def _counts_note(table_id, entries):
         nt = {int(v) for v in (_num(r.get("query_n")) for r in lrows) if v}
         half = set()
         try:
-            root = _pinned_dir("sparse_mp")
-            for fp in (sorted(root.glob("sp_*.json")) if root.is_dir() else []):
-                for rec in json.loads(fp.read_text(encoding="utf-8")):
-                    if _num(rec.get("n_queries")):
-                        half.add(int(_num(rec.get("n_queries"))))
+            for tier in ("medium", "small", "tiny"):       # the files the second-pass table reads: each tier from its size class's directory (#151)
+                root = _pinned_dir("sparse_mp", size_class=_SC.SIZE_CLASS[("l3s", tier)])
+                for fp in (sorted(root.glob(f"sp_*_{tier}.json")) if root.is_dir() else []):
+                    for rec in json.loads(fp.read_text(encoding="utf-8")):
+                        if _num(rec.get("n_queries")):
+                            half.add(int(_num(rec.get("n_queries"))))
         except (OSError, ValueError, SystemExit):
             half = set()
         if len(nq) != 1:

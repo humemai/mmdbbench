@@ -20,6 +20,9 @@
 # It counts ONLY together with the pin (no sha argument: refused), it never replaces the pin check for another commit, and every use prints
 #   NATIVE_SERVER_EQUIV=<got> accepted for pin <pin>: see ENGINE-COMMIT-EQUIV
 # so STATUS shows it. The evidence is mini-ab-prep/fourarm-2611/ENGINE-COMMIT-EQUIV-<release>.md and engine_commit_equiv.json (engine_pin.py).
+# The entry is generated from the git diff, never typed: `uv run python make_engine_commit_equiv.py --repo <engine clone> --base <pin> --head <native image commit>
+# --release <A.B.C> --old-release <the release before> --out-md ENGINE-COMMIT-EQUIV-<A.B.C>.md --out-json <one-entry file> [--status <dry-run STATUS file>]` (this
+# directory; it exits 1 and writes no entry when a changed line is not a version string; see its --help). The entry is then merged into engine_commit_equiv.json.
 # Without the variable the behaviour is exactly as before.
 set -uo pipefail
 IMG="${1:?usage: verify_native_server_image.sh <image> [<sha>]}"

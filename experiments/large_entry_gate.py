@@ -29,10 +29,35 @@ SPARSE_KEYS = ("warm p50 ms", "warm p99 ms", "gain")
 TABLE_KEYS = {TABLE: OVERLAY_KEYS, "l3s": SPARSE_KEYS}
 
 
+# The fields of an entry's identity, in the order of `_identity`: the sentence of the gate names the first one that differs.
+IDENTITY_FIELDS = ("backend key", "build", "size id")
+
+
 def _identity(e, sid):
     """What an entry is, apart from the words it is labelled with (a rename of a label must not read as a lost entry): the runner's backend key,
-    the build, the precision and the size id."""
-    return (str(e.get("backend_key") or e.get("backend")), str(e.get("build") or ""), str(e.get("precision") or ""), sid)
+    the build and the size id.
+
+    The precision is not part of it. It follows from the backend key (an int8 arm has a key of its own), and the page as published carried none on the
+    served native entry of the dense table where the exporter now writes `fp32`, so with the precision in the key the gate read "the entry is gone" on a
+    landing of the unmodified store (humemai/mmdbbench#156). The metric keys of an identity are pooled across the entries it holds, as `had` and `kept`
+    below already do, so a precision that drifts is not a lost entry and a removed entry still is."""
+    return (str(e.get("backend_key") or e.get("backend")), str(e.get("build") or ""), sid)
+
+
+def _first_difference(ident, now):
+    """(field, published value, rebuilt value) for the first identity field that differs between `ident` and the closest identity of `now` (the one that
+    agrees with it on most leading fields), or None when no entry of `now` agrees even on the first field: the entry is truly absent."""
+    best = None
+    for other in sorted(now):
+        n = 0
+        while n < len(ident) and ident[n] == other[n]:
+            n += 1
+        if n and n < len(ident) and (best is None or n > best[0]):
+            best = (n, other)
+    if best is None:
+        return None
+    n, other = best
+    return IDENTITY_FIELDS[n], ident[n], other[n]
 
 
 def _large_entries(payload, table=TABLE):
@@ -66,8 +91,14 @@ def lost_large_keys(previous, current, table=TABLE, keys=OVERLAY_KEYS):
         lost = [k for k in had if k not in kept]
         if lost:
             label, sid = old[0].get("backend"), ident[-1]
-            problems.append(f"table {table!r}, entry {label!r} at size {sid!r}: " + ("the entry is gone, it had " if ident not in now else "it lost ")
-                            + ", ".join(lost))
+            if ident in now:
+                what = "it lost "
+            else:
+                # not found under this identity: say which field of it the rebuilt payload disagrees on, or that nothing like it is there
+                diff = _first_difference(ident, now)
+                what = ("the entry is gone, it had " if diff is None else
+                        f"no rebuilt entry has its identity, its {diff[0]} differs (published {diff[1]!r}, rebuilt {diff[2]!r}), it had ")
+            problems.append(f"table {table!r}, entry {label!r} at size {sid!r}: " + what + ", ".join(lost))
     return problems
 
 

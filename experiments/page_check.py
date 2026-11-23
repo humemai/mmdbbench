@@ -1999,7 +1999,8 @@ def _check_raw_backend_keys(payload):
 
     display_name() falls back to the key with its underscores made spaces for a key with no DISPLAY_NAMES entry, and the live page printed
     'cratedb tpc was not run on the transaction workload'. The roster is the exporter's own (runner.LANES, runner.ARM_RUNS, DISPLAY_NAMES);
-    text in backticks is code and is not read; a form that is the arm's own display name is not a leak. Returns the bad count."""
+    text in backticks is code and is not read, and neither is a URL (a host name such as www.mongodb.com is an address, not a backend key); a form
+    that is the arm's own display name is not a leak. Returns the bad count."""
     import re
     import export_web as EW
     import runner as RN
@@ -2014,7 +2015,7 @@ def _check_raw_backend_keys(payload):
     pat = re.compile(r"(?<![A-Za-z0-9_-])(" + "|".join(re.escape(f) for f in sorted(forms, key=len, reverse=True)) + r")(?![A-Za-z0-9_-])")
     bad = 0
     for where, text in _prose_of(payload):
-        for m in pat.finditer(re.sub(r"`[^`]*`", "", text)):
+        for m in pat.finditer(re.sub(r"https?://\S+", "", re.sub(r"`[^`]*`", "", text))):
             print(f"    RAW-KEY {where}: {m.group(1)!r} [{forms[m.group(1)]}] in {text[:100]!r}")
             bad += 1
     return bad

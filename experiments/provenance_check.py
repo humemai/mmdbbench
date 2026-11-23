@@ -141,7 +141,9 @@ FEEDS = {
 }
 import make_paper_tables as _MPT
 FEEDS["T5"][0] = os.path.basename(_MPT.dense_mp_dir())
-_sparse = _MPT._pinned_sparse_rows()
+# build="all", as make_paper_tables.sparse_table reads it: a landing that holds both builds of l3s at the pin has no single-build default to name, and the
+# reader validates each build on its own. Only None (partial or mixed rows) stops here; {} is the arm not run at this pin yet.
+_sparse = _MPT._pinned_sparse_rows(build="all")
 if _sparse is None:
     raise SystemExit("pinned sparse rows incomplete; T4 has no fallback")
 # An empty selection is absent, not partial: the sparse arm has not run at this

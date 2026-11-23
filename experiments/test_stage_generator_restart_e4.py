@@ -34,6 +34,8 @@ import landing_gates  # noqa: E402
 import make_2611_stages as G  # noqa: E402
 import runner  # noqa: E402
 
+# conftest.py empties cap_rule's cache for every test but test_cap_rule's (an autouse fixture), so the data is read from the file and handed to cap_rule.rule_cap
+RULE = json.loads((HERE / "cap_rule_2610.json").read_text())
 RESTART_ARMS = {"docs": "arcadedb_server", "graph": "arcadedb_graph_server", "dense": "arcadedb_dense_server", "ts": "arcadedb_ts_native_server"}
 RESTART_SMALL = {"docs": "tpch1", "graph": "sf1", "dense": "small", "ts": "ts100"}
 
@@ -202,7 +204,7 @@ def test_the_written_drafts_of_both_final_chains_lint_clean_and_cover_the_new_ce
                 seen[(lane_, scale, be, wl)] += 1
                 if lane_ == "restart":
                     assert scale in tiers[model_of[be]], (f.name, be, scale)               # no arm at another model's size
-            want = min(runner.TIMEOUT_BY_SCALE[scale], cap_rule.rule_cap(lane_, scale, wl, "") or 10 ** 9)
+            want = min(runner.TIMEOUT_BY_SCALE[scale], cap_rule.rule_cap(lane_, scale, wl, "", RULE) or 10 ** 9)
             assert int(cap) == want, (f.name, cap, want)                                    # the tier cap lowered by the cap rule
             assert "this tier's budgets do not fit its cap" in text and f"cell_cost_check.py --lane {lane_} " in text
             assert "version_pin_check.py --runtime" in text and "ABORT: pair unverified at the pin" in text and 'ARCADEDB_ENGINE_COMMIT=$PIN' in text
@@ -250,7 +252,8 @@ def test_the_time_of_a_rep_is_far_below_two_hours(capsys):
     """The estimate in the pull request, from the only timings of these cells the repository holds: the pass-1 cell lines of the 2026-10 pass (cap_rule_2610.json,
     pin d36b4ca3a), the slowest ArcadeDB arm's median per cell. The runner adds a lean-client twin job to every served ArcadeDB arm (ARCADEDB_HTTP_ARMS) that runs
     the whole cell again; e4 has none. The 26.11.1 pass did not run either lane, so there are no 26.11.1 rows to read."""
-    caps = cap_rule.load()["caps"]
+    caps = RULE["caps"]
+    assert RULE["rule"]["pin"] == "d36b4ca3a"
     cells = [("restart", RESTART_SMALL[m], "restart") for m in RESTART_ARMS] + [("e4", "e2", "decomp")]
     median = {c: caps[cap_rule.key_of(*c, "")]["arcadedb_max_median_s"] for c in cells}
     twin = {c: 2 if c[0] == "restart" else 1 for c in cells}

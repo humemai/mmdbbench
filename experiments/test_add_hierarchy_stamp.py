@@ -170,7 +170,7 @@ def test_source_two_is_never_asked_on_the_native_wheel_and_the_reason_says_why()
     db = FakeDb(rows=WITHOUT_METADATA, native=True)
     got, tried = BC.arcadedb_hierarchy_live(db, INDEX, db.sql, "native")
     assert got is None and db.schema.calls == []
-    assert [t.split(":")[0] for t in tried] == ["schema:index", "java-schema"] and "NotOnNativeYet" in tried[1]
+    assert [t.split(": ")[0] for t in tried] == ["schema:index", "java-schema"] and "NotOnNativeYet" in tried[1]
 
 
 def test_a_failing_java_read_is_a_reason_not_an_empty_stamp():

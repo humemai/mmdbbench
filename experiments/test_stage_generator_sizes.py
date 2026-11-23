@@ -37,6 +37,7 @@ import size_classes  # noqa: E402
 FINAL = "final-small"
 KEPT = ("small", "extra")
 LANE_ORDER = G.CORE_LANES + G.SECOND_LANES
+FINAL_ORDER = LANE_ORDER + G.FINAL_LANES      # the lanes of `--profile final-small`: the second list, then the restart table and the e4 decomposition
 
 # Counted by hand, per build, for `--profile final-small`:
 #   l2         sf1 oltp: 2 arms x (relaxed, strict) = 4, sf1full olap: 2 arms x (GAV on, GAV off) = 4
@@ -46,13 +47,18 @@ LANE_ORDER = G.CORE_LANES + G.SECOND_LANES
 #   l3s        4 arms (embedded, embedded_fp32, server, server_fp32) x 2 sizes (tiny, small) x (lane cell, overlay)
 #   l4         4 arms x ts100
 #   lifecycle  2 arms x 8 workloads x 3 sizes (lc10k, lc100k, lc1m)
-TYPED = {"l2": 8, "e2": 6, "l1tpc": 6, "l3d": 4, "l3s": 16, "l4": 4, "lifecycle": 48}
+#   restart    4 served arms, one per model, each at the small size of its model (tpch1, sf1, small, ts100): 4 cells (humemai/mmdbbench#137)
+#   e4         the one decomposition cell (arcadedb_e4, scale e2), in the JVM chain only: the arm has no native counterpart (humemai/mmdbbench#137)
+TYPED = {"l2": 8, "e2": 6, "l1tpc": 6, "l3d": 4, "l3s": 16, "l4": 4, "lifecycle": 48, "restart": 4}
+TYPED_JVM_ONLY = {"e4": 1}
 # the arms of `full` that the final profile leaves out, and the arms it keeps beside them
 OUT_ARMS = {"arcadedb_dense_embedded_int8", "arcadedb_dense_server_int8", "arcadedb_sparse_embedded_nocompact"}
 IN_ARMS = {"arcadedb_dense_embedded", "arcadedb_dense_server", "arcadedb_sparse_embedded", "arcadedb_sparse_embedded_fp32",
            "arcadedb_sparse_server", "arcadedb_sparse_server_fp32"}
 SMALL_PAIRS = {("l2", "sf1"), ("l2", "sf1full"), ("e2", "e2"), ("l1tpc", "tpch1"), ("l3d", "small"), ("l3s", "tiny"), ("l3s", "small"),
-               ("l4", "ts100"), ("lifecycle", "lc10k"), ("lifecycle", "lc100k"), ("lifecycle", "lc1m")}
+               ("l4", "ts100"), ("lifecycle", "lc10k"), ("lifecycle", "lc100k"), ("lifecycle", "lc1m"),
+               ("restart", "tpch1"), ("restart", "sf1"), ("restart", "small"), ("restart", "ts100"), ("e4", "e2")}
+JVM_ONLY_PAIRS = {("e4", "e2")}
 LARGE_SCALE_NAMES = {"sf10", "tpch10", "e2_500k", "deep10m", "lc10m", "ts1000", "medium"}
 
 
@@ -73,7 +79,7 @@ def cells_of(stages):
 def table_cells(build):
     """Every ArcadeDB cell of the unfiltered stage table for one build's chain: what the filters start from, read without them."""
     skip = set(G.build_less_served_arms()) if build == "native" else set()
-    return [c for spec in G.STAGES for c in G.stage_cells(spec) if G.engine_of(c.backend) == "arcadedb" and c.backend not in skip]
+    return [c for spec in G.ALL_STAGES for c in G.stage_cells(spec) if G.engine_of(c.backend) == "arcadedb" and c.backend not in skip]
 
 
 def expected_per_lane(build):
@@ -89,18 +95,21 @@ def test_the_cells_per_lane_of_the_final_small_chain(build, monkeypatch):
     assert sizes == "small"
     have = collections.Counter(c.lane for c in cells_of(stages))
     per_size = collections.Counter((c.lane, c.scale) for c in cells_of(stages))
-    print(f"\n{build} chain, --profile {FINAL}: " + ", ".join(f"{lane} {have[lane]}" for lane in LANE_ORDER) + f"; total {sum(have.values())} cells per build")
+    print(f"\n{build} chain, --profile {FINAL}: " + ", ".join(f"{lane} {have[lane]}" for lane in FINAL_ORDER) + f"; total {sum(have.values())} cells per build")
     print("  per size: " + ", ".join(f"{lane}/{sc} {n}" for (lane, sc), n in sorted(per_size.items())))
     assert have == expected_per_lane(build)          # derived from SIZE_CLASS and the stage table
-    assert dict(have) == TYPED                       # the hand count
+    assert dict(have) == dict(TYPED, **(TYPED_JVM_ONLY if build == "jvm" else {}))      # the hand count
     assert len(cells_of(stages)) == len(set(cells_of(stages)))      # nothing doubled
 
 
 def test_both_chains_run_the_same_cells_at_the_small_sizes(monkeypatch):
-    """The one build-specific arm, the JVM image-defaults arm, runs at tpch10 only, which is a large size."""
+    """The arms with no native counterpart are the JVM chain's alone: the image-defaults arm runs at tpch10 only, which is a large size, and the e4 arm runs the
+    one decomposition cell. Every other cell, the restart cells of the four served arms included, is in both chains."""
     jvm = sorted(c.label for c in cells_of(chain(monkeypatch, "jvm")[0]))
     native = sorted(c.label for c in cells_of(chain(monkeypatch, "native")[0]))
-    assert jvm == native and jvm
+    buildless = set(G.build_less_served_arms())
+    assert native and sorted(c.label for c in cells_of(chain(monkeypatch, "jvm")[0]) if c.backend not in buildless) == native
+    assert [l for l in jvm if l not in native] == ["e4/e2/arcadedb_e4/decomp"]
 
 
 def test_sf1full_stays_and_every_large_size_is_gone(monkeypatch):
@@ -108,14 +117,14 @@ def test_sf1full_stays_and_every_large_size_is_gone(monkeypatch):
     for build in ("jvm", "native"):
         stages = chain(monkeypatch, build)[0]
         pairs = {(c.lane, c.scale) for c in cells_of(stages)}
-        assert pairs == SMALL_PAIRS
+        assert pairs == SMALL_PAIRS - (JVM_ONLY_PAIRS if build == "native" else set())
         assert ("l2", "sf1full") in pairs
         assert not {sc for _l, sc in pairs} & LARGE_SCALE_NAMES
         for st in stages:
             assert st[4] and not set(st[4]) & LARGE_SCALE_NAMES, st[0]
             assert all(size_classes.SIZE_CLASS[(st[2], x)] in KEPT for x in st[4]), st[0]
-    # and the pairs are what SIZE_CLASS says for the lanes of this chain (restart and e4 are lanes of #137, not of the generator's table yet)
-    assert SMALL_PAIRS == {(lane, sc) for (lane, sc), cls in size_classes.SIZE_CLASS.items() if cls in KEPT and lane in LANE_ORDER}
+    # and the pairs are what SIZE_CLASS says for the lanes of this chain, the restart table and the e4 decomposition included
+    assert SMALL_PAIRS == {(lane, sc) for (lane, sc), cls in size_classes.SIZE_CLASS.items() if cls in KEPT and lane in FINAL_ORDER}
 
 
 def test_the_filter_reads_size_class_and_not_the_large_scales_tuple(monkeypatch):
@@ -173,7 +182,7 @@ def test_the_arms_that_are_not_on_the_page_are_left_out_and_the_others_stay(monk
     assert OUT_ARMS <= {c.backend for c in full}
     extra = [c for c in full if c.backend in OUT_ARMS]
     assert len(extra) == 8                                   # int8 dense: 2 arms x 2; nocompact: 1 arm x 2 sizes x 2 (lane cell and overlay)
-    assert len(full) - len(extra) == sum(TYPED.values())
+    assert len(full) - len(extra) == sum(TYPED[lane] for lane in LANE_ORDER)       # `full` has no restart or e4 stage: only the final profile does
     # the profile's own proof names an arm it must not carry
     unskipped = G.number(G.subset_specs(["arcadedb"], G.parse_lanes(None, True, "full"), "biggest-last", (), True, "small"), "qZ")
     probs = G.profile_problems(FINAL, unskipped)
@@ -203,7 +212,7 @@ def test_the_paper_profile_and_the_full_profile_are_what_they_were():
     assert G.PROFILES["full"]["drops"] == () and "sizes" not in G.PROFILES["full"] and "sizes" not in G.PROFILES["paper-2611"]
     assert G.profile_skip("paper-2611") == tuple(b for b in runner.LANES["l3d"][1] if G.engine_of(b) and G.drop_reason("paper-2611", "l3d", b))
     assert G.profile_skip("full") == () and G.profile_lanes("paper-2611") == G.CORE_LANES and G.profile_lanes("full") == LANE_ORDER
-    assert G.profile_lanes(FINAL) == LANE_ORDER
+    assert G.profile_lanes(FINAL) == FINAL_ORDER
     assert set(G.profile_skip(FINAL)) >= OUT_ARMS and not set(G.profile_skip(FINAL)) & IN_ARMS
     assert G.resolve_sizes("paper-2611", None) == "all" and G.resolve_sizes("full", "small") == "small" and G.resolve_sizes(FINAL, None) == "small"
 
@@ -221,19 +230,22 @@ def test_the_final_profile_cannot_run_at_all_sizes(tmp_path):
 def test_the_final_profile_implies_its_sizes_and_its_second_list():
     alone = run(rerun_args() + ["--check", "--profile", FINAL])
     assert alone.returncode == 0, alone.stdout[-600:] + alone.stderr[-400:]
-    assert "lanes: l2, e2, l1tpc, l3d, l3s, l4, lifecycle" in alone.stdout and "sizes small:" in alone.stdout
+    assert "lanes: l2, e2, l1tpc, l3d, l3s, l4, lifecycle, restart, e4\n" in alone.stdout and "sizes small:" in alone.stdout
     spelled = run(rerun_args() + ["--check", "--profile", FINAL, "--sizes", "small", "--second-list"])
     assert spelled.returncode == 0 and spelled.stdout == alone.stdout
     sparse = run(rerun_args() + ["--check", "--profile", FINAL, "--lanes", "sparse,lifecycle"])
     assert sparse.returncode == 0 and "lanes: l3s, lifecycle" in sparse.stdout, sparse.stdout[-400:]
-    for line in ("kept    e2/e2, l1tpc/tpch1, l2/sf1, l2/sf1full, l3d/small, l3s/small, l3s/tiny, l4/ts100, lifecycle/lc100k, lifecycle/lc10k, lifecycle/lc1m",
-                 "dropped e2/e2_500k (large), l1tpc/tpch10 (large), l2/sf10 (large), l3d/deep10m (large), l3s/medium (large), l4/ts1000 (large), lifecycle/lc10m (large)"):
+    for line in ("kept    e2/e2, e4/e2, l1tpc/tpch1, l2/sf1, l2/sf1full, l3d/small, l3s/small, l3s/tiny, l4/ts100, lifecycle/lc100k, lifecycle/lc10k, lifecycle/lc1m, "
+                 "restart/sf1, restart/small, restart/tpch1, restart/ts100",
+                 "dropped e2/e2_500k (large), l1tpc/tpch10 (large), l2/sf10 (large), l3d/deep10m (large), l3s/medium (large), l4/ts1000 (large), lifecycle/lc10m (large), "
+                 "restart/deep10m (large), restart/sf10 (large), restart/tpch10 (large), restart/ts1000 (large)"):
         assert line in alone.stdout
 
 
 def test_another_profile_can_take_the_small_sizes_and_a_default_call_prints_no_size_line():
     r = run(rerun_args() + ["--check", "--profile", "full", "--second-list", "--sizes", "small"])
-    assert r.returncode == 0 and "lanes: l2, e2, l1tpc, l3d, l3s, l4, lifecycle" in r.stdout and "sizes small:" in r.stdout
+    assert r.returncode == 0 and "lanes: l2, e2, l1tpc, l3d, l3s, l4, lifecycle\n" in r.stdout and "sizes small:" in r.stdout
+    assert "restart" not in r.stdout and "e4/e2" not in r.stdout          # `full` does not stage the final pass's lanes, and its size lines do not list them
     r = run(rerun_args() + ["--check", "--profile", "paper-2611", "--sizes", "small"])
     assert r.returncode == 0 and "lanes: l2, e2, l1tpc, l3d\n" in r.stdout, r.stdout[-500:]
     for extra in ([], ["--sizes", "all"], ["--profile", "full", "--second-list"]):
@@ -252,7 +264,7 @@ def test_the_written_drafts_of_the_final_chain_lint_clean_and_hold_only_the_smal
     r = run(rerun_args() + ["--after", "none", "--id-prefix", "qWV", "--profile", FINAL, "--out", str(out)])
     assert r.returncode == 0, r.stdout[-600:] + r.stderr[-400:]
     files = sorted(out.glob("qWV*.sh"))
-    assert len(files) == 25                    # the pair install, and 8 stages x 3 passes
+    assert len(files) == 40                    # the pair install, and 13 stages x 3 passes (8 lane stages, 4 restart stages, the e4 stage)
     seen = collections.Counter()
     for f in files:
         text = f.read_text()

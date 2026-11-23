@@ -1730,7 +1730,7 @@ OCT_TABLE_METRICS = {
         ("lsqb_q8_p50_ms", "LSQB Q8 p50 ms"),
         ("lsqb_q9_p50_ms", "LSQB Q9 p50 ms"),
         ("cold_first_query_ms", "cold first query ms"),
-        (_rate(("n_persons_ingested", "n_edges_ingested"), "build_s"), "ingest vertices+edges/s"),
+        (_rate_all(("n_persons_ingested", "n_edges_ingested", "msg_vertices", "msg_edges"), "build_s"), "ingest vertices+edges/s"),
         ("build_s", "ingest total s"),
         ("gav_build_s", "view build s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),

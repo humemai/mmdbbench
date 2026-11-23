@@ -48,6 +48,7 @@ from runner import BACKENDS, MEM_BY_SCALE, HEAP_BY_SCALE  # noqa: E402  (path se
 import bench_common  # noqa: E402
 import arm_identity as _AI  # noqa: E402
 import size_classes as _SC  # noqa: E402
+import memory_per_million as _MPM  # noqa: E402  (peak memory per million records, humemai/mmdbbench#133)
 import overlay_merge as _OM  # noqa: E402  (which overlay file a table reads when the name carries the client, humemai/mmdbbench#62)
 import engine_pin as _EP  # noqa: E402
 
@@ -1043,6 +1044,18 @@ def _release_of(version_name) -> str | None:
     return m.group(0) if m else None
 
 
+def _per_million_notes(payload):
+    """The two limits of the per-million memory column, as generated sentences under every table that prints it (humemai/mmdbbench#133).
+
+    Run after `_classify_sizes`, which gives each row its size class and the page its sizes: which engines of a table have a second size to read
+    a slope from is read from those finished entries, so the sentence names them from the payload. The text is built in memory_per_million;
+    each sentence is registered as generated here, with its strings, so the gate holds it to the registry."""
+    for t in payload["tables"]:
+        for text, values in _MPM.notes(t):
+            if text not in (t.get("conditions") or []):
+                t["conditions"] = list(t.get("conditions") or []) + [_gen(text, *values)]
+
+
 def _classify_sizes(payload):
     """Every row says small or large, a table says when its large size has no rows, and the page says once how to read the two.
 
@@ -1390,6 +1403,11 @@ def _dense_overlay_entries(scale="deep10m"):
         _pk = _campaign_stat(_cb, scale, MEM_PEAK_FIELD, build=_ob) or _agg(peak, MEM_PEAK_FIELD)
         if _pk is not None:
             metrics["peak memory GiB"] = _pk
+            # The overlay's files carry no count of vectors: the corpus is the lane's own size, the one the rate above divides. Small size only.
+            _pm = (_MPM.scale_stat(_pk, 9_990_000 if scale == "deep10m" else 1_000_000)
+                   if _SC.SIZE_CLASS.get(("l3d", scale)) == "small" else None)
+            if _pm is not None:
+                metrics[_MPM.column_label("l3d")] = _pm
         _dk = _campaign_stat(_cb, scale, "disk_data_mb", build=_ob)
         if _dk is not None:
             metrics["disk GiB"] = _dk
@@ -1529,6 +1547,20 @@ def _rate(count_fields, seconds_field):
     return fn
 
 
+def _per_million(table_id):
+    """A per-row callable for the column "peak memory GiB per million <records>" (humemai/mmdbbench#133): the row's memory reading (`_peak_mem`,
+    the one the `peak memory GiB` column prints) over the records of the table's own ingest count, per million. A value for a SMALL-size row
+    only; a row with no count of records has none, and `_agg` drops it like any missing figure. It returns MiB per million and says so through
+    `unit_field`, so `_agg` divides by 1024 and the column is GiB per million, with the median over repetitions taken per row like the rate's."""
+    _unit, fields = _MPM.RECORDS[table_id]
+
+    def fn(r):
+        return _MPM.row_value(r, _peak_mem(r), fields)
+    fn.__name__ = f"peak_memory_per_million({'+'.join(fields)})"
+    fn.unit_field = MEM_PEAK_FIELD
+    return fn
+
+
 def _agg(rows, field, across_scales=False):
     """Median across repetitions, with the spread, matching the paper.
 
@@ -1648,6 +1680,7 @@ OCT_TABLE_METRICS = {
         ("ingest_s", "ingest s"),
         ("index_s", "index s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
+        (_per_million("l1tpc"), _MPM.column_label("l1tpc")),
         (_disk_data, "disk GiB"),
     ],
     "l2": [
@@ -1661,6 +1694,7 @@ OCT_TABLE_METRICS = {
         (_rate(("n_persons_ingested", "n_edges_ingested"), "build_s"), "ingest vertices+edges/s"),
         ("build_s", "ingest total s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
+        (_per_million("l2"), _MPM.column_label("l2")),
         (_disk_data, "disk GiB"),
     ],
     "l2olap": [
@@ -1688,6 +1722,7 @@ OCT_TABLE_METRICS = {
         ("build_s", "ingest total s"),
         ("gav_build_s", "view build s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
+        (_per_million("l2olap"), _MPM.column_label("l2olap")),
         (_disk_data, "disk GiB"),
     ],
     "e2": [
@@ -1711,6 +1746,7 @@ OCT_TABLE_METRICS = {
         ("ingest_s", "ingest s"),
         ("index_s", "index s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
+        (_per_million("e2"), _MPM.column_label("e2")),
         (_disk_data, "disk GiB"),
     ],
     "l3d": [
@@ -1737,6 +1773,7 @@ OCT_TABLE_METRICS = {
         ("build_docs_per_s", "ingest+index vectors/s"),
         ("build_s", "ingest+index total s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
+        (_per_million("l3d"), _MPM.column_label("l3d")),
         (_disk_data, "disk GiB"),
     ],
     "l3s": [
@@ -1749,6 +1786,7 @@ OCT_TABLE_METRICS = {
         ("build_docs_per_s", "ingest+index vectors/s"),
         ("build_s", "ingest+index total s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
+        (_per_million("l3s"), _MPM.column_label("l3s")),
         (_disk_data, "disk GiB"),
     ],
     "l4": [
@@ -1772,6 +1810,7 @@ OCT_TABLE_METRICS = {
         ("load_s", "ingest s"),
         ("index_s", "index s"),
         (MEM_PEAK_FIELD, "peak memory GiB"),
+        (_per_million("l4"), _MPM.column_label("l4")),
         ("disk_data_mb", "disk GiB"),
     ],
 }
@@ -4073,7 +4112,7 @@ def _l4_table(all_rows):
             "metrics": {},
         }
         for field, lab in _l4_cols:
-            for candidate in ((field,) if isinstance(field, str) else field):
+            for candidate in ((field,) if isinstance(field, str) or callable(field) else field):
                 got = _agg(rs, candidate)
                 if got is not None:
                     entry["metrics"][lab] = got
@@ -7561,6 +7600,8 @@ def _finish_table(table: dict) -> dict:
             return 2 if "/s" in c else 3
         if c == "peak memory GiB":
             return 4
+        if _MPM.unit_of(c):
+            return 4.1
         if c == "JVM heap":
             return 4.5
         if c == MEM_PHASE_COLUMN[1]:
@@ -7590,7 +7631,7 @@ def _finish_table(table: dict) -> dict:
             continue
         if "/s" in c or c in ("recall@10", "gain"):
             dirs[c] = "up"
-        elif c.endswith(" ms") or c.endswith(" s") or c.endswith(" GiB") or c in ("torn results", "vs Java"):
+        elif c.endswith(" ms") or c.endswith(" s") or c.endswith(" GiB") or _MPM.unit_of(c) or c in ("torn results", "vs Java"):
             dirs[c] = "down"
     table["directions"] = dirs
     # Every absence this table declares, as data (page_check.OPERATION_MANIFEST
@@ -7738,7 +7779,7 @@ def _restructure_tables(tables, rows):
         # so a column left to that append printed out of order and without its
         # sentence.
         SHARED_ORDER = ["ingest documents/s", "ingest total s", "ingest s", "index s",
-                        "peak memory GiB", MEM_PHASE_COLUMN[1], "disk GiB"]
+                        "peak memory GiB", _MPM.column_label("l1tpc"), MEM_PHASE_COLUMN[1], "disk GiB"]
         OLTP_KEEP = set(OLTP_COLS) | set(SHARED_ORDER)
         OLAP_KEEP = set(OLAP_COLS) | set(SHARED_ORDER)
         # The tuned PostgreSQL arm answered its question (image defaults do
@@ -8020,7 +8061,7 @@ def main() -> int:
             }
             for field, label in _metrics_for(lane, spec, src_lane):
                 src = rs
-                if field in MEM_FIELDS and src_lane in MERGED_WORKLOAD_LANES:
+                if (field in MEM_FIELDS or getattr(field, "unit_field", None) in MEM_FIELDS) and src_lane in MERGED_WORKLOAD_LANES:
                     # See MEM_FIELDS above: this lane's rows were merged across
                     # workloads, which is right for a metric that only one
                     # workload produces and wrong for one both produce. Report
@@ -8379,6 +8420,7 @@ def main() -> int:
     # SMALL AND LARGE, after every table is finished (humemai/mmdbbench#131): the sentences above name a size by its corpus, and this
     # is where a row's Size label gets its class word.
     _classify_sizes(payload)
+    _per_million_notes(payload)
 
     # A table can draw on more than one artifact, so this is a LIST. It was a
     # single string, and on 2026-08-13 that made the page lie: the DEEP-10M

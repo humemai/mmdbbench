@@ -234,7 +234,7 @@ def _served(backend, rep, server_commit="6c9f2d8e3aaa"):
 def test_the_refusal_without_a_registry_entry_ends_with_the_registry_and_the_generator_once():
     import arm_identity as AI
     rows = [_served(b, rep) for b in ("arcadedb_e2_server", "arcadedb_graph_server") for rep in (1, 2, 3)]
-    problems = AI.pair_problems(rows)
+    problems = AI.server_settings_problems(rows)
     assert [p for p in problems if "reports engine commit" in p] == [
         f"{b}: the native server reports engine commit 6c9f2d8e3 and the row names 5b8e1c7d2" for b in ("arcadedb_e2_server", "arcadedb_graph_server")]      # the sentences as before
     hint = AI.registry_hint(problems)

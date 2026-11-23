@@ -378,6 +378,9 @@ def overlay_gaps(store_rows, landing_rows, pin, scope=(), results=None, comparat
     the pins (`size_classes.row_at_pin`). `scope` is the landing's lanes: empty reads both overlays, otherwise only the one whose lane is in it. None, and silent,
     when the exporter cannot be imported for this scope and pin (it refuses at import for a scope that needs `e4decomp_<pin>` that is not there yet)."""
     scope = set(scope or ())
+    want_sparse, want_dense = not scope or "l3s" in scope, not scope or "l3d" in scope
+    if not (want_sparse or want_dense):
+        return {}                                   # a scope without the overlay lanes: nothing of this check is owed, and the exporter need not be imported
     results = Path(results) if results else RESULTS
     sys.path.insert(0, str(HERE))
     _had = {k: os.environ.get(k) for k in ("BENCH_ENGINE_COMMIT", "BENCH_ONLY_LANES")}
@@ -412,12 +415,12 @@ def overlay_gaps(store_rows, landing_rows, pin, scope=(), results=None, comparat
                 gaps.setdefault(root.name, [])
                 gaps[root.name] += [f for f in gone if f not in gaps[root.name]]
 
-    if not scope or "l3s" in scope:
+    if want_sparse:
         roots = {t: results / f"sparse_mp_{size_classes.pin_of_size_class(size_classes.SIZE_CLASS[('l3s', t)], landing=pin)}" for t in ("medium", "small", "tiny")}
         run = X.sparse_run_arms(list(roots.values()))
         for tier, root in roots.items():
             check(root, sum(X.sparse_files_owed(tier, frozen, run), []))
-    if not scope or "l3d" in scope:
+    if want_dense:
         for small, cls in ((False, "large"), (True, "small")):
             check(results / (("dense_mp5_small_" if small else "dense_mp5_") + size_classes.pin_of_size_class(cls, landing=pin)),
                   sum(X.dense_files_owed(small, frozen), []))
@@ -438,11 +441,11 @@ def format_overlay_gaps(gaps):
     return "\n".join(lines)
 
 
-def tracked_artifacts(pycost=None):
+def tracked_artifacts(_pycost=None):   # named as in main(): test_land_stage_pycost.py pins the source text of the expression below
     """The paths step 6 commits: what this publish wrote (the freeze, the payload, the generated tables, PAGE-SPEC.md) and `engine_commit_equiv.json`, the registry
     of the native server image's commit, so an entry added for the release being landed is committed with the rows that need it (humemai/mmdbbench#160). The cost
     file of the pull, when there is one, comes first."""
-    return ([str(pycost.relative_to(REPO))] if pycost else []) + [
+    return ([str(_pycost.relative_to(REPO))] if _pycost else []) + [
         "experiments/results/runs_paper.csv",
         "experiments/results/web_benchmarks.json",
         "experiments/results/generated",

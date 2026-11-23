@@ -52,6 +52,7 @@ sys.path.insert(0, str(HERE))
 from make_2611_stages import ROWS_SUFFIX  # noqa: E402  (the stage generator names what a stage writes; one place)
 from publish_instrument import PUBLISH_INSTRUMENT, instrument_of, refuse_other_instruments  # noqa: E402
 import arm_identity  # noqa: E402  (build_of: which build an ArcadeDB row ran on)
+import overlay_merge  # noqa: E402  (pick: the file a table reads for a plain overlay name)
 import size_classes  # noqa: E402  (row_size_class: the one classifier of small, large and extra)
 
 
@@ -255,7 +256,10 @@ def _published_lanes(payload_path, pin=None, scope=()):
         # refused, with the scope and the pin it saw and its own words, so the cause is in the output and not guessed from a bare line.
         raise SystemExit(
             f"REFUSING: cannot read which lanes {payload_path} already carries: export_web refused to import "
-            f"(scope [{_scope or 'none: the whole store'}], pin {pin or 'none'}): {exc}. Nothing was pulled or merged.") from exc
+            f"(scope [{_scope or 'none: the whole store'}], pin {pin or 'none'}): {exc}. Nothing was pulled or merged."
+            + (f" The e4 lane has run when the host holds {REMOTE}/e4decomp_{pin}/: copy that directory into "
+               f"experiments/results/e4decomp_{pin}/ first. This read comes before the pull of the landing, so the pull cannot fill it for a first landing of the pin."
+               if "e4decomp_" in str(exc) and pin else "")) from exc
     except Exception as exc:  # noqa: BLE001
         # AN EMPTY ANSWER HERE IS NOT HARMLESS. It used to return set() "so a
         # landing does not die on this helper", and a landing then scoped the
@@ -340,6 +344,110 @@ def format_unlisted_comparator_commits(found, pin, large_pin, comparator_pins=()
             f"{size_classes.COMPARATOR_PIN_VAR} {'is ' + ','.join(comparator_pins) if comparator_pins else 'is unset'}): {per}. The exporter keeps a row only at one of "
             f"those pins, so the payload would lose the envelope and censored entries of these cells and page_check would print MISSING for them. If the commit is the one "
             f"the comparators' chain was launched with, export {size_classes.COMPARATOR_PIN_VAR}={','.join(filter(None, [*comparator_pins, commits]))} and run again. Nothing was merged.")
+
+
+# THE FILES THE EXPORTER WILL NEED, CHECKED BEFORE THE MERGE (humemai/mmdbbench#160). The sparse and dense overlays are directories the landing assembles by
+# hand and by pull (the union of two worktrees, the comparators' chain, `--overlay-merge`), and the exporter reads them in step 4, after the merge into the store:
+# a missing file stopped the landing there, naming the file and not the step that makes it, or, for a native or a tiny file, was not a stop at all. The lists are the
+# exporter's own (`export_web.sparse_files_owed`, `dense_files_owed`), never a second copy.
+OVERLAY_STEPS = (
+    ("sp_arc_", "the ArcadeDB chains: the JVM files are sp_arc_<arm>_<tier>.json and the native ones sp_arc_<arm>_native_<tier>.json, each in its own worktree; copy the union "
+                "of both worktrees' sparse_mp_<pin>_2611/ into that directory before the run (PUBLISHING.md, \"Two chains, one pin, one landing\")"),
+    ("sp_elastic", "nothing: Elasticsearch and Milvus are outside the 2026-11 subset (make_2611_stages.OUTSIDE). A landing with none of their files declares them not "
+                   "run, so a file of one of them with the others missing is a partial set"),
+    ("sp_milvus", "nothing: Elasticsearch and Milvus are outside the 2026-11 subset (make_2611_stages.OUTSIDE). A landing with none of their files declares them not "
+                  "run, so a file of one of them with the others missing is a partial set"),
+    ("sp_", "the comparators' chain, which writes sparse_mp_<its own pin>_2611 on the host: export BENCH_COMPARATOR_PIN=<that pin> and the pull copies its files, or copy "
+            "them into that directory by hand"),
+    ("mp_", "the dense overlay of the chain that measured the arm: `--overlay ARM` for one host directory, or `--overlay-merge LABEL:PIN:DIR` for several "
+            "(the native chain's mp_<arm>_native_b<k>.json files sit in its own worktree; PUBLISHING.md, \"Dense overlays\")"),
+)
+
+
+def overlay_step(name):
+    """Which step makes the overlay file `name`, as one sentence (OVERLAY_STEPS, first prefix that matches)."""
+    return next(text for prefix, text in OVERLAY_STEPS if name.startswith(prefix))
+
+
+def overlay_gaps(store_rows, landing_rows, pin, scope=(), results=None, comparator_pins=()):
+    """{directory name: [missing file, ...]} of the sparse and dense overlay files the exporter will need for this landing, or None when this cannot decide.
+
+    The directories are the ones of the landing (`size_classes.pin_of_size_class`: each sparse tier and each dense size at the pin of its size class) and only those
+    that are there: an absent directory is a lane that has not run (the exporter's own rule, `export_web._pinned_dir`). The lists are `export_web.sparse_files_owed`
+    and `dense_files_owed`; the native files are owed by the rows (`native_overlay`), which are the store's and the landing's of the publishing instrument at
+    the pins (`size_classes.row_at_pin`). `scope` is the landing's lanes: empty reads both overlays, otherwise only the one whose lane is in it. None, and silent,
+    when the exporter cannot be imported for this scope and pin (it refuses at import for a scope that needs `e4decomp_<pin>` that is not there yet)."""
+    scope = set(scope or ())
+    results = Path(results) if results else RESULTS
+    sys.path.insert(0, str(HERE))
+    _had = {k: os.environ.get(k) for k in ("BENCH_ENGINE_COMMIT", "BENCH_ONLY_LANES")}
+    if not _had["BENCH_ENGINE_COMMIT"]:
+        os.environ["BENCH_ENGINE_COMMIT"] = pin
+    if scope:
+        os.environ["BENCH_ONLY_LANES"] = ",".join(sorted(scope))
+    _fresh = "export_web" not in sys.modules      # an import made for this check, with a pin and a scope lent for it, is not left behind for a later reader of the module
+    try:
+        import export_web as X
+    except SystemExit:
+        return None
+    except Exception:  # noqa: BLE001  (an import that fails for another reason is not an overlay finding)
+        return None
+    finally:
+        for k, v in _had.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if _fresh:
+            sys.modules.pop("export_web", None)
+    frozen = [r for r in list(store_rows) + list(landing_rows)
+              if instrument_of(r) == PUBLISH_INSTRUMENT and not r.get("error") and r.get("rc") in (0, None)
+              and size_classes.row_at_pin(r, landing=pin, comparator_pins=comparator_pins)]
+    gaps = {}
+
+    def check(root, names):
+        if root.is_dir():
+            gone = [f for f in names if not os.path.isfile(overlay_merge.pick(root, f))]
+            if gone:
+                gaps.setdefault(root.name, [])
+                gaps[root.name] += [f for f in gone if f not in gaps[root.name]]
+
+    if not scope or "l3s" in scope:
+        roots = {t: results / f"sparse_mp_{size_classes.pin_of_size_class(size_classes.SIZE_CLASS[('l3s', t)], landing=pin)}" for t in ("medium", "small", "tiny")}
+        run = X.sparse_run_arms(list(roots.values()))
+        for tier, root in roots.items():
+            check(root, sum(X.sparse_files_owed(tier, frozen, run), []))
+    if not scope or "l3d" in scope:
+        for small, cls in ((False, "large"), (True, "small")):
+            check(results / (("dense_mp5_small_" if small else "dense_mp5_") + size_classes.pin_of_size_class(cls, landing=pin)),
+                  sum(X.dense_files_owed(small, frozen), []))
+    return gaps
+
+
+def format_overlay_gaps(gaps):
+    """The refusal sentence of `overlay_gaps`: each directory with its missing files, and for each kind of file the step that makes it."""
+    lines = ["REFUSING: the exporter reads overlay files that are not in experiments/results/, and it would stop after the merge into the store (step 4). Missing:"]
+    for d, files in gaps.items():
+        by = {}
+        for f in files:
+            by.setdefault(overlay_step(f), []).append(f)
+        for step_text, fs in by.items():
+            lines.append(f"  {d}: {len(fs)} file(s), {', '.join(fs[:4])}{' ...' if len(fs) > 4 else ''}")
+            lines.append(f"    made by: {step_text}")
+    lines.append("Nothing was merged. Fill the directories and run again (the list is the exporter's own, `export_web.sparse_files_owed` and `dense_files_owed`).")
+    return "\n".join(lines)
+
+
+def tracked_artifacts(pycost=None):
+    """The paths step 6 commits: what this publish wrote (the freeze, the payload, the generated tables, PAGE-SPEC.md) and `engine_commit_equiv.json`, the registry
+    of the native server image's commit, so an entry added for the release being landed is committed with the rows that need it (humemai/mmdbbench#160). The cost
+    file of the pull, when there is one, comes first."""
+    return ([str(pycost.relative_to(REPO))] if pycost else []) + [
+        "experiments/results/runs_paper.csv",
+        "experiments/results/web_benchmarks.json",
+        "experiments/results/generated",
+        "experiments/engine_commit_equiv.json",
+        "experiments/PAGE-SPEC.md"]
 
 
 _COMMIT_IN_VERSION = re.compile("\u00b7\\s*([0-9a-f]{7,40})\\b")   # "arcadedb 26.11.1 \u00b7 a3a5d1245": the identity sentence of an entry (export_web._engine_identity)
@@ -781,17 +889,21 @@ def pull_sparse_overlays(pin, large_pin, results=None, scp=None, comparator_pins
             _tmp.mkdir(exist_ok=True)
             for _p, g in plan:
                 (scp or sh)(["scp", "-q", f"{HOST}:{REMOTE}/{host_name('sparse_mp', cp)}/{g}", str(_tmp)], check=False)
-            _took = []
+            _took, _held = [], []
             for f in sorted(_tmp.glob("sp_*.json")):
                 _dest = results / f"sparse_mp_{next(q for q, g in plan if f.match(g))}"
-                if f.name.startswith("sp_arc_") or (_dest / f.name).exists():
+                if f.name.startswith("sp_arc_"):
+                    continue
+                if (_dest / f.name).exists():
+                    _held.append(f.name)
                     continue
                 _dest.mkdir(exist_ok=True)
                 shutil.copyfile(f, _dest / f.name)
                 _took.append(f"{_dest.name}/{f.name}")
             shutil.rmtree(_tmp)
             print(f"  comparators' sparse files at {cp}: {len(_took)} file(s) copied into the directory of their tier's class" if _took
-                  else f"  comparators' sparse files at {cp}: none to add from {HOST}:sparse_mp_{cp}")
+                  else f"  comparators' sparse files at {cp}: the host's {len(_held)} file(s) are already in the landing's directory, none to add" if _held
+                  else f"  comparators' sparse files at {cp}: none on {HOST}:sparse_mp_{cp}; the check before the merge names what is then missing")
 
 
 def main():
@@ -984,6 +1096,10 @@ def main():
     # an ABSENT directory as a lane not yet run, so a sparse landing without it
     # would have published the sparse table and silently left its second-pass
     # table off the page. Pulled whenever sparse is part of what lands.
+    # An `scp: ... No such file or directory` line below is expected for a path the host does not hold: the ArcadeDB union is pre-created locally (two worktrees),
+    # the medium files do not exist while the large sizes are not rerun, and e4decomp is in the JVM worktree only. A miss that matters is named by the check
+    # before the merge, not by scp.
+    print("  (scp: No such file or directory lines for the sparse, medium and e4 directories are expected when the host does not hold them)")
     if not _lanes or "l3s" in _lanes:
         pull_sparse_overlays(args.pin, large_pin, comparator_pins=size_classes.comparator_pins())
 
@@ -1089,6 +1205,15 @@ def main():
                                             comparator_pins=size_classes.comparator_pins())
     if _unlisted:
         sys.exit(format_unlisted_comparator_commits(_unlisted, args.pin, large_pin, size_classes.comparator_pins()))
+
+    # THE OVERLAY FILES THE EXPORTER WILL NEED ARE THERE, OR THE LANDING REFUSES HERE, BEFORE THE MERGE (humemai/mmdbbench#160). Silent when it cannot decide.
+    _gaps = overlay_gaps(_read_jsonl(RESULTS / "runs.jsonl"), keep, args.pin, scope=_lanes, comparator_pins=size_classes.comparator_pins())
+    if _gaps:
+        if args.dry_run:
+            # A dry run says it and goes on to its usual stop (rc 0): it merges nothing either way, and the same list is the refusal of the run without --dry-run.
+            print("\n  " + format_overlay_gaps(_gaps).replace("REFUSING:", "WOULD REFUSE (the run without --dry-run stops here):", 1).replace("\n", "\n  "))
+        else:
+            sys.exit(format_overlay_gaps(_gaps))
 
     if args.dry_run:
         # STOP BEFORE ANYTHING WRITES. Without --apply this script still runs
@@ -1243,11 +1368,7 @@ def main():
     # no commit. results/generated is allowlisted in .gitignore; under the
     # allowlist an unnamed path is ignored and `git add` on it commits NOTHING,
     # silently.
-    tracked = ([str(_pycost.relative_to(REPO))] if _pycost else []) + [
-               "experiments/results/runs_paper.csv",
-               "experiments/results/web_benchmarks.json",
-               "experiments/results/generated",
-               "experiments/PAGE-SPEC.md"]
+    tracked = tracked_artifacts(_pycost)
     return publish_branch(args.branch, args.message, site_files, tracked)
 
 

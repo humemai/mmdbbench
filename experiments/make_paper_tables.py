@@ -1119,6 +1119,14 @@ def _refuse_partial_native(cand, label, arms=MP_INPROCESS_ARMS, prefix="mp"):
         raise SystemExit(f"{label}: the native build's overlay is partial {part} of {n} builds per arm; no fallback, re-run the arm")
 
 
+def dense_required_files(small=False):
+    """The plain file names a dense overlay of this landing must hold: `mp_<arm>_b<k>.json` for each required arm (`mp_required`) and each of the
+    `mp_builds()` builds. `small` is the 1M overlay (`MP_ARMS_SMALL`), else the 9.99M one (`MP_ARMS`). The resolvers below refuse on this list and the
+    landing's check before the merge (`land_stage.overlay_gaps`) lists the same one (humemai/mmdbbench#160)."""
+    n = mp_builds()
+    return [f"mp_{a}_b{b}.json" for a in mp_required(MP_ARMS_SMALL if small else MP_ARMS) for b in range(1, n + 1)]
+
+
 def dense_mp_dir():
     """results/dense_mp5_<pin>: complete, or absent, or refuse. PINNED ONLY: a
     fallback to an older overlay would publish an older engine's numbers
@@ -1150,11 +1158,10 @@ def dense_mp_dir():
     # thing they should ever have differed in.
     if not os.path.isdir(cand):
         return cand
-    required = mp_required(MP_ARMS)
-    missing = [f"mp_{a}_b{b}.json" for a in required for b in range(1, n + 1)
-               if not os.path.isfile(_OM.pick(cand, f"mp_{a}_b{b}.json"))]
+    required = dense_required_files()
+    missing = [f for f in required if not os.path.isfile(_OM.pick(cand, f))]
     if missing:
-        raise SystemExit(f"dense_mp5_{pin}: {len(missing)} of {len(required) * n} files missing "
+        raise SystemExit(f"dense_mp5_{pin}: {len(missing)} of {len(required)} files missing "
                          f"(e.g. {missing[0]}) at {n} builds per arm (BENCH_MP_BUILDS, default {MP_BUILDS_DEFAULT}); no fallback, re-run the arm")
     _refuse_partial_native(cand, f"dense_mp5_{pin}")
     return cand
@@ -1172,11 +1179,10 @@ def dense_mp_small_dir():
     cand = os.path.join(RESULTS, f"dense_mp5_small_{pin}")
     if not os.path.isdir(cand):
         return cand
-    required = mp_required(MP_ARMS_SMALL)
-    missing = [f"mp_{a}_b{b}.json" for a in required for b in range(1, n + 1)
-               if not os.path.isfile(_OM.pick(cand, f"mp_{a}_b{b}.json"))]
+    required = dense_required_files(small=True)
+    missing = [f for f in required if not os.path.isfile(_OM.pick(cand, f))]
     if missing:
-        raise SystemExit(f"dense_mp5_small_{pin}: {len(missing)} of {len(required) * n} files missing "
+        raise SystemExit(f"dense_mp5_small_{pin}: {len(missing)} of {len(required)} files missing "
                          f"(e.g. {missing[0]}) at {n} builds per arm (BENCH_MP_BUILDS, default {MP_BUILDS_DEFAULT}); no fallback, re-run the arm")
     return cand
 

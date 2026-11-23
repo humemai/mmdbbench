@@ -51,6 +51,7 @@ import size_classes as _SC  # noqa: E402
 import large_entry_gate as _LG  # noqa: E402  (a large dense entry keeps the metric keys the published payload has, humemai/mmdbbench#146)
 import memory_per_million as _MPM  # noqa: E402  (peak memory per million records, humemai/mmdbbench#133)
 import overlay_merge as _OM  # noqa: E402  (which overlay file a table reads when the name carries the client, humemai/mmdbbench#62)
+import native_overlay as _NO  # noqa: E402  (the native build's overlay files the frozen rows call for, humemai/mmdbbench#160)
 import engine_pin as _EP  # noqa: E402
 
 # THE PQ ARMS CAN HAVE ROWS EVEN WHEN THEY ARE NOT MEASURING. runner registers them only under BENCH_DENSE_PQ=1 (a stage
@@ -1313,6 +1314,26 @@ def _overlay_files_by_build(root, stem, tail, backend_key):
     return [(b, got[b]) for b in ("native", "jvm") if b in got]
 
 
+def _campaign_backend_key(arm, backend_key):
+    """The backend key of the lane rows of a dense overlay arm: DENSE_10M_ARMS names ArcadeDB's int8 arm with the backend of its fp32 twin, its rows carry `_int8`."""
+    return backend_key if (not arm.endswith("int8") or backend_key.endswith("_int8")) else backend_key + "_int8"
+
+
+def dense_files_owed(small, rows):
+    """(plain names, native names) of the files the dense overlay must hold: the plain ones are `make_paper_tables.dense_required_files`, and the 1M overlay
+    (`small`) owes the native files `mp_<arm>_native_b<k>.json` of each ArcadeDB arm the landing holds that has a native l3d row at `small` among `rows`
+    (`native_overlay`; humemai/mmdbbench#160). The 9.99M overlay owes none: its served native arm has no overlay and is read from the lane rows. The
+    dense table and `land_stage.overlay_gaps` read this one list."""
+    import make_paper_tables as _MPT
+    plain = _MPT.dense_required_files(small=small)
+    if not small:
+        return plain, []
+    n = _MPT.mp_builds()
+    held = _MPT.mp_required(_MPT.MP_ARMS_SMALL)
+    arms = [(arm, _campaign_backend_key(arm, key)) for arm, key, _l, ours in DENSE_10M_ARMS if ours and arm in held]
+    return plain, _NO.owed_native(rows, "l3d", "small", arms, lambda a: [f"mp_{a}_native_b{k}.json" for k in range(1, n + 1)])
+
+
 def _dense_overlay_entries(scale="deep10m"):
     """The DEEP-10M tier, every engine, both passes.
 
@@ -1349,6 +1370,8 @@ def _dense_overlay_entries(scale="deep10m"):
     arms = [a for a in DENSE_10M_ARMS if a[0] in present]
     if not root.is_dir():
         return []
+    if scale != "deep10m":
+        _NO.refuse_missing_native(root, dense_files_owed(True, _FROZEN_ROWS)[1], "l3d", "small", root.name)
     out = []
     # THE OVERLAY BELONGS TO THE BUILD THAT PRODUCED IT. The driver stamps engine_backend on every pass it writes (run_conditions); a
     # native run's files are mp_<arm>_native_b<k>.json beside the JVM build's mp_<arm>_b<k>.json, and the build is read from the
@@ -1425,7 +1448,7 @@ def _dense_overlay_entries(scale="deep10m"):
         # disk is not, and comes from the campaign cell of the same arm.
         # The campaign backend name carries the precision (arcadedb_dense_
         # embedded_int8); the arm table keys ArcadeDB's int8 arm by token.
-        _cb = backend_key if (not arm.endswith("int8") or backend_key.endswith("_int8")) else backend_key + "_int8"
+        _cb = _campaign_backend_key(arm, backend_key)
         # Peak memory and disk from the campaign cell of the same arm: the
         # served arm's multipass file sees only the client container (3.6 GiB
         # against the pair's 28), and no file carries disk. Same build, same
@@ -2808,7 +2831,7 @@ def _native_server_equiv_note(tables, rows=None):
         entry = _EP._equiv_registry().get(release) if release else None
         if not entry:
             raise SystemExit(f"REFUSING: a row stamps server_engine_commit_equiv={reported[:9]!r} against engine_commit {pin[:9]!r} and "
-                             f"engine_commit_equiv.json has no release pair for it")
+                             f"engine_commit_equiv.json has no release pair for it ({_AI.REGISTRY_HINT})")
         # the registry's spelling of both commits, whatever length the row or the stage pin wrote (9 or 40 characters)
         short_pin = entry["pin"][:10]
         short_eq = next(x for x in entry["equivalent"] if _EP.commit_matches(reported, x))[:10]
@@ -3204,6 +3227,25 @@ SPARSE_MP_ARMS = [
 SPARSE_MP_BY_PRESENCE = ("elastic", "milvus")
 
 
+def sparse_run_arms(roots):
+    """The arms of SPARSE_MP_ARMS a landing's sparse overlay is held to: every required one, and `SPARSE_MP_BY_PRESENCE` arms only when a directory of `roots`
+    holds a file of them."""
+    return {arm for arm, _b, _l in SPARSE_MP_ARMS
+            if arm not in SPARSE_MP_BY_PRESENCE or any(r.is_dir() and _OM.files(r, f"sp_{arm}_*.json") for r in roots)}
+
+
+def sparse_files_owed(tier, rows, run):
+    """(plain names, native names) of the files the sparse overlay of `tier` must hold, for the frozen `rows` and the arms `run` (`sparse_run_arms`).
+
+    The plain names `sp_<arm>_<tier>.json` are owed at every tier but `tiny`; `tiny` owes them when the rows hold an l3s row at that size (its files were
+    optional while 100k had no second pass, and a tier with no file and no row is still absent: humemai/mmdbbench#160). The native names
+    `sp_<arm>_native_<tier>.json` are owed, per arm, when the rows hold a native row of that arm at the tier (`native_overlay`). The table and
+    `land_stage.overlay_gaps` read this one list."""
+    plain = [] if tier == "tiny" and not _NO.holds_rows(rows, "l3s", "tiny") else [f"sp_{arm}_{tier}.json" for arm, _b, _l in SPARSE_MP_ARMS if arm in run]
+    native = _NO.owed_native(rows, "l3s", tier, [(arm, b) for arm, b, _l in SPARSE_MP_ARMS if arm in run], lambda arm: [f"sp_{arm}_native_{tier}.json"])
+    return plain, native
+
+
 def _sparse_multipass_table():
     """What a second pass buys each engine on the sparse lane.
 
@@ -3219,8 +3261,7 @@ def _sparse_multipass_table():
     """
     entries = []
     _roots = [_pinned_dir("sparse_mp", size_class=_SC.SIZE_CLASS[("l3s", t)]) for t in ("medium", "small", "tiny")]
-    _run = {arm for arm, _b, _l in SPARSE_MP_ARMS
-            if arm not in SPARSE_MP_BY_PRESENCE or any(r.is_dir() and _OM.files(r, f"sp_{arm}_*.json") for r in _roots)}
+    _run = sparse_run_arms(_roots)
     # 100k joined the second-pass run (qDP); its files are
     # optional so the table renders before they land, and the sparse
     # condition says whether 100k has a second pass by looking, not by text.
@@ -3229,10 +3270,11 @@ def _sparse_multipass_table():
         # whose large rows stay on an earlier release its files are in `sparse_mp_<that pin>`, while the small and tiny files are in the landing's. One
         # release for both classes is one directory, as before. An absent directory is a tier not run at its pin; a partial one refuses.
         _cls = _SC.SIZE_CLASS[("l3s", tier)]
-        root = _pinned_dir("sparse_mp", size_class=_cls,
-                           expected=None if tier == "tiny" else [f"sp_{arm}_{tier}.json" for arm, _b, _l in SPARSE_MP_ARMS if arm in _run])
+        _plain, _native = sparse_files_owed(tier, _FROZEN_ROWS, _run)
+        root = _pinned_dir("sparse_mp", size_class=_cls, expected=_plain or None)
         if not root.is_dir():
             continue
+        _NO.refuse_missing_native(root, _native, "l3s", tier, root.name)
         _sp_units = []
         for arm, backend, label in SPARSE_MP_ARMS + SPARSE_MP_OPTIONAL_ARMS:
             for _ob, _fps in _overlay_files_by_build(root, f"sp_{arm}", f"_{tier}.json", backend):
@@ -7929,7 +7971,7 @@ def main() -> int:
     # size class (humemai/mmdbbench#134): the small rows may be on one release and the large rows on another, never two inside one size class.
     _bad = _AI.pair_problems(rows, group=_SC.row_size_class, table_of=lambda r: _SC.row_table(r, _TABLE_LANE))
     if _bad:
-        raise SystemExit("REFUSING: " + "; ".join(_bad))
+        raise SystemExit("REFUSING: " + "; ".join(_bad) + _AI.registry_hint(_bad))
     global _FROZEN_ROWS, _SPLIT
     _FROZEN_ROWS = rows
     _SPLIT = _AI.splits_page(rows)

@@ -191,6 +191,15 @@ def _native_overlays(results):
     return n
 
 
+OVERLAY_LANES = ("l3d", "l3s")
+
+
+def _owes_no_served_overlay(r):
+    """The fixture writes the native overlay of the in-process arms only. Since humemai/mmdbbench#160 a native row of an overlay lane owes its native overlay file, so the
+    served arms of the overlay lanes carry no native twin here (the other lanes' served arms keep theirs: no overlay is read for them)."""
+    return not (r.get("lane") in OVERLAY_LANES and AI.served(r))
+
+
 @pytest.fixture(scope="module")
 def pages(tmp_path_factory):
     """(payload of the old freeze, payload with native twins everywhere, payload with native twins in every lane but l2, the dir)."""
@@ -200,7 +209,9 @@ def pages(tmp_path_factory):
     base = _stage(root / "base")
     assert _run("make_paper_tables.py", base).returncode == 0
     out = []
-    for name, keep in (("old", None), ("both", lambda r: True), ("partial", lambda r: r.get("lane") != "l2"), ("bare", lambda r: True)):
+    # "bare" keeps no native row of an overlay lane: native rows with no native overlay file are refused since humemai/mmdbbench#160 (test_silent_overlay_losses.py)
+    for name, keep in (("old", None), ("both", _owes_no_served_overlay), ("partial", lambda r: r.get("lane") != "l2" and _owes_no_served_overlay(r)),
+                       ("bare", lambda r: r.get("lane") not in OVERLAY_LANES)):
         d = root / name
         shutil.copytree(base, d)
         if keep:
@@ -282,7 +293,8 @@ def test_a_stamped_overlay_stands_per_build_and_the_gate_passes_the_dense_table(
 
 def test_an_unstamped_overlay_is_the_jvm_build_and_the_native_build_is_declared_not_measured(pages):
     """The default, chosen on purpose: an overlay file with no engine_backend is the JVM build (what every earlier overlay was). With
-    native rows on the page and no native overlay, the dense embedded arms read JVM build, and the native twin is a declared absence."""
+    native rows on the page and no native overlay, the dense embedded arms read JVM build, and the native twin is a declared absence. The native rows are
+    those of the other lanes: a native row of l3d or l3s with no native overlay file is a refusal (humemai/mmdbbench#160)."""
     bare = pages[4]
     t = _t(bare, "l3d")
     emb = [e for e in t["entries"] if e.get("is_arcadedb") and e.get("deployment") == "embedded" and e.get("precision") in ("fp32", "int8")]

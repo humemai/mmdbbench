@@ -293,6 +293,18 @@ def _settings_from_cell(text):
     return None
 
 
+# THE HINT THAT CLOSES A REFUSAL FOR A NATIVE SERVER IMAGE THE REGISTRY DOES NOT KNOW (humemai/mmdbbench#160). Upstream builds the `-native` server image at the
+# release tag, one commit after the commit of the JVM image, the jars and the wheels; engine_commit_equiv.json holds that pair per release, and without an entry
+# for the release being landed every served native row is a mismatch. The sentence of the mismatch (`server_settings_problems`) names rows, not the cure.
+REGISTRY_HINT = ("the registry is experiments/engine_commit_equiv.json: make_engine_commit_equiv.py writes the entry of a release from the git diff of its two "
+                 "commits, the entry is merged into the registry by hand and committed before the landing (PUBLISHING.md, \"Landing a finished queue stage\")")
+
+
+def registry_hint(problems):
+    """` (REGISTRY_HINT)` when one of `problems` is the native server commit mismatch, else "": one closing hint per refusal, not one per sentence."""
+    return f" ({REGISTRY_HINT})" if any("the native server reports engine commit" in p for p in problems) else ""
+
+
 def server_settings_problems(rows):
     """Sentences for a served-arm settings mismatch between the builds (empty: fine). A native server row with no read-back is a problem
     too: a setting written is not a setting in force."""

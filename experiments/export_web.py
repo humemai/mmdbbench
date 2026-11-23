@@ -48,6 +48,7 @@ from runner import BACKENDS, MEM_BY_SCALE, HEAP_BY_SCALE  # noqa: E402  (path se
 import bench_common  # noqa: E402
 import arm_identity as _AI  # noqa: E402
 import size_classes as _SC  # noqa: E402
+import large_entry_gate as _LG  # noqa: E402  (a large dense entry keeps the metric keys the published payload has, humemai/mmdbbench#146)
 import memory_per_million as _MPM  # noqa: E402  (peak memory per million records, humemai/mmdbbench#133)
 import overlay_merge as _OM  # noqa: E402  (which overlay file a table reads when the name carries the client, humemai/mmdbbench#62)
 import engine_pin as _EP  # noqa: E402
@@ -399,13 +400,16 @@ def _campaign_engine_string(backend) -> str | None:
     return _row_engine_string(best) if best else None
 
 
-def _overlay_commit() -> str | None:
+def _overlay_commit(size_class: str = "small") -> str | None:
     """The commit an overlay row belongs to: the files carry engine_commit=None
     (the driver never stamped it) but the directory is named by the pin, so a
-    pinned overlay's rows are that commit's rows by construction."""
+    pinned overlay's rows are that commit's rows by construction. The pin is the
+    one of the row's size class (size_classes.pin_of_size_class): the large
+    rows of a landing may be on an earlier release than its small rows
+    (humemai/mmdbbench#146)."""
     import make_paper_tables as _MPT
     _MPT.dense_mp_dir()      # refuses a missing or incomplete pinned overlay
-    return os.environ.get("BENCH_ENGINE_COMMIT", "").strip() or None
+    return _SC.pin_of_size_class(size_class) or None
 
 
 # Canonical spelling per engine, so an image repo name and a row label cannot
@@ -1460,7 +1464,7 @@ def _dense_overlay_entries(scale="deep10m"):
             "n_docs": n_docs,
             "deployment": deployment_of(backend_key),
             "image": None,
-            "version_name": _engine_version(label, v, commit=_overlay_commit()),
+            "version_name": _engine_version(label, v, commit=_overlay_commit(_SC.SIZE_CLASS[("l3d", scale)])),
             "host": "mini",
             "metrics": metrics,
         })
@@ -5471,9 +5475,10 @@ def _refuse_other_client_overlays():
     file name as the other client's job, so the second job to finish won; this catches the case where it was not the benchmark's
     own. Since humemai/mmdbbench#62 the name carries the client, and the files checked are the ones a table reads (`_OM.files`): a
     file named for the vendor driver or the PostgreSQL wire is read by no table, a file named for the lean client is still checked."""
-    pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
+    # the landing's pin and the pin of the large class (humemai/mmdbbench#146): the overlay of the large rows sits in a directory of the old pin
+    pins = sorted({p for p in (os.environ.get("BENCH_ENGINE_COMMIT", "").strip(), _SC.pin_of_size_class("large")) if p})
     bad = []
-    for d in sorted(RESULTS.glob(f"*_{pin}")) if pin else []:
+    for d in sorted(d for pin in pins for d in RESULTS.glob(f"*_{pin}")):
         for fp in [Path(p) for p in _OM.files(d, "*.json")] if d.is_dir() else []:
             if _OTHER_CLIENT_STAMP.search(fp.read_text(encoding="utf-8", errors="replace")):
                 bad.append(f"{d.name}/{fp.name}")
@@ -8502,6 +8507,14 @@ def main() -> int:
     # refuse to write anything that still carries one.
     payload = _strip_internal_refs(payload)
     _refuse_internal_refs(payload)
+    # THE LARGE ROWS KEEP THEIR COLUMNS (humemai/mmdbbench#146). The payload on disk is the page as last published, and it is read before it is
+    # overwritten: a large dense entry that had `warm p50 ms` there and has lost it (its overlay was not found, so it was rebuilt from the lane
+    # rows) refuses the write, with the table, the entry and the keys.
+    try:
+        _published = json.loads(OUT.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _published = None
+    _LG.refuse_lost_large_keys(_published, payload)
     OUT.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n",
                    encoding="utf-8")
     n_entries = sum(len(t["entries"]) for t in tables)

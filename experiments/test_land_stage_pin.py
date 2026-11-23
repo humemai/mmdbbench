@@ -46,6 +46,23 @@ def test_a_landing_with_no_pin_refuses(monkeypatch, tmp_path):
     assert "no --pin" in str(exc.value)
 
 
+def test_a_payload_that_names_two_commits_gives_no_default_pin_and_every_later_landing_must_name_one(monkeypatch, tmp_path):
+    """After the first landing of a new release the payload holds two commits (small rows on the new one, large rows on the old one).
+    `arcadedb_commits` is a sorted list, so it does not say which is newer and the default does not guess (humemai/mmdbbench#147)."""
+    monkeypatch.delenv("BENCH_ENGINE_COMMIT", raising=False)
+    monkeypatch.setattr(L, "PAYLOAD", _payload(tmp_path, ["a3a5d1245", "d1ce4d8c0"]))
+    monkeypatch.setattr(L, "PY", str(tmp_path / "no-venv-python"))
+    monkeypatch.setattr(sys, "argv", ["land_stage.py", "--message", "x"])
+    with pytest.raises(SystemExit) as exc:
+        L.main()
+    assert "no --pin" in str(exc.value) and "exactly one engine commit" in str(exc.value) and "Pass --pin" in str(exc.value)
+    monkeypatch.setenv("BENCH_INSTRUMENT", "2026-10")      # the check after the pin check: a named pin gets past it, and is stopped here
+    monkeypatch.setattr(sys, "argv", ["land_stage.py", "--pin", "d1ce4d8c0", "--message", "x"])
+    with pytest.raises(SystemExit) as exc:
+        L.main()
+    assert "2026-11 rows only" in str(exc.value)
+
+
 def test_a_landing_refuses_another_instrument(monkeypatch, tmp_path):
     monkeypatch.setenv("BENCH_INSTRUMENT", "2026-10")
     monkeypatch.setattr(L, "PY", str(tmp_path / "no-venv-python"))

@@ -318,3 +318,89 @@ def test_the_exporter_reads_the_lean_file_and_checks_only_the_files_a_table_read
             os.environ.pop("BENCH_ENGINE_COMMIT", None)
         else:
             os.environ["BENCH_ENGINE_COMMIT"] = saved_pin
+
+
+# humemai/mmdbbench#147: --overlay-exclude ARM@LABEL leaves an arm out of ONE source; ARM alone still leaves it out of every source
+def _old_and_new_overlays():
+    """The old overlay (a comparator and ArcadeDB's old arms) and the new one (ArcadeDB's new arms under the same names)."""
+    old, new = _dir(), _dir()
+    _put(old, "mp_qdrant_b1.json", mark="old-qdrant"); _put(old, "mp_fp32_b1.json", mark="old-fp32"); _put(old, "mp_arcsrv_b1.json", mark="old-arcsrv")
+    _put(new, "mp_fp32_b1.json", mark="new-fp32"); _put(new, "mp_fp32_native_b1.json", mark="new-fp32-native"); _put(new, "mp_arcsrv_b1.json", mark="new-arcsrv")
+    return old, new
+
+
+def _marks(out):
+    return {p.name: json.loads(p.read_text())[0]["mark"] for p in sorted(Path(out).glob("mp_*.json"))}
+
+
+def test_without_an_exclude_the_two_overlays_collide_and_a_global_exclude_drops_the_new_files_too():
+    old, new = _old_and_new_overlays()
+    out = _dir() / "o"
+    try:
+        OM.merge([("old@a3a5d1245", old), ("new@d1ce4d8c0", new)], out)
+    except SystemExit as e:
+        assert "mp_fp32_b1.json" in str(e) and "old@a3a5d1245" in str(e) and "new@d1ce4d8c0" in str(e)
+    else:
+        raise AssertionError("expected a refusal")
+    out = _dir() / "o"
+    OM.merge([("old@a3a5d1245", old), ("new@d1ce4d8c0", new)], out, exclude_arms=("fp32", "arcsrv"))
+    assert _marks(out) == {"mp_qdrant_b1.json": "old-qdrant"}          # the old form, unchanged: the arm is out of every source
+
+
+def test_a_per_source_exclude_drops_the_arm_from_that_source_only():
+    old, new = _old_and_new_overlays()
+    for sources in ((("old@a3a5d1245", old), ("new@d1ce4d8c0", new)), (("new@d1ce4d8c0", new), ("old@a3a5d1245", old))):
+        for specs in (("fp32@old", "arcsrv@old"), ("fp32@old@a3a5d1245", "arcsrv@old@a3a5d1245")):     # the label, or the whole label@pin
+            out = _dir() / "o"
+            OM.merge(list(sources), out, exclude_arms=specs)
+            assert _marks(out) == {"mp_qdrant_b1.json": "old-qdrant", "mp_fp32_b1.json": "new-fp32",
+                                   "mp_fp32_native_b1.json": "new-fp32-native", "mp_arcsrv_b1.json": "new-arcsrv"}, (sources, specs)
+
+
+def test_a_per_source_exclude_and_a_global_one_can_be_mixed_and_an_unnamed_source_keeps_its_arm():
+    old, new = _old_and_new_overlays()
+    out = _dir() / "o"
+    OM.merge([("old@a", old), ("new@b", new)], out, exclude_arms=("fp32@old", "arcsrv"))
+    assert _marks(out) == {"mp_qdrant_b1.json": "old-qdrant", "mp_fp32_b1.json": "new-fp32", "mp_fp32_native_b1.json": "new-fp32-native"}
+    out = _dir() / "o"
+    OM.merge([("old@a", old), ("new@b", new)], out, exclude_arms=("fp32@new", "arcsrv@new"))      # the other way round: the new files go, the old stay
+    assert _marks(out) == {"mp_qdrant_b1.json": "old-qdrant", "mp_fp32_b1.json": "old-fp32", "mp_arcsrv_b1.json": "old-arcsrv"}
+
+
+def test_a_malformed_exclude_refuses():
+    for bad in ("@old", "fp32@", "@"):
+        try:
+            OM.parse_exclude([bad])
+        except SystemExit as e:
+            assert "ARM or ARM@LABEL" in str(e) and repr(bad) in str(e)
+        else:
+            raise AssertionError(f"expected a refusal of {bad!r}")
+    assert OM.parse_exclude(["fp32", "arcsrv@old"]) == ({"fp32"}, [("arcsrv", "old")])
+
+
+def test_land_stage_builds_both_sizes_with_a_per_source_exclude_and_a_label_that_names_no_source_refuses():
+    import land_stage as L
+    res, comp, arc = _dir(), _dir(), _dir()
+    for stem in ("dense_mp5", "dense_mp5_small"):
+        _put(comp / f"{stem}_e85469273", "mp_qdrant_b1.json", mark="old-qdrant")
+        _put(comp / f"{stem}_e85469273", "mp_fp32_b1.json", mark="old-fp32")
+        _put(comp / f"{stem}_e85469273", "mp_arcsrv_b1.json", mark="old-arcsrv")
+        _put(arc / f"{stem}_d1ce4d8c0_2611", "mp_fp32_b1.json", mark="new-fp32")
+        _put(arc / f"{stem}_d1ce4d8c0_2611", "mp_arcsrv_b1.json", mark="new-arcsrv")
+    specs = [f"old:e85469273:{comp}", f"new:d1ce4d8c0:{arc}"]
+    for bad in ("fp32@olds", "fp32@old2@e85469273"):
+        try:
+            L.apply_overlay_merge(specs, [bad], "d1ce4d8c0", results=res)
+        except SystemExit as e:
+            assert "no source is labelled" in str(e) and bad.split("@", 1)[1] in str(e) and "'old'" in str(e)
+        else:
+            raise AssertionError(f"expected a refusal of {bad}")
+    assert not list(res.iterdir())                                           # nothing was merged
+    L.apply_overlay_merge(specs, ["fp32@old", "arcsrv@old"], "d1ce4d8c0", results=res)
+    for stem in ("dense_mp5", "dense_mp5_small"):
+        assert _marks(res / f"{stem}_d1ce4d8c0") == {"mp_qdrant_b1.json": "old-qdrant", "mp_fp32_b1.json": "new-fp32", "mp_arcsrv_b1.json": "new-arcsrv"}
+    # the directory a landing already holds is a source called `existing`: a second run with the same call changes nothing, and
+    # `existing` is a label an exclude may name
+    for extra in ([], ["qdrant@existing"]):
+        L.apply_overlay_merge(specs, ["fp32@old", "arcsrv@old"] + extra, "d1ce4d8c0", results=res)
+        assert _marks(res / "dense_mp5_d1ce4d8c0") == {"mp_qdrant_b1.json": "old-qdrant", "mp_fp32_b1.json": "new-fp32", "mp_arcsrv_b1.json": "new-arcsrv"}

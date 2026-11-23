@@ -31,9 +31,9 @@ COLUMN_PREFIX = "peak memory GiB per million "
 #   - l1tpc: line items and parts, as `_rate(("n_lineitem", "n_part"), "build_s")`.
 #   - l2: persons and KNOWS edges, as the rate column.
 #   - l2olap: the table's one size is the FULL network, whose message half (`msg_vertices`, `msg_edges`) is most of what the cell loads. The
-#     rate column of that table counts persons and KNOWS only, so it understates the records of the full network by about a factor of ninety;
-#     a per-record memory over that count would be wrong by the same factor and would sit beside a Size label that names 3.2M vertices and
-#     13.8M edges. All four fields are required, so a row without the message counts has a dash and not a quietly smaller count.
+#     rate column of that table counted persons and KNOWS only until humemai/mmdbbench#140, which understated the records of the full network by about
+#     a factor of ninety; both columns now count the four fields, beside a Size label that names 3.2M vertices and 13.8M edges. All four fields are
+#     required, so a row without the message counts has a dash and not a quietly smaller count.
 #   - e2: products and edges, as the rate column.
 #   - l3d, l3s: `n_docs`, the vectors the lane loaded (`build_docs_per_s` is `n_docs / build_s`).
 #   - l4: `n_points`, the points the lane parsed (`ingest_pts_per_s` is `n_points / ingest time`).

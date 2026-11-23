@@ -176,6 +176,20 @@ def main():
     for _r in out_reps:
         _r.update(cell_mem)
 
+    # THE addHierarchy STAMP THAT NEEDS A CLOSED DATABASE (humemai/mmdbbench#31). The two sources that read a live engine answered (or
+    # did not) at `readbacks()` above; when neither did, the embedded ArcadeDB arm still owes the stamp from schema.json, which the
+    # engine writes complete only on close. This driver never closes, so it closes here, after the last timed pass and after the memory
+    # sampler has stopped, and only for the arm and the wheel that need it: on the JVM wheel, and wherever the engine reports the setting
+    # through SQL, nothing below runs. A close or a read that fails is a reason on the rows, never the loss of the cell's passes.
+    if getattr(b, "hierarchy_unresolved", False):
+        try:
+            b.close()
+            _post = b.readbacks_after_close()
+        except Exception as e:  # noqa: BLE001 - recorded, never swallowed
+            _post = {"arcadedb_readback_error": f"closing the engine to read schema.json failed: {type(e).__name__}: {e}"}
+        for _r in out_reps:
+            _r.update(_post)
+
     outp = os.environ.get("PROBE_OUT", "")
     if outp:
         with open(outp, "w") as f:

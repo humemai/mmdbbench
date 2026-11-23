@@ -1056,6 +1056,15 @@ def _per_million_notes(payload):
                 t["conditions"] = list(t.get("conditions") or []) + [_gen(text, *values)]
 
 
+def _release_note(releases):
+    """The generated sentence that names the ArcadeDB release of the rows of each size class (`releases`: class -> set of releases), or None."""
+    parts = [f"{cls} size, {_join_and(sorted(releases[cls]))}" for cls in SIZE_CLASSES if releases.get(cls)]
+    if not parts:
+        return None
+    return _gen("Engine version of the ArcadeDB rows: " + "; ".join(parts) + ".",
+                *[v for cls in SIZE_CLASSES for v in sorted(releases.get(cls) or ())])
+
+
 def _classify_sizes(payload):
     """Every row says small or large, a table says when its large size has no rows, and the page says once how to read the two.
 
@@ -1065,8 +1074,9 @@ def _classify_sizes(payload):
       size_corpus  the label as it was, the corpus alone
       scale_label  the class word, then the corpus: what the Size column prints
     and the table gets `sizes`, one record per size (with a record for a large size that has no rows). A table whose Size column is not a
-    corpus size (the durability table names an operation, the coverage table says "every size above") carries `size_class` null and an
-    empty `sizes`. Three kinds of generated sentence follow from the rows: the absent large size, the extra sizes, and the ArcadeDB
+    corpus size (the durability table names an operation, the coverage table says "every size above") has an empty `sizes`, and its rows
+    carry `size_class` null unless the table gave them one: the durability table does, per size class of the rows an entry pools
+    (`_durability_table`, humemai/mmdbbench#145), and its label already starts with the class word. Three kinds of generated sentence follow from the rows: the absent large size, the extra sizes, and the ArcadeDB
     version of the rows of each size; and one paragraph joins the page's own conditions."""
     lanes_with_sizes = {lane for lane, _ in SIZE_CLASS}
     page_releases = collections.defaultdict(set)      # class -> ArcadeDB releases, over the whole page
@@ -1075,8 +1085,20 @@ def _classify_sizes(payload):
         lane = (_TABLE_LANE.get(tid) or (_SIZE_TABLE_LANE.get(tid),))[0]
         t["sizes"] = []
         if lane not in lanes_with_sizes:
+            # The class a table gave its own rows stays (the durability table, #145) and counts in the sentence and the paragraph about the
+            # engine version by size; a row with none has none, as before.
+            own = collections.defaultdict(set)
             for e in t.get("entries") or []:
-                e["size_class"] = None
+                cls = e.get("size_class")
+                if cls is not None and cls not in SIZE_CLASSES:
+                    raise SystemExit(f"REFUSING: table {tid!r} gives a row the size class {cls!r}; the classes are {', '.join(SIZE_CLASSES)}.")
+                e["size_class"] = cls
+                if cls and e.get("is_arcadedb") and _release_of(e.get("version_name")):
+                    own[cls].add(_release_of(e.get("version_name")))
+                    page_releases[cls].add(_release_of(e.get("version_name")))
+            note = _release_note(own)
+            if note and note not in (t.get("conditions") or []):
+                t["conditions"] = list(t.get("conditions") or []) + [note]
             continue
         by_size = {}                                  # size id -> its record, in the order the table prints
         releases = collections.defaultdict(set)       # class -> ArcadeDB releases, on this table
@@ -1114,10 +1136,9 @@ def _classify_sizes(payload):
         if extra:
             notes.append(_gen(f"Beside its small and its large size, this table has {'an extra size' if len(extra) == 1 else 'extra sizes'}: "
                               f"{_join_and(extra)}.", *extra))
-        parts = [f"{cls} size, {_join_and(sorted(releases[cls]))}" for cls in SIZE_CLASSES if releases.get(cls)]
-        if parts:
-            notes.append(_gen("Engine version of the ArcadeDB rows: " + "; ".join(parts) + ".",
-                              *[v for cls in SIZE_CLASSES for v in sorted(releases.get(cls) or ())]))
+        release_note = _release_note(releases)
+        if release_note:
+            notes.append(release_note)
         t["conditions"] = list(t.get("conditions") or []) + [n for n in notes if n not in (t.get("conditions") or [])]
     if not any(t["sizes"] for t in payload["tables"]):
         return
@@ -3562,6 +3583,12 @@ DURABILITY_WRITES = [
 ]
 
 
+def _op_of(e):
+    """The operation a durability entry times: its `operation`, else its `scale`. The `scale` key also carries the size class (two size classes of
+    one operation are two entries, so the page picks the fastest engine inside one of them), and the count of operations must not."""
+    return str(e.get("operation") or e.get("scale") or "")
+
+
 def _durability_scope_note(entries):
     """What this table actually holds, counted from its own rows.
 
@@ -3580,7 +3607,7 @@ def _durability_scope_note(entries):
     """
     kinds = {"doc": 0, "graph": 0, "crossmodel": 0}
     for e in entries:
-        op = str(e.get("scale") or "")
+        op = _op_of(e)
         if op.startswith("doc"):
             kinds["doc"] += 1
         elif op.startswith("graph"):
@@ -3589,9 +3616,9 @@ def _durability_scope_note(entries):
             kinds["crossmodel"] += 1
     # One entry per engine per operation, so the operation count is what the
     # reader needs, not the row count.
-    ops = {k: len({str(e.get("scale")) for e in entries
-                   if str(e.get("scale") or "").startswith(k)
-                   or (k == "crossmodel" and "crossmodel" in str(e.get("scale") or ""))})
+    ops = {k: len({_op_of(e) for e in entries
+                   if _op_of(e).startswith(k)
+                   or (k == "crossmodel" and "crossmodel" in _op_of(e))})
            for k in kinds}
     # The cross-model transaction is one operation printed once per catalog
     # size (DURABILITY_PER_SCALE); it counts once.
@@ -3688,10 +3715,14 @@ def _durability_table(all_rows):
             # out of this one for the same reason.
             if str(r.get("backend")) in OFF_PAGE_ARMS:
                 continue
-            by.setdefault((str(r.get("backend")), str(r.get("scale")) if per_scale else None, _arm_build(r)),
-                          []).append(r)
-        for (backend, sc, build), rs in sorted(by.items(), key=lambda kv: (_durability_scale_rank(lane, kv[0][1]),
-                                                                            kv[0][0], kv[0][2])):
+            # THE SIZE CLASS IS PART OF THE KEY (humemai/mmdbbench#145). Until the large sizes are rerun the small rows of an ArcadeDB arm
+            # are on one release and its large rows on another, and an entry prints one release beside one median: pooling the two classes
+            # would print one of two releases over numbers of both (_one_version refuses it). The class of a row is the one SIZE_CLASS
+            # gives its lane and size; a size with no class raises, like every table that prints a size.
+            by.setdefault((str(r.get("backend")), str(r.get("scale")) if per_scale else None,
+                           size_class(lane, str(r.get("scale"))), _arm_build(r)), []).append(r)
+        for (backend, sc, cls, build), rs in sorted(by.items(), key=lambda kv: (_durability_scale_rank(lane, kv[0][1]),
+                                                                                 SIZE_CLASSES.index(kv[0][2]), kv[0][0], kv[0][3])):
             if sc is not None:
                 # ONE ROW PER CORPUS SIZE for an operation whose cost grows with
                 # the corpus, named in the Size column beside the operation.
@@ -3699,7 +3730,9 @@ def _durability_table(all_rows):
                 op_label_s = (op_label[:-1] + f", {_durability_corpus(lane, sc)})"
                               if op_label.endswith(")") else f"{op_label}, {_durability_corpus(lane, sc)}")
             else:
-                op_key_s, op_label_s = op_key, op_label
+                # The key names the size class too: the page picks the fastest engine and keys a row by `scale`, so the small and the
+                # large rows of one operation must not share it. (A per-corpus operation above already names its catalog size, which is one class.)
+                op_key_s, op_label_s = f"{op_key}_{cls}", op_label
             # The CELL's class, not the engine string: the string is what the
             # engine answered, and on a no-knob engine both cells answer the
             # same thing, which is precisely the case this table has to keep
@@ -3713,11 +3746,15 @@ def _durability_table(all_rows):
                 "build": build or None,
                 "is_arcadedb": "arcadedb" in backend,
                 "scale": op_key_s,
-                "scale_label": op_label_s,
+                # The Size label starts with the size class like every other table's (`Small: ...`, `Large: ...`), the operation after it.
+                "scale_label": f"{cls.capitalize()}: {op_label_s}",
+                "size_class": cls,
+                "size_corpus": op_label_s,
+                "operation": op_key,
                 "workload": "write",
                 "n_docs": None,
                 "deployment": deployment_of(backend),
-                "image": (_one_version(rs, f"durability/{backend}/{op_key_s}").get("image") or None),
+                "image": (_one_version(rs, f"durability/{backend}/{op_key_s} (table durability, {cls} size)").get("image") or None),
                 # ArcadeDB is identified by commit (#49); a comparator by its
                 # own stamp, else its row read "arcadedb surrealdb-embedded:...".
                 "version_name": (_engine_identity(rs[0].get("engine_version"),
@@ -4663,9 +4700,9 @@ OCT_PROSE = {
         "pairs": ("Each row is one engine running ONE operation twice: once where a commit returns without waiting for the disk, which is the setting every other table on this page reports, and once where the commit waits for the log to be flushed and synced. Nothing else about the cell changes.", []),
         "every_write": ("Every timed write on the page is here: the six document operations, the three graph writes, and the cross-model transaction. Read down the operations for one engine rather than across the engines for one operation, because what the setting costs is a property of the engine's commit and the rest of the page already compares the engines.", []),
         "read_control": ("The read is the control, and it is the row that makes the rest readable: it runs in both cells like everything else and commits nothing, so it is what the writes are moving against.", []),
-        "size_column": ("The Size column names the operation rather than a corpus size, and for the cross-model transaction the catalog size as well: the three lanes that time a write do not write the same thing, so each engine is compared only against the engines running its own operation.", []),
+        "size_column": ("The Size column starts with the size class, small or large, and names the operation rather than a corpus size, and for the cross-model transaction the catalog size as well: the three lanes that time a write do not write the same thing, so each engine is compared only against the engines running its own operation at its own size class.", []),
         "cell_property": ("The setting is a property of the cell, not a second measurement inside one: it lives on the database or on the server for most of these engines, so each pair of numbers is two runs.", []),
-        "ratio": ("The ratio is what the strict setting costs on that engine for that operation. The document and graph operations write the same few records whatever the corpus holds, so each row pools every corpus size its lane ran it at; the cross-model transaction searches and expands over the whole catalog, so it has one row per catalog size and its ratio holds at that size. It is not a claim about any other write. A large ratio is not a slow engine: it is an engine whose relaxed path was fast, measured against a flush that costs what a flush costs.", []),
+        "ratio": ("The ratio is what the strict setting costs on that engine for that operation. The document and graph operations write the same few records whatever the corpus holds, so each row pools every corpus size of its size class that its lane ran it at; the cross-model transaction searches and expands over the whole catalog, so it has one row per catalog size and its ratio holds at that size. It is not a claim about any other write. A large ratio is not a slow engine: it is an engine whose relaxed path was fast, measured against a flush that costs what a flush costs.", []),
     },
     "docs_oltp": {
         "ingest": ("Ingest paths: DuckDB and ArcadeDB embedded load whole frames, DuckDB with CREATE TABLE AS SELECT from in-memory frames and ArcadeDB embedded through the Python package's insert_columns, which hands each batch of the file to the engine as whole columns and builds the documents in Java; ArcadeDB served binds 2,000-row INSERT ... CONTENT batches over HTTP; PostgreSQL COPY FROM STDIN, SQLite executemany, MongoDB insert_many, ArangoDB import_bulk, and SurrealDB's Python SDK are fed row by row.",

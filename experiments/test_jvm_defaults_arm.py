@@ -539,7 +539,7 @@ def test_a_second_restricted_arm_needs_no_special_case(monkeypatch):
     assert [d[0] for d in derived] == ["qRI", "qRJ", "qRK", "qRL"]          # ids continue the sequence (the CrateDB analytics and Redis stages follow)
     by_arm = {M.stage_backends(d)[0]: d for d in derived}
     assert set(by_arm) == {second, ARM, "cratedb_tpc", "redis_tpc"}
-    stages = M.STATIC_STAGES + derived
+    stages = M.STATIC_STAGES + derived + M.FINAL_STAGES    # the coverage gate owes the restart lane and the e4 lane a stage (#137)
     problems, _e, _c = M.check_coverage(stages)
     assert problems == []
     graph_main = next(s for s in stages if s[0] == "qRA")

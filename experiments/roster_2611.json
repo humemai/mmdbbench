@@ -1769,7 +1769,7 @@
    "workload": "search"
   }
  ],
- "cells_sha256": "e482908b299c5bdad72d4dbae92659545ac2fd87647ceeea59f6204ca38ac81d",
+ "cells_sha256": "8205f67e831711f16038aaaf33a60cdf9d2680fc920079026da6e8f164e9e54f",
  "generated_by": "landing_gates.py roster-gen (make_2611_stages.STAGES, stage_cells, drop_reason)",
  "outside": {
   "prefixes": [
@@ -1782,7 +1782,7 @@
    "questdb"
   ],
   "rule": "registered arms that are not in the subset of the paper pass (make_2611_stages.OUTSIDE)",
-  "source": "experiments/make_2611_stages.py:462"
+  "source": "experiments/make_2611_stages.py:547"
  },
  "outside_cells": [
   {
@@ -3584,15 +3584,15 @@
   "profile": "paper-2611",
   "rules": {
    "neo4j-memgraph-dense": {
-    "source": "experiments/make_2611_stages.py:489",
+    "source": "experiments/make_2611_stages.py:575",
     "why": "Neo4j and Memgraph stay in the graph lane (and cross-model where they are); their dense-lane cells are out"
    },
    "quantized-dense": {
-    "source": "experiments/make_2611_stages.py:489",
+    "source": "experiments/make_2611_stages.py:575",
     "why": "the dense lane is fp32 only: quantized arms are not like-for-like across engines, and quantization is out of the paper's scope (ArcadeDB's own INT8 and BINARY are out by the owner's rule; jvector PQ, BQ and NVQ are studied after the paper)"
    },
    "second-list": {
-    "source": "experiments/make_2611_stages.py:489",
+    "source": "experiments/make_2611_stages.py:575",
     "why": "sparse, time series and lifecycle are out of scope for the paper (the comparators and the ArcadeDB chain alike)"
    }
   }

@@ -391,13 +391,18 @@ GENERATIONS = {
     "arcadedb-release-full-second": (_release_args() + ["--after", "none", "--id-prefix", "qV", "--profile", "full", "--second-list"], False),
     "arcadedb-release-native-full-second": (_release_args(**{"--wheel-name": NATIVE_REL_WHEEL, "--wheel-url": "https://files.pythonhosted.org/packages/x/" + NATIVE_REL_WHEEL})
                                             + ["--after", "none", "--id-prefix", "qN", "--profile", "full", "--second-list"], False),
+    # The two chains of the final pass (humemai/mmdbbench#136, #137): `--profile final-small`, the small sizes of every table, with the restart stages and the e4 stage that
+    # no other profile has. Every case above is main's output from before those stages: adding them must not move one of its lines.
+    "arcadedb-release-final-small": (_release_args() + ["--after", "none", "--id-prefix", "qF", "--profile", "final-small"], False),
+    "arcadedb-release-native-final-small": (_release_args(**{"--wheel-name": NATIVE_REL_WHEEL, "--wheel-url": "https://files.pythonhosted.org/packages/x/" + NATIVE_REL_WHEEL})
+                                            + ["--after", "none", "--id-prefix", "qG", "--profile", "final-small"], False),
 }
 
 
 def drafts_sha256(tmp_path):
     """sha256 of every script the generations of GENERATIONS write: under the default profile (paper-2611) the comparators (default order with engine tiers, the same
     without them, and paper order at 3 reps) and ArcadeDB alone on a release, the JVM and the native chain, the core lanes; under `--profile full --second-list` both
-    ArcadeDB chains at every size. One line per script, `<sha256>  <case>/<name>`, sorted."""
+    ArcadeDB chains at every size; under `--profile final-small` both chains of the final pass (the small sizes, the restart and e4 stages). One line per script, `<sha256>  <case>/<name>`, sorted."""
     lines = []
     for case, (args, from_env) in GENERATIONS.items():
         out = tmp_path / case

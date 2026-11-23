@@ -57,6 +57,13 @@ of the image, the pinned wheel by sha256, the cap rule, the ALL-DONE trap. What 
     less the arms the page does not print (the int8 and PQ dense arms, the `nocompact` sparse arms), at the small sizes only. It carries its
     sizes and its second list, so `--sizes all` with it is refused and `--second-list` is implied; `--check` proves the stage list and
     `--check --drafts DIR` the written scripts. The twins of the served cells (lean client, PostgreSQL wire) are the runner's, not dropped here.
+  * THE SERVER RESTART AND THE E4 DECOMPOSITION (humemai/mmdbbench#137, refs #114). Two page tables had no stage: `restart` (runner lane
+    `restart`, l6_restart.py) and the E4 deployment decomposition (lane `e4`, e4_decomp.py). The 26.11.1 pass never measured either, so STAGES,
+    the table of that pass, does not hold them and a call of the paper-2611 or the full profile writes what it wrote before. FINAL_STAGES
+    holds them and `--profile final-small` schedules them (`final_lanes`): one restart stage per model (documents, graph, dense vectors, time
+    series: an arm runs the one model l6_restart.MODEL gives it, at that model's own sizes, so a stage cannot hold arms of two models) and one
+    e4 stage, which only the JVM chain runs (`arcadedb_e4` has no native counterpart, and its artifacts are one directory per pin,
+    `e4decomp_<pin>/`, which a second chain would overwrite). `check_coverage` owes both lanes a stage and fails when one is missing.
   * THE INSTRUMENT. Every stage exports BENCH_INSTRUMENT=2026-11 before its first python call and aborts if the tree
     does not select it. Rows go to `runs_page_<pin>_2611.jsonl` (and the overlay directories carry the same suffix), so one
     file never holds two instruments. This generator re-executes itself with the variable set; a different value in the
@@ -290,6 +297,52 @@ def _derived_stages(static):
 
 STAGES = STATIC_STAGES + _derived_stages(STATIC_STAGES)
 
+# THE FINAL PASS'S OWN STAGES (humemai/mmdbbench#137, refs #114). Two page tables have no stage in the 26.11.1 pass: the server restart (runner lane
+# `restart`, l6_restart.py) and the E4 deployment decomposition (lane `e4`, e4_decomp.py). Neither was measured at 26.11.1 (the page has no restart
+# table and lists e4 as pending), so STAGES, the table of that pass, stays as it was, and the roster of that pass (landing_gates.roster_cells,
+# roster_2611.json) does not owe them a row. The rerun on 26.12.1 (#114) holds every page table to one release (PAGE-SPEC rule 3, #134), so
+# `--profile final-small` stages them: FINAL_STAGES below, read through ALL_STAGES by every proof and by subset_specs. A profile that does not carry
+# them (`final_lanes` in PROFILES) never schedules them, so its drafts are the ones it wrote before.
+FINAL_LANES = ("restart", "e4")
+
+# The restart lane runs ONE model per arm (l6_restart.MODEL) and its scale names the model, so a stage holds the arms of one model and that model's own
+# sizes: one stage with every arm at every scale would run an arm at another model's tier, which the lane refuses at run time. The arms and the sizes
+# are READ from the lane by ast (the generator runs on the bench host and must not import the lane's modules), never typed a second time. Each model
+# takes the guards of the lane whose loader it uses (documents l1tpc, graph l2, dense l3d, time series l4).
+RESTART_MODELS = (("docs", "documents (TPC-H)", _TPCH), ("graph", "graph (LDBC SNB)", _LDBC), ("dense", "dense vectors", []),
+                  ("ts", "time series (TSBS)", _TS))
+
+
+def _restart_tables():
+    """(MODEL, MODEL_SCALES) of l6_restart.py read by ast: the model each restart arm runs, and the tiers of each model (less `micro`, the laptop smoke tier)."""
+    tree = ast.parse(open(os.path.join(HERE, "l6_restart.py"), encoding="utf-8").read())
+    found = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") in ("MODEL", "MODEL_SCALES"):
+            found[node.targets[0].id] = ast.literal_eval(node.value)
+    if len(found) != 2:
+        raise SystemExit("l6_restart.MODEL or l6_restart.MODEL_SCALES not found: the stage generator cannot tell which sizes each restart arm runs at")
+    return found["MODEL"], {m: {s for s in sc if s != "micro"} for m, sc in found["MODEL_SCALES"].items()}
+
+
+def _final_stages(last_id):
+    """The stages of FINAL_LANES, their ids following `last_id`: one restart stage per model (its arms, its sizes, the small one first) and the e4
+    stage. The e4 lane has one arm and one size (scale `e2`: the probe's own corpus, `ROWS` in deployment_decomp_probe.py), so its stage needs no arm list."""
+    model_of, tiers = _restart_tables()
+    out, sid = [], last_id
+    for model, what, guards in RESTART_MODELS:
+        arms = [b for b in runner.LANES["restart"][1] if model_of.get(b) == model]
+        scales = sorted(tiers[model], key=lambda s: (_SC.SIZE_CLASS.get(("restart", s)) != "small", s))
+        sid = _next_id(sid)
+        out.append((sid, f"server restart, {what}, at both sizes", "restart", ["restart"], scales, list(guards), {}, [], arms))
+    sid = _next_id(sid)
+    out.append((sid, "E4 deployment decomposition: embedded, in-process server, separate container", "e4", ["decomp"], ["e2"], [], {}, []))
+    return out
+
+
+FINAL_STAGES = _final_stages(STAGES[-1][0])
+ALL_STAGES = STAGES + FINAL_STAGES   # every stage the generator can schedule: the 26.11.1 table, then the final pass's
+
 
 # --------------------------------------------------------------------------------------------------------- coverage
 def _page_lanes():
@@ -313,13 +366,44 @@ def stage_backends(spec):
     return sorted(bes, key=engine_rank)   # stable: arms of one engine keep the lane's order
 
 
+# Page tables that are a directory of artifacts and not rows of the freeze, so export_web._TABLE_LANE has no entry for them: lane -> (workload, the
+# name in export_web.py that reads the directory). The e4 decomposition is one: `export_web` stops without `e4decomp_<pin>/`, and nothing in the rows
+# says a stage owes it (BUGS F84: the page needed it, the chain had no stage, and September's artifact was made by hand).
+DIRECTORY_TABLES = {"e4": ("decomp", "E4_DIR")}
+
+
+def directory_table_problems():
+    """A DIRECTORY_TABLES entry whose reader export_web.py no longer defines: the table is gone or renamed, and the stage it owes is a stale rule."""
+    src = open(os.path.join(HERE, "export_web.py"), encoding="utf-8").read()
+    return [f"{lane}/{wl}: DIRECTORY_TABLES names {name} as the page's reader of this lane's artifacts, and export_web.py defines no {name}"
+            for lane, (wl, name) in DIRECTORY_TABLES.items() if not re.search(rf"^{name} = ", src, re.M)]
+
+
+def restart_model_problems(stages):
+    """What is wrong with the restart stages of `stages`: a registered arm that l6_restart.MODEL has no model for, and an arm staged at a size of another
+    model than its own (the lane refuses it at run time: it would measure the wrong data under its name, and the cell would fail after its container started)."""
+    model_of, tiers = _restart_tables()
+    out = [f"restart/{b}: registered in runner.LANES, and l6_restart.MODEL has no model for it" for b in runner.LANES["restart"][1] if b not in model_of]
+    for spec in stages:
+        if spec[2] != "restart":
+            continue
+        for be in stage_backends(spec):
+            for sc in spec[4]:
+                if be in model_of and sc not in tiers[model_of[be]]:
+                    out.append(f"restart/{sc}/{be}: {be} runs the {model_of[be]} model, whose sizes are {', '.join(sorted(tiers[model_of[be]]))}; "
+                               f"{sc} is another model's size")
+    return out
+
+
 def check_coverage(stages=None):
     """Every registered arm of every page lane this table stages in exactly one stage per workload, and no stage that
     contradicts runner.ARM_RUNS (a workload, size, repetitions or durability class the arm's declaration does not name).
     Returns (problems, excluded lanes with reasons, per-lane arm counts)."""
-    stages = STAGES if stages is None else stages
+    stages = ALL_STAGES if stages is None else stages
     page = _page_lanes()
-    ours = {s[2] for s in STATIC_STAGES}
+    for lane, (wl, _reader) in DIRECTORY_TABLES.items():   # a page table that is a directory of artifacts has no _TABLE_LANE entry, and still needs its stage
+        page[lane] = None if page.get(lane, {wl}) is None else page.get(lane, set()) | {wl}
+    ours = {s[2] for s in STATIC_STAGES} | set(FINAL_LANES)   # the restart lane and the e4 lane are this generator's: no silent exclusion
     seen = collections.Counter()
     stage_wls = collections.defaultdict(set)
     problems = []
@@ -339,6 +423,7 @@ def check_coverage(stages=None):
                     problems.append(f"{lane}/{wl}/{be}: staged without REPS={cfg['reps']}, the repetitions runner.ARM_RUNS declares")
                 if cfg and cfg.get("durability") and (spec[9] if len(spec) > 9 else None) != cfg["durability"]:
                     problems.append(f"{lane}/{wl}/{be}: staged for both durability classes, runner.ARM_RUNS declares {cfg['durability']} only")
+    problems += directory_table_problems() + restart_model_problems(stages)
     excluded, counts = [], {}
     for lane, spec_l in runner.LANES.items():
         backends = spec_l[1]
@@ -483,6 +568,7 @@ DROP_NEO4J_MEMGRAPH_DENSE = "neo4j-memgraph-dense"
 DROP_QUANTIZED_DENSE = "quantized-dense"
 DROP_ORDER = (DROP_SECOND_LIST, DROP_NEO4J_MEMGRAPH_DENSE, DROP_QUANTIZED_DENSE)   # the paper-2611 profile's drops
 DROP_NOCOMPACT_SPARSE = "nocompact-sparse"   # the final-small profile's own (humemai/mmdbbench#136)
+DROP_FINAL_LANES = "final-pass-lanes"   # the lanes only `--profile final-small` stages (FINAL_LANES, #137); no profile lists it in `drops`: drop_reason derives it
 DROP_ORDER_ALL = DROP_ORDER + (DROP_NOCOMPACT_SPARSE,)   # every reason a profile may name, in the order drop_reason tries them
 # the lane whose arms a drop names (the second list names whole lanes, so it has no entry)
 DROP_LANE = {DROP_NEO4J_MEMGRAPH_DENSE: "l3d", DROP_QUANTIZED_DENSE: "l3d", DROP_NOCOMPACT_SPARSE: "l3s"}
@@ -493,6 +579,7 @@ DROP_WHY = {
                           "paper's scope (ArcadeDB's own INT8 and BINARY are out by the owner's rule; jvector PQ, BQ and NVQ are studied after the paper)",
     DROP_NOCOMPACT_SPARSE: "the sparse nocompact arm is the settle-step ablation that export_web.OFF_PAGE_ARMS keeps off the page: no table prints it, so the final "
                            "pass does not spend cells on it",
+    DROP_FINAL_LANES: "the server restart and the E4 decomposition are staged by the final pass only (--profile final-small): the 26.11.1 pass never measured them",
 }
 PROFILES = {
     "paper-2611": {"drops": DROP_ORDER, "target_reps": TARGET_REPS,
@@ -501,7 +588,8 @@ PROFILES = {
     # THE FINAL PROFILE (humemai/mmdbbench#136, for the rerun of #114): the lanes of `full` with the second list (sparse, time series, lifecycle), less
     # the arms no page table prints, at the small sizes only. It carries its sizes and its second list: --sizes all with it is refused (resolve_sizes).
     "final-small": {"drops": (DROP_QUANTIZED_DENSE, DROP_NOCOMPACT_SPARSE), "target_reps": TARGET_REPS, "sizes": "small", "second_list": True,
-                    "doc": "the small and extra sizes only (size_classes.SIZE_CLASS), the second list included, no int8 or PQ dense arm and no nocompact sparse arm"},
+                    "final_lanes": True,
+                    "doc": "the small and extra sizes only (size_classes.SIZE_CLASS), the second list included, no int8 or PQ dense arm and no nocompact sparse arm, and the server restart and the E4 decomposition, which only this pass stages"},
 }
 DEFAULT_PROFILE = "paper-2611"
 # the arm families QUANTIZATION.md names: `<engine>_dense_int8` (scalar or int8) and `<engine>_dense_pq` (product quantization, only under
@@ -522,7 +610,10 @@ def is_nocompact_sparse(backend):
 
 
 def drop_reason(profile, lane, backend):
-    """Why `profile` drops this arm in this lane (one of DROP_ORDER_ALL), or None. Needs engine_of, defined below; called at run time."""
+    """Why `profile` drops this arm in this lane (one of DROP_ORDER_ALL, or DROP_FINAL_LANES for a lane of the final pass under a profile that does not carry it), or
+    None. Needs engine_of, defined below; called at run time."""
+    if lane in FINAL_LANES and not PROFILES[profile].get("final_lanes"):
+        return DROP_FINAL_LANES
     drops = PROFILES[profile]["drops"]
     for why in DROP_ORDER_ALL:
         if why not in drops:
@@ -539,8 +630,9 @@ def drop_reason(profile, lane, backend):
 
 
 def profile_lanes(profile):
-    """The lanes a profile stages: every lane, less the second list when the profile drops it."""
-    return tuple(l for l in CORE_LANES + SECOND_LANES if drop_reason(profile, l, "") is None)
+    """The lanes a profile stages: every lane, less the second list when the profile drops it, and the final pass's own lanes when the profile carries them."""
+    return (tuple(l for l in CORE_LANES + SECOND_LANES if drop_reason(profile, l, "") is None)
+            + (FINAL_LANES if PROFILES[profile].get("final_lanes") else ()))
 
 
 def profile_skip(profile):
@@ -667,8 +759,8 @@ def resolve_sizes(profile, sizes):
 
 def size_table_problems():
     """Every (lane, scale) the stage table stages has a class in size_classes.SIZE_CLASS (a new size must be classed before --sizes can place it)."""
-    return [f"{lane}/{sc}: staged in STAGES but has no class in size_classes.SIZE_CLASS (small, large or extra)"
-            for lane, sc in sorted({(s[2], x) for s in STAGES for x in s[4]}) if scale_class(lane, sc) is None]
+    return [f"{lane}/{sc}: staged in STAGES (or FINAL_STAGES) but has no class in size_classes.SIZE_CLASS (small, large or extra)"
+            for lane, sc in sorted({(s[2], x) for s in ALL_STAGES for x in s[4]}) if scale_class(lane, sc) is None]
 
 
 def size_problems(stages, sizes="all"):
@@ -686,11 +778,11 @@ def size_problems(stages, sizes="all"):
     return out
 
 
-def size_report(sizes):
+def size_report(sizes, lanes=()):
     """Lines that list what the size filter keeps and what it leaves out: the (lane, scale) pairs of the stage table."""
     if sizes in (None, "all"):
         return []
-    pairs = sorted({(s[2], x) for s in STAGES for x in s[4]})
+    pairs = sorted({(s[2], x) for s in ALL_STAGES for x in s[4] if s[2] not in FINAL_LANES or s[2] in lanes})   # the final pass's lanes only when the call stages them
     return [f"  kept    {', '.join(f'{l}/{x}' for l, x in pairs if scale_kept(l, x, sizes))}",
             f"  dropped {', '.join(f'{l}/{x} ({scale_class(l, x)})' for l, x in pairs if not scale_kept(l, x, sizes))}"]
 
@@ -817,21 +909,25 @@ def parse_engines(text, mode):
 
 def parse_lanes(text, second_list, profile=None):
     """The lanes asked for. With a `profile`, one that drops the second list refuses it (and --second-list) by name, so a dropped lane is
-    never asked for by accident; without one (or with `full`) the second list needs --second-list."""
+    never asked for by accident; without one (or with `full`) the second list needs --second-list. A profile that carries the final pass's lanes
+    (final-small) has them by default, and no other profile takes them by name either."""
     if profile and second_list and drop_reason(profile, SECOND_LANES[0], "") == DROP_SECOND_LIST:
         raise SystemExit(f"REFUSING: --second-list: the {profile} profile drops the second list, {DROP_WHY[DROP_SECOND_LIST]}; "
                          f"--profile full has it")
+    final = bool(profile) and bool(PROFILES[profile].get("final_lanes"))
     if not text:
-        return list(CORE_LANES + (SECOND_LANES if second_list else ()))
+        return list(CORE_LANES + (SECOND_LANES if second_list else ()) + (FINAL_LANES if final else ()))
     out = []
     for x in (t.strip() for t in text.split(",") if t.strip()):
         lane = LANE_ALIASES.get(x, x)
-        if lane not in CORE_LANES + SECOND_LANES:
+        if lane not in CORE_LANES + SECOND_LANES + FINAL_LANES:
             raise SystemExit(f"REFUSING: lane {x} is not in the subset's lists (core: graph, cross-model, documents, dense; "
-                             f"second list: sparse, timeseries, lifecycle)")
+                             f"second list: sparse, timeseries, lifecycle; final pass: restart, e4)")
         if profile and drop_reason(profile, lane, "") == DROP_SECOND_LIST:
             raise SystemExit(f"REFUSING: lane {x}: the {profile} profile drops the second list, {DROP_WHY[DROP_SECOND_LIST]}; "
                              f"--profile full --second-list has it")
+        if lane in FINAL_LANES and not final:
+            raise SystemExit(f"REFUSING: lane {x}: {DROP_WHY[DROP_FINAL_LANES]}; --profile final-small has it")
         if lane in SECOND_LANES and not second_list:
             raise SystemExit(f"REFUSING: lane {x} is on the second list; add --second-list")
         out.append(lane)
@@ -857,7 +953,7 @@ def subset_specs(engines, lanes, order="biggest-last", skip=(), tiers=False, siz
     every piece of Tier 2, each tier in the order the other options give (nothing is dropped or doubled: stage_problems proves it). With `sizes` ("small"),
     only the scales of the kept size classes stay (scale_kept) and a stage left with no scale is dropped; "all" leaves every stage as it was."""
     base = []
-    for spec in STAGES:
+    for spec in ALL_STAGES:
         s = _spec10(spec)
         if s[2] not in lanes:
             continue
@@ -875,7 +971,7 @@ def subset_specs(engines, lanes, order="biggest-last", skip=(), tiers=False, siz
         return sorted(base, key=stage_tier) if tiers else base   # stable: the table order inside a tier
     pieces = []   # (block, tier, index, spec)
     for i, s in enumerate(base):
-        block = 0 if s[2] in CORE_LANES else 1 + SECOND_ORDER.index(s[2])
+        block = 0 if s[2] in CORE_LANES else 1 + (SECOND_ORDER + FINAL_LANES).index(s[2])   # the final pass's lanes run after the second list
         small = [x for x in s[4] if x not in LARGE_SCALES]
         large = [x for x in s[4] if x in LARGE_SCALES]
         parts = [(0, small, " (small tier)" if large and small else ""), (1, large, " (large tier)" if small else "")]
@@ -920,7 +1016,7 @@ def stage_problems(stages, engines, lanes, skip=(), sizes="all"):
             elif engine_of(b) not in engines or b in skip:
                 out.append(f"{st[0]}: runs {b} ({engine_of(b)}), which is not among the engines asked for")
     want = collections.Counter()
-    for spec in STAGES:
+    for spec in ALL_STAGES:
         if spec[2] not in lanes:
             continue
         s = _spec10(spec)
@@ -2226,7 +2322,7 @@ def main(argv=None) -> int:
     ap.add_argument("--id-prefix", default=DEFAULT_PREFIX, help=f"stage id prefix (default {DEFAULT_PREFIX})")
     ap.add_argument("--engines", help=f"comma list of subset engines ({', '.join(ENGINES)}); default every engine of the mode")
     ap.add_argument("--lanes", help="comma list: graph, cross-model, documents, dense (core); sparse, timeseries, lifecycle "
-                                    "(second list, needs --second-list); runner lane ids work too")
+                                    "(second list, needs --second-list); restart, e4 (the final pass, --profile final-small); runner lane ids work too")
     ap.add_argument("--profile", choices=tuple(PROFILES), default=DEFAULT_PROFILE,
                     help=f"which cells the subset keeps (default {DEFAULT_PROFILE}): " + "; ".join(f"{k}: {v['doc']}" for k, v in PROFILES.items())
                          + ". Every dropped cell is listed by --check, with its reason")
@@ -2318,7 +2414,7 @@ def main(argv=None) -> int:
         print(ln)
     if sizes != "all":
         print(f"sizes {sizes}: the {' and '.join(SIZE_KEEPS[sizes])} classes of size_classes.SIZE_CLASS; the large sizes are left out")
-        for ln in size_report(sizes):
+        for ln in size_report(sizes, lanes):
             print(ln)
     for st in stages:
         bes = stage_backends(st)

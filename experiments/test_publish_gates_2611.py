@@ -22,18 +22,13 @@ import pytest
 
 from test_publish_2611_e2e import HERE, _env, _stage
 
-_RAW_KEY_REASON = (
-    "page_check raw-key gate (origin b01b09a96d) flags 5 raw backend keys in the prose generated from the frozen fixture: mongodb in the l3s "
-    "conditions, arcadedb in the e4 conditions. The origin landed only e2, l1tpc and l2, whose prose has none. Strict: fix the prose or the "
-    "fixture and this marker must go.")
-
 GATES = [
     ("equivalence_check", []),
     ("resource_check", []),
     ("override_registry", []),
     ("degenerate_check", ["{results}/runs_paper.csv"]),
     ("fairness_check", []),
-    pytest.param("page_check", [], marks=pytest.mark.xfail(strict=True, reason=_RAW_KEY_REASON)),
+    ("page_check", []),
     ("version_consistency_check", []),
     ("version_pin_check", []),
     ("provenance_check", []),
@@ -77,7 +72,6 @@ def test_the_gate_passes_on_the_fixture_payload(payload_dir, name, args):
     assert proc.returncode == 0, _tail(proc)
 
 
-@pytest.mark.xfail(strict=True, reason=_RAW_KEY_REASON)
 def test_page_check_accepts_the_pq_arms_without_the_pq_switch(payload_dir):
     # runner.LANES lists the PQ arms only under BENCH_DENSE_PQ=1; the payload carries PQ rows regardless
     payload = json.loads((payload_dir["results"] / "web_benchmarks.json").read_text())

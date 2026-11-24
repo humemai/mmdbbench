@@ -1,0 +1,30 @@
+ok    three compare claims of stage s2 ran to the end, exit 0 (compare1 0, compare2 0, compare3 0)
+ok    compare1: 5 rows, one per unit where the lane has a role
+ok    compare2: 4 rows, one per unit where the lane has a role
+ok    compare3: 5 rows, one per unit where the lane has a role
+ok    L0.a.cpu.start0: target row has a figure (5.183e+07 ops/s), the gate, throttle 0 and the pinned cores
+ok    L0.a.cpu.start0: the lanes started within 0.00 s of each other and the neighbours ran until the target ended
+ok    L0.p.cpu.compute.r0: target row has a figure (5.629e+07 ops/s), the gate, throttle 0 and the pinned cores
+ok    L0.p.cpu.compute.r0: the lanes started within 0.01 s of each other and the neighbours ran until the target ended
+ok    L0.p.cpu.compute.r0: roles {'compare1': 'busy', 'compare2': 'target', 'compare3': 'light'}
+ok    L0.p.cpu.idle.r0: target row has a figure (5.587e+07 ops/s), the gate, throttle 0 and the pinned cores
+ok    L0.p.cpu.idle.r0: the lanes started within 0.01 s of each other and the neighbours ran until the target ended
+ok    L0.p.cpu.idle.r0: roles {'compare1': 'light', 'compare2': 'target', 'compare3': 'light'}
+ok    L0.p.cpu.idle.r1: target row has a figure (5.296e+07 ops/s), the gate, throttle 0 and the pinned cores
+ok    L0.p.cpu.idle.r1: the lanes started within 0.00 s of each other and the neighbours ran until the target ended
+ok    L0.p.cpu.idle.r1: roles {'compare1': 'target', 'compare2': 'light', 'compare3': 'light'}
+ok    L0.p.cpu.compute.r1: target row has a figure (5.238e+07 ops/s), the gate, throttle 0 and the pinned cores
+ok    L0.p.cpu.compute.r1: the lanes started within 0.01 s of each other and the neighbours ran until the target ended
+ok    L0.p.cpu.compute.r1: roles {'compare1': 'busy', 'compare2': 'light', 'compare3': 'target'}
+ok    L0.a.cpu.mid0: target row has a figure (5.213e+07 ops/s), the gate, throttle 0 and the pinned cores
+ok    L0.a.cpu.mid0: the lanes started within 0.00 s of each other and the neighbours ran until the target ended
+ok    a second start of the claim writes no new row (resume)
+ok    a claim started on another lane than its order says is refused (exit 2)
+ok    a claim started with another cell class than its order says is refused (exit 2)
+ok    an OUT that is not in the order is refused (exit 2)
+ok    stage s4 with compare3 missing: the rendezvous fails and both claims exit 4 (4, 4)
+ok    stage s4 queued again with -r2 on every OUT runs to the end (exit 0, rows written)
+ok    solo claim: exit 0, one row, figure 5.087e+07
+ok    analyze.py reads the runner's rows (smoke leg, no verdict): exit 0 
+
+RUNNER SMOKE OK: 28 checks

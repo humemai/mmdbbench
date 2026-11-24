@@ -1,0 +1,32 @@
+Qualification plan for mini: seed 1, plan 47b2e8c43ffd, layout d73083cf85b9
+Probes: membw. Rounds: 10, read at rounds 3, 5, 10. Runs per round: 15.
+Thresholds: band 0.03, margin 0.03, interval inside 0.06, accept at 10 rounds, big ratios outside [0.9, 1.1].
+Cases (lanes busy at the same time):
+  alone-solo: busy solo; measured solo; admission today: admitted
+  alone-compare1: busy compare1; measured compare1; admission today: admitted
+  alone-compare2: busy compare2; measured compare2; admission today: admitted
+  alone-compare3: busy compare3; measured compare3; admission today: admitted
+  aa-solo: busy solo; measured solo; admission today: admitted
+  aa-compare1: busy compare1; measured compare1; admission today: admitted
+  aa-compare2: busy compare2; measured compare2; admission today: admitted
+  aa-compare3: busy compare3; measured compare3; admission today: admitted
+  pair-compare1-compare2: busy compare1, compare2; measured compare1, compare2; admission today: admitted
+  pair-compare1-compare3: busy compare1, compare3; measured compare1, compare3; admission today: admitted
+  pair-compare2-compare3: busy compare2, compare3; measured compare2, compare3; admission today: admitted
+  all-compare: busy compare1, compare2, compare3; measured compare1, compare2, compare3; admission today: admitted
+  all-compare+bulk-cpu: busy compare1, compare2, compare3, bulk; measured compare1, compare2, compare3; admission today: admitted
+  all-compare+bulk-bw_heavy: busy compare1, compare2, compare3, bulk; measured compare1, compare2, compare3; admission today: refused: lock-beside-compare:bw_heavy
+  all-compare+bulk-io_heavy: busy compare1, compare2, compare3, bulk; measured compare1, compare2, compare3; admission today: refused: lock-beside-compare:io_heavy
+  not run: solo with compare1: the exclusion matrix keeps solo and compare1 apart, so no pair of them is run
+  not run: solo with compare2: the exclusion matrix keeps solo and compare2 apart, so no pair of them is run
+  not run: solo with compare3: the exclusion matrix keeps solo and compare3 apart, so no pair of them is run
+  not run: solo with bulk: the exclusion matrix keeps solo and bulk apart, so no pair of them is run
+Preconditions:
+  idle-host: Before the first run no job runs in any lane, no benchmark study is queued to start in the window, and the Tower's status shows the host with no running job.
+  plan-only: Only the runs of this plan run while the window is open. A job outside the plan that starts on the host makes the rounds it touches invalid.
+  thermal: Before every run the package is at or below 70 C; the gate waits up to 900 s and then goes on and records gate_ok false.
+  turbo: Turbo is off (no_turbo 1) for the whole window, as the profile says.
+  governor: The CPU governor is powersave on the cores of every lane for the whole window.
+  memory: At least 8 GB of memory is available before every run, and the lanes' memory caps are not exceeded.
+  kill-switch: The kill switch is known: the file <state>/lanes/STOP stops every lane, and STOP.<lane> stops one. Every run has a dead-man deadline: the hours of the rung being run plus 30 minutes.
+Hours (ASSUMED): 3 rounds 1.2 h, 5 rounds 2.1 h, 10 rounds 4.2 h

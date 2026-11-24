@@ -1,0 +1,83 @@
+{
+ "claimable": true,
+ "claims": [
+  {
+   "cell_class": "bw_heavy",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-h@h-c1",
+   "lane": "compare1",
+   "note": "pilot of #164, leg H, stage h, lane compare1; order.json in the study folder",
+   "out": "h-c1",
+   "stage": "h",
+   "study": "pilot164-h"
+  },
+  {
+   "cell_class": "compute",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-h@h-c2",
+   "lane": "compare2",
+   "note": "pilot of #164, leg H, stage h, lane compare2; order.json in the study folder",
+   "out": "h-c2",
+   "stage": "h",
+   "study": "pilot164-h"
+  },
+  {
+   "cell_class": "compute",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-h@h-c3",
+   "lane": "compare3",
+   "note": "pilot of #164, leg H, stage h, lane compare3; order.json in the study folder",
+   "out": "h-c3",
+   "stage": "h",
+   "study": "pilot164-h"
+  }
+ ],
+ "corr_max": 0.3,
+ "data": true,
+ "format": 1,
+ "lanes_proven": {
+  "bw_heavy": 1,
+  "compute": 3,
+  "io_heavy": 1,
+  "none": 1
+ },
+ "leg": "H",
+ "levels": [],
+ "mid_n": null,
+ "needs": null,
+ "picks_json_sha256": "82ac20cd16dff84f1218f95df24debf91a4223004eb35803b16671afc3f1a4bc",
+ "plan_py_sha256": "e3c33dac5c9b059e84378b3081e758ba2834e2e0701bccb18d027fb8dbb2c1f1",
+ "ref_n": null,
+ "reps": null,
+ "salt": 0,
+ "seed": 20261124,
+ "targets": [],
+ "title": "heat run: compare1 membw, compare2 cpu, compare3 cpu at once for 30 minutes (decides whether three busy lanes may be used)",
+ "topup_of": null,
+ "units": [
+  {
+   "box_s": 1800,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "H.h.all3",
+   "idx": null,
+   "kind": "heat",
+   "level": null,
+   "light_lanes": [],
+   "position": null,
+   "rep": 0,
+   "round": null,
+   "set": null,
+   "stage": "h",
+   "streams": {
+    "compare1": "probe:membw",
+    "compare2": "probe:cpu",
+    "compare3": "probe:cpu"
+   },
+   "target": null
+  }
+ ]
+}

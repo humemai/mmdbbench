@@ -1,0 +1,156 @@
+# Pilot of permuted neighbours on the mini's compare lanes: pre-registration (DRAFT of 2026-11-24, evening, for mmdbbench#164)
+
+Status: DRAFT. Nothing has run on the mini, nothing is queued, nothing is posted. It becomes the pre-registration when I post it on #164 with the lock block of section 12 filled in by `build_prereg.py` (the hashes of the files). From then on every value below changes only by my word, and a change after the first run of a leg makes it a new pilot (the rule of the lane qualification plans of 2026-11-18 to 2026-11-22). This file lives in the notes of the benchmark repo, which has no remote. It replaces the draft of the morning of the same day.
+
+Every number in this file is written by `build_prereg.py` from the output of the scripts named in section 12 (`select_cells.py`, `plan.py`, `cost_legs.py`, `smoke.py`, `smoke_runner.py`), or is a design constant of #164 (5 runs per target and level, 3 solo runs, 3 percent) or of the lane documentation, and the cited ones are checked against the file they come from.
+
+## 0. What changed since the draft of the morning
+
+- My decisions of 2026-11-24 on #164 (comment of 2026-11-23, read again): n=5 means 5 runs per target and neighbour level; the real cells cover the disk I/O and the cache and latency classes; for compute and memory bandwidth the calibration probes `cpu` and `membw` are the targets and the report says so; the non-compute classes get their qualification through a pre-registered plan written first (`QUALIFICATION-PLAN.md`), never by relabelling a job's class.
+- When: not January. The mini is idle now and the 26.12.1 small pass starts after the engine release (about 2026-12-02), so the legs that the record admits today run this week, and the 26.12.1 pass can use three lanes if they pass.
+- Heat: the mini throttled with three busy compare lanes (humem-ops#480: 91 C, 33 to 48 s of throttle per job on 2026-11-22, and two busy lanes also throttled later that night). So a block has at most two busy lanes, the third lane carries a light neighbour, a thermal gate and a throttle reading belong to every run, and a separate heat run (leg H) measures three busy lanes for 30 minutes before any pass uses three.
+- The design follows the record: the order only puts a class on a lane that the mini's record admits (section 8). That is why the legs below are not the full square of the issue; the full square needs the qualification plan first.
+
+## 1. Question
+
+Can the absolute figure of a cell be recovered from runs on compare lanes beside permuted neighbours, within 3 percent of its solo figure, for each resource class (compute, memory bandwidth, disk I/O, cache and latency)? The lane documentation (humem-ops `docs/lanes.md`, "Absolute figures") says a compute-bound cell beside compute neighbours stays close to solo, and that memory-bound and disk-bound cells beside other jobs are biased. Averaging over random neighbours does not remove that bias, so the pilot estimates the neighbour effect and reports the idle-neighbour figure with its interval.
+
+This is a pilot of the method on the small size, where a run takes minutes and a mistake is cheap. It is not a benchmark row, and no figure from it goes on the page or into a paper.
+
+## 2. Targets
+
+Two kinds, as decided on #164.
+
+- Stand-ins for the classes that have no eligible real cell: the calibration probes `cpu` (class compute) and `membw` (class memory bandwidth) of the lane kit, time boxed (60 s each), one figure per run (operations per second, megabytes per second). The report calls their class verdicts PROBE-PASS or PROBE-FAIL and never PASS.
+- Real cells for disk I/O and for cache and latency: the four cells of `picks.json`, chosen by `select_cells.py` before any run by the rule written in its docstring (one ArcadeDB arm of a small-size cell of the 26.11.1 landing; a median wall time of at least 60 s; at most 1.5 cores used on average; a memory cap of at most the 12 GiB of a compare lane; jvm before native, embedded before server, shortest first). They are two cells of one family (`l2` interactive graph OLTP at `sf1`) in two durability classes, so a verdict is about that family, not about the class. They are legs L5 and L6 and are not claimable yet (section 9).
+
+The rule was fixed after I had seen the row totals of cpu time, I/O and peak memory per cell, and before any wall time, class or pick was computed. The thresholds were not changed after the pick was printed.
+
+@@FUNNEL@@
+
+@@PICK@@
+
+For compute and memory bandwidth no real cell passes the rule at the memory cap of a compare lane (the near-miss list is in section 14): the compute candidates that pass the time and thread screens are the `l1tpc` OLTP cells, whose landed cap is 16 GiB although their measured peak is far below 12 GiB; the bandwidth candidates are scans that use many cores or have a 32 GiB cap. That is why the probes stand in, and why the report says so for those two classes. I do not relax the rule.
+
+## 3. Design
+
+All of it is fixed before the first run of a leg; the seed of the orders is in the lock block and the order files are hashed there.
+
+- **Block.** A permuted block has the target on one compare lane, one busy neighbour stream of the leg's level on a second lane (or none), and a light neighbour on the third lane. The light neighbour is a process of the study that is busy about 1 percent of the time on its lane's cores, so that three claims are in the lanes in every block, as they will be in a three-lane pass, without more heat. In the `idle` level both neighbours are light. At most two lanes are busy at once.
+- **Levels.** `idle`; `compute` (the `cpu` probe, looped over the whole target run); `membw` (the `membw` probe); `io` (the `io` probe). A stream covers the whole target run: it starts with the target and stops when the target writes its end marker. A target run in which a neighbour covered less than 95 percent of it is invalid.
+- **Runs per level.** 5 per target and level (reading B of the draft, my decision of 2026-11-24).
+- **Order.** Seeded, balanced, written down (`plan.py`, docstring): the level order of a round is a cyclic Latin-square row of a seeded permutation (reversed in later cycles), the lane position of the target is equal within one among the lanes that the record admits for that level, the neighbour lane alternates, targets are interleaved, and a seeded search takes the first order whose correlation between the run order and every level and position dummy is at most 0.30. With 5 runs per level the three lane positions cannot be exactly equal (2, 2 and 1); the one run in excess goes to the position with the smallest total.
+- **References.** For every target: a solo set on the `solo` lane at full width (cores 0 to 11) at the start and at the end, 3 runs each, and 1 run in the middle; and the same target alone on two cpus (a compare lane with nothing beside it, every admitted lane once per set) with the same counts. The two widths keep the lane-width effect (full width against two cpus alone) apart from the neighbour effect (two cpus alone against two cpus beside neighbours). The solo figure of the pass rule is the median of the 6 start and end runs at full width.
+- **Stages and claims.** The solo lane and the compare lanes cannot run together, so a leg is five stages, each one claim per lane: s1 solo start set; s2 compare lanes (the alone start set, the first three rounds, the alone middle run); s3 solo middle run; s4 compare lanes (the last two rounds and the alone end set); s5 solo end set. Each compare stage is one claim per lane that runs its units in lock step with the other two (section 8).
+- **Thermal gate and throttle evidence.** Before every unit the leader waits until the package is at most 70 C (the profile's gate; poll 10 s, cap 900 s) and writes the result into the row (`gate_ok`, `gate_wait_s`, `pkg_c_start`). Every row carries the package temperature at the start and its maximum, and the throttle time of the lane's cores read from the `thermal_throttle` counters before and after the run, as the Worker's sampler reads them (humem-ops `sampler.py`). A run is invalid when its throttle time is above 1 percent of its wall time, when the throttle could not be read, or when the gate was not held. Invalid runs are replaced in one top-up stage, never dropped (section 7).
+- **Legs.** What can be claimed now is in the table; the hours come from `cost_legs.py` (section 12 has the output).
+
+@@LEGS@@
+
+- **Why more than one probe leg.** The record admits a class on a lane only as far as its `lanes_proven` goes: `compute` three lanes, every other class compare1 only. So a memory-bandwidth or disk stream, and a target of such a class, sit on compare1, and the compute stream and the light neighbour sit on the other lanes. L3 and L4 put one such stream beside the `cpu` target (the target on compare2 or compare3), L2 puts the `membw` target on compare1 beside idle and compute neighbours. The claim of compare1 carries the class of the stream it hosts in that leg, so no claim is mislabelled.
+
+## 4. Analysis
+
+`analyze.py` reads the order file and the rows files and nothing else; every number of the report is computed there. Per target, a linear model of the log of the figure of the valid permuted runs: one intercept, one effect for each non-idle level, one effect for each lane position (effect coded, so they sum to zero), and a linear drift term in the planned run order of that target (the change over the whole pilot). The idle-neighbour figure is the exponential of the intercept: the idle level, averaged over the lane positions, at the middle of the pilot. The interval is the 95 percent interval of the model with a robust (HC3) standard error and a t quantile, and of a residual bootstrap (leverage corrected, 10000 resamples, seed 1); the wider of the two is used, coefficient by coefficient. The neighbour effects are the exponentials of the level coefficients with their intervals: the interference matrix (target by level). A level or position with no valid run, or a singular design, makes the target UNDECIDED.
+
+- **Cell PASS** when the idle-neighbour figure is within 3 percent of the solo figure and the half-width of its interval is within 3 percent of the figure.
+- **Cell FAIL** when the whole interval lies outside plus or minus 3 percent of the solo figure.
+- **Cell UNDECIDED** otherwise, and always when: a set of solo runs spreads by more than 3 percent from smallest to largest, or the start and the end median of the solo runs differ by more than 3 percent, or a set has fewer than 2 valid runs; more than 10 percent of the planned permuted runs are invalid or missing (one of 10, two of 20); the realised design has a level or position confounded with the run order (correlation above 0.60; the planned order is held to 0.30); or the model cannot be identified.
+- **Class.** PASS needs at least 2 real cells, all PASS. A class whose only targets are probes gets PROBE-PASS or PROBE-FAIL. Any FAIL is FAIL. A class with no target has no verdict.
+- **Interim read.** After stage s2 (three of five rounds) `analyze.py --interim` can say EARLY-FAIL: at least 3 idle runs and their median differs from the solo median by more than 10 percent. It stops nothing by itself; I read it before queueing stage s3.
+- **Reported besides the verdict:** the figure against the two-cpu solo figure and the lane-width effect; the middle anchors against the reference (drift of the host); the drift term; the lane position effects; the invalid runs and why; the design as realised.
+
+The comparison for the pass rule is against the full-width solo figure, because that is the figure the page holds. A cell that fails against the full-width figure and passes against the two-cpu figure fails because of the lane width, not because of the neighbours, and the report shows both.
+
+## 5. What each outcome means
+
+| Leg | PASS | FAIL or UNDECIDED |
+|---|---|---|
+| L1 compute (probe `cpu`) | PROBE-PASS: a compute-bound figure taken on a compare lane beside compute neighbours and one light neighbour is within 3 percent of its solo figure, with the interval of the method. The calibration of 2026-11-19 stands, for probe-shaped cells | the calibration is not reproduced by this method: no absolute figure of a compute cell from a compare lane until it is understood |
+| L2 bandwidth stand-in (probe `membw`, compare1) | PROBE-PASS: a bandwidth-bound figure on compare1 beside idle and compute neighbours stays within 3 percent | bandwidth-bound figures stay solo |
+| L3 and L4 (probe `cpu` beside one `membw` or `io` stream) | no verdict of their own: the neighbour effects are the result (the interference matrix of a compute target); they tell whether a bandwidth or disk stream on compare1 moves a compute figure on the other lanes | the same |
+| H heat | HEAT-PASS: no lane throttled more than 1 percent of 1800 s and the package at most 88 C (the highest reading of a run without throttle in humem-ops#480). The 26.12.1 pass may then use three busy compare lanes for compute work of that heat | HEAT-FAIL: it keeps at most two busy lanes plus a light one |
+| L5 and L6 (real cells, compare1 only) | the cell class PASS or not for that cell family at compare1 beside compute neighbours; whether it carries to compare2 and compare3 is the qualification plan's question | solo |
+
+A PASS carries to the large size only for cells that fit a compare lane. A compare lane has 2 cpus and 12 GiB, so cells with larger caps cannot run on it at all. If no leg passes, nothing changes and the large pass is planned on solo lanes with caps and fewer cells, as #164 says.
+
+## 6. What it may not claim
+
+- Nothing about the new host (Ryzen 9 9955HX, February 2027). Its cores, cache layout and memory differ, so no figure, interval or verdict of this pilot carries over. A short version (one target per class) is repeated there as part of its qualification.
+- Nothing about an engine. The probes have no engine, and the real cells are one engine in two arms and one cell family.
+- Nothing about a class that has no target, about cells that depend on thread count, or about cells with a cap above a compare lane.
+- A PROBE-PASS says that this method recovered the absolute figure of that probe within 3 percent. It does not say that a real cell of the class would pass.
+- No row of the pilot enters the freeze (`runs_paper.csv`), the page, a release or a paper, and the pilot is not posted as a result outside the notes without my word.
+
+## 7. Stop rules
+
+- **Priority.** The 26.12.1 small pass has priority. A leg starts only while no timed study, pass stage or gate holds the mini, and I queue stage by stage, so between two stages the mini is free for a job of the pass.
+- **Solo set unstable.** If the runs of a solo set spread by more than 3 percent, or the reference medians differ by more than 3 percent between the start and the end, the target is UNDECIDED (section 4).
+- **Interim.** EARLY-FAIL (section 4) is read after stage s2; I decide then whether to run the rest, and I say why in the notes.
+- **Invalid runs.** A run that a Worker halt, a missing lane, throttle, a gate that was not held, a neighbour that did not cover it, or a failed probe makes invalid writes a `failed` row or is flagged by `analyze.py`; it is never retried in place. `analyze.py` writes the list of units to replace, `plan.py topup` makes one more stage of replacement claims (stages `t1c` and `t1s`), and a run that is invalid again stays invalid. Replacement runs sit at the end of the order, so their place in the drift term is their real one. A target with more than 10 percent invalid is UNDECIDED.
+- **A stage that cannot start.** If a lane of a compare stage never starts, the first rendezvous fails after 30 minutes and the claims exit 4; I queue the three claims again with `-r2` on every OUT. If a unit cannot gather its three lanes within 10 minutes it is aborted for all of them, two aborted units in a row end the stage, and the aborted units go to the top-up.
+- **Heat.** A leg pauses between units while the package is above 70 C (cap 900 s, then the run is invalid). If more than 20 percent of the permuted runs of a leg are throttled, I stop the pilot, report it on humem-ops#480 and wait for its fix. Leg H is the measurement for three busy lanes. It is only about the `cpu` and `membw` probes; a JVM study heats more, so a HEAT-PASS says three lanes of that heat, not of every study.
+- **Budget.** Each leg ends when its claims are done or when I stop it. The kill switch is the Worker's `STOP` file. The hours per leg are an estimate, not a limit.
+- **No tuning.** No threshold, cell, level, count, order, constant or analysis step changes between runs of a leg. A rule changed after a run is a new pilot of that leg.
+
+## 8. Where it runs
+
+On the mini, through the Humem Tower's start queue (`queue_add`), which the mini's Worker drives since 2026-11-22 for the compare lanes and since 2026-11-23 for `solo`. Nothing is started by hand, nothing runs outside the Worker's admission, and no claim carries a class it does not have. The claims are in `RUN-RECIPE.md` (generated, private): study folder, `out`, lane and `cell_class` of each, and the copy lines. A study is a folder `~/humem-drill/repros/pilot164-<leg>/` with `run_ab.sh`, `pilot_run.py`, `probes.py` (a copy of humem-ops `probes.py`, hashed) and `order.json`.
+
+- **Admission as it is.** The record `mini-2026-11-19-1b62305a8e21` has a `classes` block with `compute` only: a `compute` claim may use any of the three compare lanes, every other class and a claim with no class is admitted on compare1 only. A solo claim takes no class. The orders are built with `lanes_proven` compute 3, bw_heavy 1, io_heavy 1, none 1, so no claim of the legs below is refused by class. L0 shows the chain on the host before any data is taken (three compute claims at once, the pinning, the evidence). It does not show that a `bw_heavy` or `io_heavy` claim on compare1 is admitted beside compute claims on the other two lanes: the docs say so (check 8 reads the class of the claim for its own lane only), but nobody has run it. The first compare1 claim of L2 is that test, and if the Tower or the Worker refuses it, L2 to L4 and H wait for my decision and nothing is relabelled.
+- **Lock step.** The three claims of a compare stage are started by the Worker one tick apart. The runner of each lane prepares its work, writes a marker, and the leader (compare1) starts all three together after the thermal gate. The markers are files in the study folder (`sync/`). The runner pins itself to the lane's cores, reads them back, and refuses to run if it may use other cores.
+- **Evidence.** Per run, the row of the runner (section 3). Per claim, the Worker's own `lane-evidence.json` (co-runners, `host_lane_mode`, throttle, gate, `halted_by`), which I read next to the rows. A halted claim is restarted by the Worker; the runner skips units that have rows, and writes `failed: interrupted` for the unit that was cut.
+- **Rate limit.** The write tools allow 10 calls per hour per area (humem-ops `write-tools.md`). The recipe has as many claims as the legs need; I queue them over several hours, stage by stage.
+
+## 9. Real-cell legs and the qualification plan
+
+L5 and L6 need two things that do not exist yet, and I do not write them under this registration.
+
+- **The cell command.** One cell of `picks.json` at its landed settings on the 26.11.1 pin (the image and wheel digests of the landed rows), run inside a claim on two cpus and 12 GiB, with a figure (the cell's wall time). `pilot_run.py` refuses a `cell:` workload until it exists. It is written, hashed and posted as an amendment before the lock of L5 and L6, and the legs are then locked with their own order hashes. An amendment changes nothing registered here.
+- **Qualification of the classes beyond compare1.** The strict cells need `io_heavy` on more than one lane and the cache and latency cells need a class that does not exist yet (open point 3 of the draft). `QUALIFICATION-PLAN.md` is the pre-registered plan: what rounds, what ratios decide, the thermal gate, how long. It is written first, as #164 says. After it has run, `plan.py build --lanes-proven io_heavy=N` makes the order for the full square of the issue (every lane position, a bandwidth or disk stream on every admitted lane), and that order is another amendment.
+
+## 10. The twelve open points of the draft of the morning, closed
+
+| # | Point | Closed as | By |
+|---|---|---|---|
+| 1 | Reading of n=5 | 5 runs per target and neighbour level | #164 decision 1 |
+| 2 | Compute and bandwidth have no eligible cell | the probes `cpu` and `membw` are the targets, the report says so (PROBE-PASS, never PASS); no new rule for the `l1tpc` cells | #164 decision 2 |
+| 3 | Cache and latency has no calibration class | no class: its claims are unclassed and admitted on compare1 only until a class and a probe exist in humem-ops (a change that is not mine, listed in section 13); no relabelling | #164 decision 3 |
+| 4 | Admission | the pilot is designed to the record as it is; the other classes through `QUALIFICATION-PLAN.md`; no launcher outside the Worker, no relabel | #164 decision 3 and 4 |
+| 5 | Reference width | the pass is against the full-width solo figure; the two-cpu figure and the width effect are reported beside it | mine, an implementation detail; reopen before the post |
+| 6 | Heat | at most two busy lanes and a light third; a thermal gate and a throttle reading per run; invalid above 1 percent throttle; leg H for three busy lanes; humem-ops#480 stays open | my instruction of 2026-11-24 |
+| 7 | Neighbours are probes | yes: `cpu`, `membw`, `io`, one busy stream per block; cache and latency is not a neighbour level | mine; #164 lists four levels |
+| 8 | Memory of a compare lane | 12 GiB, read from the live `worker.toml` of the mini on 2026-11-24 (`memory_gb = 12` for the three lanes) | read, not assumed |
+| 9 | Engine pin | the probe legs have no engine; L5 and L6 stay on the 26.11.1 pin and need its images and wheels on the mini when they run, so they are scheduled around the 26.12.1 pass | mine; open for me in section 13 |
+| 10 | One cell family | stays, and the report says so (section 2) | mine |
+| 11 | Place in the order | the probe legs this week on the idle mini, before the 26.12.1 pass; the real-cell legs later, never while a timed study holds the mini | my instruction of 2026-11-24 |
+| 12 | Scripts | `plan.py`, `analyze.py`, the runner, `cost_legs.py`: written, smoke-tested, hashed (sections 11 and 12) | done |
+
+## 11. Smoke results
+
+Both smokes run on the laptop on synthetic data and on 2-second probes. They are results of the instrument, not of the pilot. `smoke.py` simulates pilots with a known truth (neighbour effects, lane positions, drift, noise), checks that the analysis recovers it, that the pass rule gives PASS and FAIL where it must, that an unbalanced order is refused, and how missing, throttled and uncovered runs are handled. `smoke_runner.py` starts the three claims of a stage of the smoke leg at once on three cores of the laptop and checks the lock step, the roles, the rows, the resume, the refusals and the rendezvous failure.
+
+@@SMOKE@@
+
+## 12. Lock block (written by `build_prereg.py` from the files; the date of the lock is the day I post it)
+
+@@LOCK@@
+
+The hours of every leg (`cost_legs.py`; the overheads and the lane-width factors are ASSUMED and printed with it):
+
+@@COST@@
+
+## 13. Open points that still need me
+
+1. Post the registration on #164 and say go. The claims may start only after that.
+2. Check on the mini before L0: `status` shows no job and the four lanes in drive mode; I have read the Worker's file (read only) and it says so.
+3. The class for cache and latency (`latency` and a probe such as a pointer chase) is a humem-ops change; I have not filed it. Until it exists the cache and latency cells run unclassed on compare1 only.
+4. The cell command for L5 and L6, and whether they run before or after the 26.12.1 pass (the engine pin stays 26.11.1).
+5. The qualification plan for `io_heavy` (5.4 hours assumed at 10 rounds): my word and a window with the mini idle.
+6. The one admission that no run has shown: a `bw_heavy` claim on compare1 beside `compute` claims on compare2 and compare3 (L2, L3, H). Section 8 says what happens if it is refused.
+7. The queue rate: 43 claims for the claimable legs at 10 calls an hour is at least five hours of calls.
+8. Where the `io` stream of L4 writes: its 64 MiB scratch file goes below the claim's folder in `~/humem-drill/repros/` on the mini's system disk. The qualification plans used the data disk. I leave it unless you want it moved; the file is the same size and the stream is a neighbour, not a target.
+
+## 14. Candidate table and near misses of the cell selection
+
+@@CANDIDATES@@

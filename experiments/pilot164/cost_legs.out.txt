@@ -1,0 +1,14 @@
+leg  units claims  low h central h  high h  title
+L0       6      4    0.2       0.2     0.3  smoke of the chain on the mini (shortened, never data)
+L1      24      9    1.0       1.0     1.3  compute: probe cpu beside idle and compute neighbours
+L2      24      9    1.0       1.0     1.3  bandwidth stand-in: probe membw (compare1 only) beside idle and compute neighbours
+L3      29      9    1.1       1.1     1.5  probe cpu beside idle, compute and one membw stream (on compare1)
+L4      29      9    1.1       1.1     1.5  probe cpu beside idle, compute and one io stream (on compare1)
+H        1      3    0.6       0.6     0.6  heat run: compare1 membw, compare2 cpu, compare3 cpu at once for 30 minutes (decides whether
+L5      48      9    8.5      10.0    12.3  disk I/O: the two strict cells of picks.json (compare1 only) beside idle and compute neighbo
+L6      48      9    8.2       9.7    12.0  cache and latency: the two relaxed cells of picks.json (compare1 only) beside idle and compu
+qualify-plan-io.txt: probes io, assumed hours at rungs 3, 5 and 10: 1.6, 2.7, 5.4 (the plan_sha of this offline copy is not the one of the mini: its layout hash differs)
+qualify-plan-membw.txt: probes membw, assumed hours at rungs 3, 5 and 10: 1.2, 2.1, 4.2 (the plan_sha of this offline copy is not the one of the mini: its layout hash differs)
+
+ASSUMED: overhead 30 s per compare unit and 15 s per solo unit, 300 s per stage for the claims, f {'low': 1.0, 'central': 1.25, 'high': 1.5}, a thermal wait of 60 s per compare unit in the high case
+claimable now (L0, L1, L2, L3, L4, H): 5.0 / 5.0 / 6.5 h (low / central / high)

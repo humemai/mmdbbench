@@ -1403,7 +1403,7 @@ class LadybugGraph(Base):
 
 class DuckpgqGraph(Base):
     """DuckDB with the DuckPGQ community extension (embedded, in-process through
-    the duckdb Python package on the pinned dbbench:duckdb image, duckdb==1.5.6).
+    the duckdb Python package on the pinned dbbench:duckdb image, duckdb==2.0.1 from 2026-11-25, 1.5.6 before).
     The persons-and-knows data lives in two DuckDB tables; a PROPERTY GRAPH over
     them answers every graph read in SQL/PGQ (`GRAPH_TABLE ... MATCH`), and the
     writes are plain SQL on the underlying tables, one statement group per
@@ -1522,8 +1522,10 @@ class DuckpgqGraph(Base):
         # sched_getaffinity sees the mask. Same fix as the other DuckDB arms.
         self._threads = len(os.sched_getaffinity(0))
         self.cx.execute(f"PRAGMA threads={self._threads}")
-        # The community DuckPGQ build for the pinned 1.5.6 (404 on 1.5.5; loads but parses nothing on 2.0.0).
+        # The community DuckPGQ build for the pinned DuckDB (1.5.6 to 2026-11-25: 404 on 1.5.5; 2.0.1 from then). On 2.x the grammar is off
+        # until `SET active_grammar_extensions` names it (bench_common.duckpgq_enable); without it 2.0.0 "parses nothing".
         self.cx.execute("INSTALL duckpgq FROM community; LOAD duckpgq;")
+        bench_common.duckpgq_enable(self.cx)
         _ext = self.cx.execute(
             "SELECT extension_version FROM duckdb_extensions() "
             "WHERE extension_name = 'duckpgq'").fetchall()
@@ -1554,6 +1556,7 @@ class DuckpgqGraph(Base):
         def flush():
             columns = list(zip(*buf))
             tbl = pa.table({c: pa.array(columns[i]) for i, c in enumerate(cols)})
+            bench_common.duckdb_drain(self.cx)
             self.cx.register("_src", tbl)
             self.cx.execute(f"INSERT INTO {table} SELECT * FROM _src")
             self.cx.unregister("_src")

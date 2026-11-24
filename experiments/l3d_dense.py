@@ -1243,6 +1243,7 @@ class DuckVSS(Base):
         # row 44): the load and the HNSW build are two statements, so the
         # boundary exists and the row records both, as the split arms do.
         _t0 = time.perf_counter()
+        bench_common.duckdb_drain(self.cx)
         self.cx.register("src", tbl)
         self.cx.execute(f"CREATE TABLE t AS SELECT id, vec::FLOAT[{DIM}] AS vec FROM src")
         self.cx.unregister("src")

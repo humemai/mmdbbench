@@ -578,7 +578,8 @@ BACKENDS = {
         "topology": "embedded",
         "image": "dbbench:client",
     },
-    # MongoDB 9.0.4 (from 2026-10-23). History: 8.0 refused to start on Linux
+    # MongoDB 9.0.8 (from 2026-11-25; 9.0.4, mongo@sha256:b609cdfba3a8..., from 2026-10-23 to 2026-11-25: the move and its boot test are
+    # in COMPARATORS.md, "Pins moved for the 26.12.1 small pass"). History: 8.0 refused to start on Linux
     # >= 6.19 (SERVER-121912) and the pin moved to 8.2.12; in September and early
     # October the 8.3 line (8.3.11) refused to boot on the bench kernel with
     #   "MongoDB cannot start: Linux kernel versions 6.19 and newer has a known
@@ -629,7 +630,7 @@ BACKENDS = {
     "postgres_ts": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "postgres@sha256:9770878138a2e83abcb10856d30cc3f24dae0d317bb956db6ab9159de6c3c80d",  # 18.6, the `postgres` arm's digest
+        "server_image": "postgres@sha256:32f5fdbf4d27ebe0d4552313126a593400f40b21bff207e43617b2305838bce3",  # 18.7, the `postgres` arm's digest
         "server_env": ["-e", "POSTGRES_PASSWORD=dbbenchpass", "-e", "POSTGRES_DB=bench"],
         "server_cmd": ["-c", "synchronous_commit=off", "-c", "shared_buffers={sb}", "-c", "effective_cache_size={ecs}",
                        "-c", "maintenance_work_mem={mwm}", "-c", "max_wal_size=4GB"] + PG_FIT_CMD,
@@ -640,7 +641,7 @@ BACKENDS = {
     "mongodb": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "mongo@sha256:b609cdfba3a865331378cc4158bc52522a3bf176d59a7ff2c43fab52f5d9d5cb",  # 9.0.4
+        "server_image": "mongo@sha256:e5964383224061a512e9a886a4beaf6ed299f0237b7239dbf9876cbc7882910d",  # 9.0.8
         "server_cmd": ["--replSet", "rs0", "--bind_ip_all"],
         "server_port": 27017,
         "ready_regex": r"Waiting for connections",
@@ -654,7 +655,7 @@ BACKENDS = {
     "mongodb_graph": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "mongo@sha256:b609cdfba3a865331378cc4158bc52522a3bf176d59a7ff2c43fab52f5d9d5cb",  # 9.0.4
+        "server_image": "mongo@sha256:e5964383224061a512e9a886a4beaf6ed299f0237b7239dbf9876cbc7882910d",  # 9.0.8
         "server_cmd": ["--replSet", "rs0", "--bind_ip_all"],
         "server_port": 27017,
         "ready_regex": r"Waiting for connections",
@@ -739,7 +740,7 @@ BACKENDS = {
     "postgres": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "postgres@sha256:9770878138a2e83abcb10856d30cc3f24dae0d317bb956db6ab9159de6c3c80d",  # 18.6
+        "server_image": "postgres@sha256:32f5fdbf4d27ebe0d4552313126a593400f40b21bff207e43617b2305838bce3",  # 18.7
         "server_env": ["-e", "POSTGRES_PASSWORD=dbbenchpass", "-e", "POSTGRES_DB=bench"],
         # DURABILITY MATCHED AT THE RELAXED END (DECISIONS #81): a commit
         # returns when the WAL record is in the OS, the walwriter flushes it
@@ -785,7 +786,7 @@ BACKENDS = {
     "postgres_tuned": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "postgres@sha256:9770878138a2e83abcb10856d30cc3f24dae0d317bb956db6ab9159de6c3c80d",  # 18.6, same digest as the default arm
+        "server_image": "postgres@sha256:32f5fdbf4d27ebe0d4552313126a593400f40b21bff207e43617b2305838bce3",  # 18.7, same digest as the default arm
         "server_env": ["-e", "POSTGRES_PASSWORD=dbbenchpass", "-e", "POSTGRES_DB=bench"],
         # Sized from the container, not written as a constant. The two lanes
         # that run PostgreSQL get different envelopes (24g at medium, 12g at
@@ -842,7 +843,7 @@ BACKENDS = {
     "neo4j_graph": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "neo4j@sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731",  # 2026.10.0-community
+        "server_image": "neo4j@sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854",  # 2026.10.2-community
         # heap parity with the ArcadeDB deployments (same per-scale heap)
         "server_env": ["-e", "NEO4J_AUTH=neo4j/dbbenchpass",
                        "-e", "NEO4J_server_memory_heap_initial__size={heap}",
@@ -1039,7 +1040,7 @@ BACKENDS = {
     "neo4j_e2": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "neo4j@sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731",  # 2026.10.0-community
+        "server_image": "neo4j@sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854",  # 2026.10.2-community
         "server_env": ["-e", "NEO4J_AUTH=neo4j/dbbenchpass",
                        "-e", "NEO4J_server_memory_heap_initial__size={heap}",
                        "-e", "NEO4J_server_memory_heap_max__size={heap}",
@@ -1061,7 +1062,7 @@ BACKENDS = {
     "arangodb_tpc": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "arangodb@sha256:4bc086d5050ca7ea11c6d00a36d8b910c838bb54ad553f8c1b715769d3499bcf",  # 3.12.12
+        "server_image": "arangodb@sha256:b3a7b110e12770ea9558e125b34d672703daf2473bdad5447f026364cb338899",  # 3.12.14
         "server_env": ["-e", "ARANGO_ROOT_PASSWORD=dbbenchpass"],
         "server_cmd": ["arangod", "--vector-index", "true"],
         "server_port": 8529,
@@ -1070,7 +1071,7 @@ BACKENDS = {
     "arangodb_graph": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "arangodb@sha256:4bc086d5050ca7ea11c6d00a36d8b910c838bb54ad553f8c1b715769d3499bcf",  # 3.12.12
+        "server_image": "arangodb@sha256:b3a7b110e12770ea9558e125b34d672703daf2473bdad5447f026364cb338899",  # 3.12.14
         "server_env": ["-e", "ARANGO_ROOT_PASSWORD=dbbenchpass"],
         "server_cmd": ["arangod", "--vector-index", "true"],
         "server_port": 8529,
@@ -1079,7 +1080,7 @@ BACKENDS = {
     "arangodb_dense": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "arangodb@sha256:4bc086d5050ca7ea11c6d00a36d8b910c838bb54ad553f8c1b715769d3499bcf",  # 3.12.12
+        "server_image": "arangodb@sha256:b3a7b110e12770ea9558e125b34d672703daf2473bdad5447f026364cb338899",  # 3.12.14
         "server_env": ["-e", "ARANGO_ROOT_PASSWORD=dbbenchpass"],
         "server_cmd": ["arangod", "--vector-index", "true"],
         "server_port": 8529,
@@ -1089,7 +1090,7 @@ BACKENDS = {
     "arangodb_dense_int8": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "arangodb@sha256:4bc086d5050ca7ea11c6d00a36d8b910c838bb54ad553f8c1b715769d3499bcf",  # 3.12.12
+        "server_image": "arangodb@sha256:b3a7b110e12770ea9558e125b34d672703daf2473bdad5447f026364cb338899",  # 3.12.14
         "server_env": ["-e", "ARANGO_ROOT_PASSWORD=dbbenchpass"],
         "server_cmd": ["arangod", "--vector-index", "true"],
         "server_port": 8529,
@@ -1098,7 +1099,7 @@ BACKENDS = {
     "arangodb_e2": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "arangodb@sha256:4bc086d5050ca7ea11c6d00a36d8b910c838bb54ad553f8c1b715769d3499bcf",  # 3.12.12
+        "server_image": "arangodb@sha256:b3a7b110e12770ea9558e125b34d672703daf2473bdad5447f026364cb338899",  # 3.12.14
         "server_env": ["-e", "ARANGO_ROOT_PASSWORD=dbbenchpass"],
         "server_cmd": ["arangod", "--vector-index", "true"],
         "server_port": 8529,
@@ -1108,7 +1109,7 @@ BACKENDS = {
     "surrealdb_graph_server": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "surrealdb/surrealdb@sha256:6a5002363ff5b000b72a55f985203e951e3175e578002954b0e38f113e48a698",  # v3.2.4, held: v3.3.4 (latest) leaves deleted graph rows behind in the l2 OLTP delete, see #483
+        "server_image": "surrealdb/surrealdb@sha256:516880cf27ee605f026cbd4f9381d154bc6d7c46a7d1d128205c9686ef234ff3",  # v3.2.6, held below 3.3.x: v3.3.4 leaves deleted graph rows behind in the l2 OLTP delete, see #483 (v3.2.4 until 2026-11-25)
         # NO DURABILITY FLAG HERE, because 3.2.4 has none to set. This
         # carried SURREAL_DATASTORE_SYNC_DATA=never, which the server does not
         # read: the pinned binary contains zero occurrences of "SYNC_DATA" and
@@ -1127,7 +1128,7 @@ BACKENDS = {
     "surrealdb_tpc_server": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "surrealdb/surrealdb@sha256:6a5002363ff5b000b72a55f985203e951e3175e578002954b0e38f113e48a698",  # v3.2.4, held: v3.3.4 (latest) leaves deleted graph rows behind in the l2 OLTP delete, see #483
+        "server_image": "surrealdb/surrealdb@sha256:516880cf27ee605f026cbd4f9381d154bc6d7c46a7d1d128205c9686ef234ff3",  # v3.2.6, held below 3.3.x: v3.3.4 leaves deleted graph rows behind in the l2 OLTP delete, see #483 (v3.2.4 until 2026-11-25)
         # NO DURABILITY FLAG HERE, because 3.2.4 has none to set. This
         # carried SURREAL_DATASTORE_SYNC_DATA=never, which the server does not
         # read: the pinned binary contains zero occurrences of "SYNC_DATA" and
@@ -1159,7 +1160,7 @@ BACKENDS = {
     "surrealdb_dense_server": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "surrealdb/surrealdb@sha256:6a5002363ff5b000b72a55f985203e951e3175e578002954b0e38f113e48a698",  # v3.2.4, held: v3.3.4 (latest) leaves deleted graph rows behind in the l2 OLTP delete, see #483
+        "server_image": "surrealdb/surrealdb@sha256:516880cf27ee605f026cbd4f9381d154bc6d7c46a7d1d128205c9686ef234ff3",  # v3.2.6, held below 3.3.x: v3.3.4 leaves deleted graph rows behind in the l2 OLTP delete, see #483 (v3.2.4 until 2026-11-25)
         # NO DURABILITY FLAG HERE, because 3.2.4 has none to set. This
         # carried SURREAL_DATASTORE_SYNC_DATA=never, which the server does not
         # read: the pinned binary contains zero occurrences of "SYNC_DATA" and
@@ -1177,7 +1178,7 @@ BACKENDS = {
     "surrealdb_e2_server": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "surrealdb/surrealdb@sha256:6a5002363ff5b000b72a55f985203e951e3175e578002954b0e38f113e48a698",  # v3.2.4, held: v3.3.4 (latest) leaves deleted graph rows behind in the l2 OLTP delete, see #483
+        "server_image": "surrealdb/surrealdb@sha256:516880cf27ee605f026cbd4f9381d154bc6d7c46a7d1d128205c9686ef234ff3",  # v3.2.6, held below 3.3.x: v3.3.4 leaves deleted graph rows behind in the l2 OLTP delete, see #483 (v3.2.4 until 2026-11-25)
         # NO DURABILITY FLAG HERE, because 3.2.4 has none to set. This
         # carried SURREAL_DATASTORE_SYNC_DATA=never, which the server does not
         # read: the pinned binary contains zero occurrences of "SYNC_DATA" and
@@ -1200,7 +1201,7 @@ BACKENDS = {
     "surrealdb_ts_server": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "surrealdb/surrealdb@sha256:6a5002363ff5b000b72a55f985203e951e3175e578002954b0e38f113e48a698",  # v3.2.4, held: v3.3.4 (latest) leaves deleted graph rows behind in the l2 OLTP delete, see #483
+        "server_image": "surrealdb/surrealdb@sha256:516880cf27ee605f026cbd4f9381d154bc6d7c46a7d1d128205c9686ef234ff3",  # v3.2.6, held below 3.3.x: v3.3.4 leaves deleted graph rows behind in the l2 OLTP delete, see #483 (v3.2.4 until 2026-11-25)
         # No durability flag: 3.2.4 has none to set (see surrealdb_graph_server).
         "server_cmd": ["start", "--user", "root", "--pass", "root", "--log", "info", "rocksdb:/tmp/surreal/db?sync=never"],
         "server_port": 8000,
@@ -1209,7 +1210,7 @@ BACKENDS = {
     "arangodb_ts": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "arangodb@sha256:4bc086d5050ca7ea11c6d00a36d8b910c838bb54ad553f8c1b715769d3499bcf",  # 3.12.12
+        "server_image": "arangodb@sha256:b3a7b110e12770ea9558e125b34d672703daf2473bdad5447f026364cb338899",  # 3.12.14
         "server_env": ["-e", "ARANGO_ROOT_PASSWORD=dbbenchpass"],
         "server_cmd": ["arangod", "--vector-index", "true"],
         "server_port": 8529,
@@ -1321,7 +1322,7 @@ BACKENDS = {
     "qdrant_sparse": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "qdrant/qdrant@sha256:2d1b0bfd0a961275481ea09400fc98008216ae54e1b52ed7d24520d63050c644",  # v1.20.0
+        "server_image": "qdrant/qdrant@sha256:c5e32ee251293d2e1f4dd34890ad75eeee5a4f3821a121d6d8b7e4323448b386",  # v1.20.2
         "server_port": 6333,
         "ready_regex": r"Qdrant (HTTP|gRPC) listening|Actix runtime found",
     },
@@ -1329,7 +1330,7 @@ BACKENDS = {
     "qdrant_sparse_uint8": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "qdrant/qdrant@sha256:2d1b0bfd0a961275481ea09400fc98008216ae54e1b52ed7d24520d63050c644",  # v1.20.0
+        "server_image": "qdrant/qdrant@sha256:c5e32ee251293d2e1f4dd34890ad75eeee5a4f3821a121d6d8b7e4323448b386",  # v1.20.2
         "server_port": 6333,
         "ready_regex": r"Qdrant (HTTP|gRPC) listening|Actix runtime found",
     },
@@ -1435,7 +1436,7 @@ BACKENDS = {
     "qdrant_dense": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "qdrant/qdrant@sha256:2d1b0bfd0a961275481ea09400fc98008216ae54e1b52ed7d24520d63050c644",  # v1.20.0
+        "server_image": "qdrant/qdrant@sha256:c5e32ee251293d2e1f4dd34890ad75eeee5a4f3821a121d6d8b7e4323448b386",  # v1.20.2
         "server_port": 6333,
         "ready_regex": r"Qdrant (HTTP|gRPC) listening|Actix runtime found",
     },
@@ -1446,7 +1447,7 @@ BACKENDS = {
     "qdrant_dense_int8": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "qdrant/qdrant@sha256:2d1b0bfd0a961275481ea09400fc98008216ae54e1b52ed7d24520d63050c644",  # v1.20.0
+        "server_image": "qdrant/qdrant@sha256:c5e32ee251293d2e1f4dd34890ad75eeee5a4f3821a121d6d8b7e4323448b386",  # v1.20.2
         "server_port": 6333,
         "ready_regex": r"Qdrant (HTTP|gRPC) listening|Actix runtime found",
     },
@@ -1458,7 +1459,7 @@ BACKENDS = {
     "pgvector_dense": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "pgvector/pgvector@sha256:ad249f9fb9572979643a47694e59b9a8cdcdf6abc6accebf49bb80ad5f20ff9b",  # 0.8.7-pg18
+        "server_image": "pgvector/pgvector@sha256:4bdc16048580b56345bca441bffe8d9b45dd2f5d76963808c853df1661df6e00",  # 0.8.7-pg18
         "server_env": ["-e", "POSTGRES_PASSWORD=dbbenchpass", "-e", "POSTGRES_DB=bench"],
         "server_cmd": ["-c", "synchronous_commit=off", "-c", "shared_buffers={sb}", "-c", "effective_cache_size={ecs}",
                        "-c", "maintenance_work_mem={mwm}", "-c", "max_wal_size=8GB"] + PG_FIT_CMD,
@@ -1469,7 +1470,7 @@ BACKENDS = {
     "pgvector_sparse": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "pgvector/pgvector@sha256:ad249f9fb9572979643a47694e59b9a8cdcdf6abc6accebf49bb80ad5f20ff9b",  # 0.8.7-pg18
+        "server_image": "pgvector/pgvector@sha256:4bdc16048580b56345bca441bffe8d9b45dd2f5d76963808c853df1661df6e00",  # 0.8.7-pg18
         "server_env": ["-e", "POSTGRES_PASSWORD=dbbenchpass", "-e", "POSTGRES_DB=bench"],
         "server_cmd": ["-c", "synchronous_commit=off", "-c", "shared_buffers={sb}", "-c", "effective_cache_size={ecs}",
                        "-c", "maintenance_work_mem={mwm}", "-c", "max_wal_size=8GB"] + PG_FIT_CMD,
@@ -1489,7 +1490,7 @@ BACKENDS = {
     "cratedb_tpc": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "crate@sha256:e7bded344df487e2595f59d7edaa0cf96979a00ba51f12ee66d7fcf8cd65f5f4",  # 6.4.6, amd64
+        "server_image": "crate@sha256:978bd9be5585eef8dc11d29043c858278ef25fb0ec3b160c2c18bea0da9115b8",  # 6.4.7, amd64
         "server_env": ["-e", "CRATE_HEAP_SIZE={heap}"],
         "server_cmd": ["-Cdiscovery.type=single-node", "-Cprocessors={ncpu}"],
         "server_port": 5432,
@@ -1498,7 +1499,7 @@ BACKENDS = {
     "cratedb_dense": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "crate@sha256:e7bded344df487e2595f59d7edaa0cf96979a00ba51f12ee66d7fcf8cd65f5f4",  # 6.4.6, amd64
+        "server_image": "crate@sha256:978bd9be5585eef8dc11d29043c858278ef25fb0ec3b160c2c18bea0da9115b8",  # 6.4.7, amd64
         "server_env": ["-e", "CRATE_HEAP_SIZE={heap}"],
         "server_cmd": ["-Cdiscovery.type=single-node", "-Cprocessors={ncpu}"],
         "server_port": 5432,
@@ -1507,7 +1508,7 @@ BACKENDS = {
     "cratedb_ts": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "crate@sha256:e7bded344df487e2595f59d7edaa0cf96979a00ba51f12ee66d7fcf8cd65f5f4",  # 6.4.6, amd64
+        "server_image": "crate@sha256:978bd9be5585eef8dc11d29043c858278ef25fb0ec3b160c2c18bea0da9115b8",  # 6.4.7, amd64
         "server_env": ["-e", "CRATE_HEAP_SIZE={heap}"],
         "server_cmd": ["-Cdiscovery.type=single-node", "-Cprocessors={ncpu}"],
         "server_port": 5432,
@@ -1517,7 +1518,7 @@ BACKENDS = {
     "neo4j_dense": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "neo4j@sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731",  # 2026.10.0-community
+        "server_image": "neo4j@sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854",  # 2026.10.2-community
         "server_env": ["-e", "NEO4J_AUTH=neo4j/dbbenchpass",
                        "-e", "NEO4J_server_memory_heap_initial__size={heap}",
                        "-e", "NEO4J_server_memory_heap_max__size={heap}",
@@ -1528,7 +1529,7 @@ BACKENDS = {
     "neo4j_dense_int8": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "neo4j@sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731",  # 2026.10.0-community
+        "server_image": "neo4j@sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854",  # 2026.10.2-community
         "server_env": ["-e", "NEO4J_AUTH=neo4j/dbbenchpass",
                        "-e", "NEO4J_server_memory_heap_initial__size={heap}",
                        "-e", "NEO4J_server_memory_heap_max__size={heap}",
@@ -1625,7 +1626,7 @@ BACKENDS = {
     "redis_dense": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "redis@sha256:13ad9044b4b2fd2abe4c5aad8c384b0504a71006fa33f023fc68998453a2eeca",  # 8.10.2, amd64
+        "server_image": "redis@sha256:29f0fcb48d8fe958e80767ca3f92d30aae798f940f257764620be3eec1b2fce5",  # 8.12.0, amd64
         "server_cmd": ["--maxmemory", "{mem90_mib}mb", "--maxmemory-policy", "noeviction",
                        "--io-threads", "{io_threads}", "--search-workers", "{io_threads}",
                        "--protected-mode", "no"],
@@ -1633,7 +1634,7 @@ BACKENDS = {
         "ready_regex": r"Ready to accept connections",
         "pre_disk_cmd": ["redis-cli", "SAVE"],
     },
-    # REDIS 8.10.2, documents (l1tpc) and time series (l4): the same image, digest, memory rule, thread fit and durability
+    # REDIS 8.12.0 (8.10.2 until 2026-11-25), documents (l1tpc) and time series (l4): the same image, digest, memory rule, thread fit and durability
     # patch as redis_dense above (one server, three models). Lane-specific settings, each from the vendor's docs:
     #   --search-on-timeout fail (documents only): the Query Engine's default query timeout is 500 ms and its default
     #     policy RETURNS the partial result when it expires
@@ -1643,7 +1644,7 @@ BACKENDS = {
     "redis_tpc": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "redis@sha256:13ad9044b4b2fd2abe4c5aad8c384b0504a71006fa33f023fc68998453a2eeca",  # 8.10.2, amd64
+        "server_image": "redis@sha256:29f0fcb48d8fe958e80767ca3f92d30aae798f940f257764620be3eec1b2fce5",  # 8.12.0, amd64
         "server_cmd": ["--maxmemory", "{mem90_mib}mb", "--maxmemory-policy", "noeviction",
                        "--io-threads", "{io_threads}", "--search-workers", "{io_threads}",
                        "--search-on-timeout", "fail", "--protected-mode", "no"],
@@ -1654,7 +1655,7 @@ BACKENDS = {
     "redis_ts": {
         "topology": "client_server",
         "image": "dbbench:client",
-        "server_image": "redis@sha256:13ad9044b4b2fd2abe4c5aad8c384b0504a71006fa33f023fc68998453a2eeca",  # 8.10.2, amd64
+        "server_image": "redis@sha256:29f0fcb48d8fe958e80767ca3f92d30aae798f940f257764620be3eec1b2fce5",  # 8.12.0, amd64
         "server_cmd": ["--maxmemory", "{mem90_mib}mb", "--maxmemory-policy", "noeviction",
                        "--io-threads", "{io_threads}", "--protected-mode", "no"],
         "server_port": 6379,

@@ -44,6 +44,32 @@ def instrument_at_least(version):
     return INSTRUMENT >= version
 
 
+def duckdb_drain(cx):
+    """Finish any result the DuckDB connection still holds, before `cx.register(...)`.
+
+    DuckDB 2.x raises `ResourceInUseException: connection has an unfinished result from execute()` when a table is registered while an earlier
+    `execute(...).fetchone()` (or an INSERT's row count) was not read to its end; 1.x did not check. The e2 cell of the guide failed on it with
+    duckdb 2.0.1 (humemai/mmdbbench CI, 2026-11-25). Reading the rest of the result is harmless on 1.x and when nothing is pending."""
+    try:
+        cx.fetchall()
+    except Exception:  # nothing pending, or a version that has no pending result to read
+        pass
+
+
+def duckpgq_enable(cx):
+    """Switch DuckPGQ's grammar on after `LOAD duckpgq` when DuckDB is 2.x; do nothing on 1.x.
+
+    DuckDB 2.0 parses a community extension's syntax only for the grammar extensions named in `active_grammar_extensions`. Without the
+    setting, `CREATE PROPERTY GRAPH` answers `Parser Error` at PROPERTY, which is how the 2026-10-23 hold (build_images.sh) read 2.0.0 as
+    "registers no syntax". With it, 2.0.0 and 2.0.1 parse CREATE PROPERTY GRAPH and GRAPH_TABLE ... MATCH (laptop probe, 2026-11-25).
+    DuckDB 1.x has no such setting, so the call is a no-op there. Returns True when the setting was made."""
+    import duckdb
+    if int(duckdb.__version__.split(".")[0]) < 2:
+        return False
+    cx.execute("SET active_grammar_extensions = ['duckpgq']")
+    return True
+
+
 # THE GRAPH ANALYTICAL VIEW MUST LIST THE `Message` SUPERTYPE FROM THIS RELEASE (upstream ArcadeData/arcadedb PR 9320, issue 9301).
 # Since that change `GraphTraversalProviderRegistry.findProvider` hands a view to a walk only when the view covers EVERY vertex type of
 # the schema (`coversVertexType(null)`, which also counts an abstract supertype such as Message), so a view that leaves Message out is

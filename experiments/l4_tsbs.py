@@ -913,6 +913,7 @@ class DuckTS(BulkRead):
             t = pa.table({"host": [p[0] for p in pts], "ts": [p[1] for p in pts],
                           "uu": [p[2] for p in pts], "us": [p[3] for p in pts],
                           "ui": [p[4] for p in pts]})
+            bench_common.duckdb_drain(self.cx)
             self.cx.register("src", t)
             self.cx.execute("INSERT INTO p SELECT * FROM src")
         # THE INDEX THIS ARM DID NOT HAVE (BUGS F98). Every other engine on

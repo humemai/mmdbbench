@@ -12,7 +12,7 @@ query.
 
 WHICH DEPLOYMENT, AND WHY
 
-  documents / TPC / time series   `mongo` 9.0.4, no access control, one-node
+  documents / TPC / time series   `mongo` 9.0.8 (9.0.4 until 2026-11-25), no access control, one-node
                                   replica set (a multi-document transaction
                                   needs one). Unchanged.
   graph                           THE SAME IMAGE AND THE SAME DIGEST. The
@@ -20,7 +20,7 @@ WHICH DEPLOYMENT, AND WHY
                                   $lookup, both core mongod, so the graph arm
                                   needs nothing mongot does.
   dense vectors / cross-model     `dbbench:mongo-search`: the same mongod
-                                  digest plus mongot 1.70.5, MongoDB Search
+                                  digest plus mongot 1.79.1 (1.70.5 until 2026-11-25), MongoDB Search
                                   Community, in one container
                                   (Dockerfile.mongosearch). mongot requires
                                   SCRAM or x509 against its sync source, so

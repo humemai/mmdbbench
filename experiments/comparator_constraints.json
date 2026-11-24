@@ -1,0 +1,256 @@
+{
+  "about": "Pin freshness data of humemai/mmdbbench#175: what limits each comparator below its latest stable release (constraints), and every deliberate hold with its exception line (exceptions). A pin may stay behind the latest release only at the latest compatible one, or with an exception line (version, reason, date, who decided). The rows are only what was read; a blank means not found, never a guess. Started on 2026-11-25 from the pins audit of humemai/mmdbbench#114 and the PR that moved the pins for the 26.12.1 small pass. No script reads it yet (#175 item 1 and 2); test_comparator_constraints.py checks its shape.",
+  "started": "2026-11-25",
+  "constraints": [
+    {
+      "backend": "PostgreSQL",
+      "component": "Apache AGE (graph arm, cross-model arm)",
+      "supported_versions": "PostgreSQL 11 to 17 and 18; no PostgreSQL 19 release (a PG19/v1.8.0-rc0 tag exists in the repository, no release); a PGDG postgresql-19-age package was not found",
+      "source_url": "https://github.com/apache/age#readme",
+      "date_read": "2026-11-25",
+      "lanes": "graph (pgage_graph), cross-model (pg_age_e2); the PostgreSQL family moves as one unit (tables, time series, vectors, graph)"
+    },
+    {
+      "backend": "PostgreSQL",
+      "component": "PGDG package postgresql-18-age 1.8.0~rc0 (bookworm)",
+      "supported_versions": "1.8.0~rc0-2.pgdg12+2 depends on postgresql-18 (>> 18.7); 1.8.0~rc0-2.pgdg12+1 depends on postgresql-18 (no version bound); both still served",
+      "source_url": "https://apt.postgresql.org/pub/repos/apt/dists/bookworm-pgdg/main/binary-amd64/Packages.gz",
+      "date_read": "2026-11-25",
+      "lanes": "graph, cross-model (Dockerfile.pgage); read while preparing the PR, not in the audit"
+    },
+    {
+      "backend": "PostgreSQL",
+      "component": "pgvector",
+      "supported_versions": "0.8.7 is the newest tag; images 0.8.7-pg18 (PG_VERSION 18.7-1.pgdg12+2, built 2026-11-12) and 0.8.7-pg19 (2026-11-20) exist",
+      "source_url": "https://hub.docker.com/v2/repositories/pgvector/pgvector/tags/0.8.7-pg18",
+      "date_read": "2026-11-25",
+      "lanes": "vectors (pgvector_dense, pgvector_sparse), cross-model"
+    },
+    {
+      "backend": "MongoDB",
+      "component": "mongot (MongoDB Search Community)",
+      "supported_versions": "the vendor table lists MongoDB Server 8.3, 8.2 and 8.0 only; no 9.0 row. mongod 9.0.x with mongot is exercised, not documented",
+      "source_url": "https://www.mongodb.com/docs/search/self-managed/current/deployment/compatibility-requirements/",
+      "date_read": "2026-11-25",
+      "lanes": "vectors (mongodb_dense), cross-model (mongodb_e2)"
+    },
+    {
+      "backend": "MongoDB",
+      "component": "mongod 8.3.x (the vendor-documented partner of mongot)",
+      "supported_versions": "refuses to start on the bench kernel (SERVER-121912 guard; SERVER-136848 open for Ubuntu kernels whose uname -r stays 7.0.0); 9.0.x starts, why was never found",
+      "source_url": "https://jira.mongodb.org/browse/SERVER-136848",
+      "date_read": "2026-11-25",
+      "lanes": "tables, graphs ($lookup), vectors, cross-model"
+    },
+    {
+      "backend": "MongoDB",
+      "component": "PyMongo",
+      "supported_versions": "PyMongo 4.18 to 4.20 fully compatible with MongoDB 9.0",
+      "source_url": "https://www.mongodb.com/docs/drivers/compatibility/",
+      "date_read": "2026-11-25",
+      "lanes": "all MongoDB lanes"
+    },
+    {
+      "backend": "DuckDB",
+      "component": "duckpgq (community extension, graph arm)",
+      "supported_versions": "builds exist for DuckDB v1.4.4, v1.5.0, v1.5.4, v1.5.6, v2.0.0, v2.0.1; no build for v1.4.5 or v1.5.5; on 2.x the grammar parses only after SET active_grammar_extensions = ['duckpgq'] (laptop probe 2026-11-25, in memory; the repo's lane queries were not run)",
+      "source_url": "https://github.com/duckdb/community-extensions/blob/main/extensions/duckpgq/description.yml",
+      "date_read": "2026-11-25",
+      "lanes": "graph (duckpgq_graph, l2 and l2olap), cross-model (duckdb_e2); one DuckDB version per page, so every DuckDB arm moves together"
+    },
+    {
+      "backend": "DuckDB",
+      "component": "vss (core extension, vector arm)",
+      "supported_versions": "a build for every DuckDB version checked, 2.0.1 included (3685131eac)",
+      "source_url": "https://extensions.duckdb.org/v2.0.1/linux_amd64/vss.duckdb_extension.gz",
+      "date_read": "2026-11-25",
+      "lanes": "vectors (duckdb_vss_dense), cross-model (duckdb_e2)"
+    },
+    {
+      "backend": "SQLite",
+      "component": "SQLite library of python:3.12-slim (Dockerfile.bench) and sqlite-vec 0.1.9",
+      "supported_versions": "the library is 3.46.1 and is not a pin; a newer SQLite needs a compiled SQLite or another binding. sqlite-vec has no SQLite version ceiling that was found (README text on versions: not found)",
+      "source_url": "https://sqlite.org/changes.html",
+      "date_read": "2026-11-25",
+      "lanes": "tables, time series, vectors, cross-model (composed embedded arm), lifecycle"
+    },
+    {
+      "backend": "SurrealDB",
+      "component": "server 3.3.x (delete behaviour)",
+      "supported_versions": "3.3.4 left a deleted person and its edge behind in 6 of 12 runs against 0 of 12 on 3.2.4; 3.3.5 and 4.0.1 have not been put through the delete study",
+      "source_url": "https://github.com/humemai/arcadedb-embedded-python/issues/483",
+      "date_read": "2026-11-25",
+      "lanes": "graph (l2 OLTP delete), tables, vectors, cross-model, time series (served)"
+    },
+    {
+      "backend": "SurrealDB",
+      "component": "embedded SDK (surrealdb Python package)",
+      "supported_versions": "SDK 3.0.0 connects to SurrealDB 2.x, 3.x and 4.x and its embedded engine runs SurrealDB 4.0, with an API change; SDK 2.0.0 embeds core 2.3.10",
+      "source_url": "https://github.com/surrealdb/surrealdb.py/releases/tag/v3.0.0",
+      "date_read": "2026-11-25",
+      "lanes": "embedded arms: tables, graph, vectors, cross-model, time series, lifecycle"
+    },
+    {
+      "backend": "Neo4j",
+      "component": "composed cross-model image (Neo4j with the Qdrant binary)",
+      "supported_versions": "Neo4j and Qdrant must both be Debian 13 (Dockerfile.composed); the Neo4j 2026.10.2 tag is the -trixie tag. Qdrant 1.20.2's base was not checked in the audit",
+      "source_url": "https://hub.docker.com/v2/repositories/library/neo4j/tags/2026.10.2-community",
+      "date_read": "2026-11-25",
+      "lanes": "cross-model (composed)"
+    },
+    {
+      "backend": "LadybugDB",
+      "component": "vector extension (baked at image build)",
+      "supported_versions": "fetched per minor from extension.ladybugdb.com/v0.22.0/...; ladybug 0.22.0 and 0.22.3 fetch the same file (sha256 23da57e805fed208f1eacb4b011cb0c2e917ae098fa6853763e44221211e71b0, equal to the baked pin); the vendor overwrote the 0.21.x file once (LadybugDB/ladybug#1390)",
+      "source_url": "https://github.com/LadybugDB/ladybug/releases",
+      "date_read": "2026-11-25",
+      "lanes": "graph, vectors, cross-model, lifecycle"
+    },
+    {
+      "backend": "CrateDB",
+      "component": "6.5 minor (psycopg over the PostgreSQL wire)",
+      "supported_versions": "6.5.0 announces wire protocol 15 (from 14), maps byte to int2, normalises operands in the planner and rewrites count(DISTINCT) on strings; psycopg 3.3.9 against 6.5: not found, not tested",
+      "source_url": "https://docs.cratedb.com/projects/crate-reference/en/latest/appendices/release-notes/6.5.0.html",
+      "date_read": "2026-11-25",
+      "lanes": "tables (TPC-H analytics); vectors and time series not in the 26.12.1 small pass"
+    },
+    {
+      "backend": "Redis",
+      "component": "modules (Query Engine, JSON, TimeSeries, Bloom) and redis-py",
+      "supported_versions": "modules ship at the versions of the Redis release and cannot be pinned apart; redis-py 8.2.0 needs Python 3.11+; whether redis-py 8.1.0 is documented against 8.12: not found",
+      "source_url": "https://github.com/redis/redis/releases/tag/8.12.0",
+      "date_read": "2026-11-25",
+      "lanes": "vectors (FT.CREATE HNSW), tables (JSON); time series not in the small pass"
+    },
+    {
+      "backend": "ArangoDB",
+      "component": "vector index (FAISS) and python-arango",
+      "supported_versions": "3.12.14 updates FAISS to 1.16.0; the vector index runs behind arangod --vector-index true; python-arango 8.3.7 needs Python 3.10+; its stated ArangoDB range: not found",
+      "source_url": "https://raw.githubusercontent.com/arangodb/arangodb/3.12/CHANGELOG",
+      "date_read": "2026-11-25",
+      "lanes": "tables, graphs, vectors, cross-model, time series"
+    },
+    {
+      "backend": "MongoDB",
+      "component": "PyMongo 4.20.1 (client)",
+      "supported_versions": "Python 3.11 or later; PyMongo 4.18 to 4.20 fully compatible with MongoDB 9.0; 4.20.0 removes beta encryption query types and text_opts (not used by the harness)",
+      "source_url": "https://pymongo.readthedocs.io/en/stable/changelog.html",
+      "date_read": "2026-11-25",
+      "lanes": "all MongoDB lanes"
+    },
+    {
+      "backend": "Redis",
+      "component": "redis-py 8.2.0 (client)",
+      "supported_versions": "Python 3.11 or later; 8.2.0 deprecates CacheConfig.DEFAULT_ALLOW_LIST and READ_COMMANDS (not used by the harness); its stated Redis range: not found",
+      "source_url": "https://github.com/redis/redis-py/releases/tag/v8.2.0",
+      "date_read": "2026-11-25",
+      "lanes": "vectors, tables"
+    },
+    {
+      "backend": "PostgreSQL",
+      "component": "psycopg 3.3.9 (client of the PostgreSQL, pgvector, AGE and CrateDB arms)",
+      "supported_versions": "Python 3.10 or later; 3.3.9 notes are fixes (the 3.3.7 and 3.3.8 notes were not read)",
+      "source_url": "https://www.psycopg.org/psycopg3/docs/news.html",
+      "date_read": "2026-11-25",
+      "lanes": "tables, vectors, graph (AGE), CrateDB tables"
+    },
+    {
+      "backend": "ArangoDB",
+      "component": "python-arango 8.3.7 (client)",
+      "supported_versions": "Python 3.10 or later; its stated ArangoDB range: not found; the smoke runs it against 3.12.14",
+      "source_url": "https://github.com/arangodb/python-arango/releases/tag/8.3.7",
+      "date_read": "2026-11-25",
+      "lanes": "tables, graphs, vectors"
+    }
+  ],
+  "exceptions": [
+    {
+      "backend": "PostgreSQL (postgres, postgres_tuned, postgres_ts, pgvector, pgage_graph, pg_age_e2)",
+      "pinned": "18.7 (pgvector 0.8.7, AGE 1.8.0)",
+      "latest_release": "19.0 (2026-11-19)",
+      "reason": "Apache AGE supports PostgreSQL up to 18 and has no PostgreSQL 19 release; the PostgreSQL family moves as one unit, so every arm stays on 18.x. The page names 18.7 and says 19.0 exists",
+      "date": "2026-11-25",
+      "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
+    },
+    {
+      "backend": "SurrealDB server (surrealdb_graph_server, _tpc_server, _e2_server)",
+      "pinned": "v3.2.6",
+      "latest_release": "v4.0.1 (2026-11-09); v3.3.5 (2026-10-29)",
+      "reason": "v3.3.4 left a deleted graph row and its edge behind in 6 of 12 runs against 0 of 12 on v3.2.4 (humemai/arcadedb-embedded-python#483); v3.3.5 and v4.0.1 have not been put through the delete study. v3.2.6 is the patch of the studied line and is smoked before it lands",
+      "date": "2026-11-25",
+      "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
+    },
+    {
+      "backend": "SurrealDB embedded (surrealdb_graph, _tpc, _e2)",
+      "pinned": "surrealdb==2.0.0 (core 2.3.10)",
+      "latest_release": "SDK 3.0.0 (2026-11-04)",
+      "reason": "a major SDK with an API change; its embedded engine runs SurrealDB 4.0, so the arm would need an adapter port and would change the engine under it. It is also the second-largest comparator cost (6.1 h), so a rerun without a reason is the most expensive one. The page says embedded core 2.3.10 and server 3.2.x are different majors",
+      "date": "2026-11-25",
+      "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
+    },
+    {
+      "backend": "SQLite (sqlite, composed_embedded; sqlite-vec loads into it)",
+      "pinned": "3.46.1 (the library of python:3.12-slim, not a pin)",
+      "latest_release": "3.54.1 (2026-10-16)",
+      "reason": "a newer SQLite needs a compiled SQLite or another binding and a smoke that enable_load_extension still loads sqlite-vec: a build change, not a pin edit. The page footnote says the Python image's library and that 3.54.1 exists",
+      "date": "2026-11-25",
+      "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
+    },
+    {
+      "backend": "CrateDB (cratedb_tpc)",
+      "pinned": "6.4.7",
+      "latest_release": "6.5.1 (2026-11-04)",
+      "reason": "6.5 rewrites the planner for TPC-H analytics and announces wire protocol 15; psycopg against 6.5 was not tested. 6.5.1 moves only after a smoke clears it on the TPC-H analytics (it passed a group-by and count(DISTINCT) smoke as a candidate on 2026-11-24, which is not that)",
+      "date": "2026-11-25",
+      "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
+    },
+    {
+      "backend": "TimescaleDB, QuestDB, LanceDB (no landed rows)",
+      "pinned": "2.31.0-pg18, 10.0.1, 0.39.0",
+      "latest_release": "2.32.1, 10.2.0, 0.41.0",
+      "reason": "no rows on the page, so a new pin loses no old number; each takes the latest compatible release at its first landing",
+      "date": "2026-11-25",
+      "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
+    },
+    {
+      "backend": "FalkorDB, Milvus, Elasticsearch (not run in the 26.12.1 small pass)",
+      "pinned": "6.0.1, v3.0.3, server 9.5.4",
+      "latest_release": "6.2.1, v3.0.6, 9.5.7",
+      "reason": "not run in this pass (#114 comment of 2026-11-23). FalkorDB 6.2 also switches its default image from Redis to Valkey, and a Valkey image cannot read Redis 7.4+ save files, so it is decided on its own",
+      "date": "2026-11-25",
+      "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
+    },
+    {
+      "backend": "falkordb (client of the FalkorDB arms)",
+      "pinned": "falkordb==1.7.1",
+      "latest_release": "1.8.2 (2026-11-11)",
+      "reason": "FalkorDB is not run in the 26.12.1 small pass and its server stays 6.0.1 (6.2.x changes the default image to Valkey); a client moves with its server. Notes of 1.8.x not read",
+      "date": "2026-11-25",
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
+    },
+    {
+      "backend": "pymilvus with minio, azure-storage-blob and ml-dtypes (clients of the Milvus arms)",
+      "pinned": "pymilvus[bulk_writer]==3.0.2, minio==7.2.20, azure-storage-blob==12.31.0, ml-dtypes==0.6.0",
+      "latest_release": "3.0.3, 7.2.20, 12.31.1, 0.7.0",
+      "reason": "Milvus is not run in this pass; Milvus's compatibility table names pymilvus 3.0.2 for the v3.0.3 server. `minio`, `azure-storage-blob` and `ml-dtypes` are its `bulk_writer` dependencies and stay with it",
+      "date": "2026-11-25",
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
+    },
+    {
+      "backend": "arcadedb-driver on the client line",
+      "pinned": "arcadedb-driver==0.2.0",
+      "latest_release": "0.4.0 (2026-11-05)",
+      "reason": "unused by any cell: the served ArcadeDB arms run the official driver layer (0.4.0); left at 0.2.0 on purpose (DECISIONS #259 (2))",
+      "date": "2026-11-25",
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
+    },
+    {
+      "backend": "numpy, pandas, pyarrow (harness libraries)",
+      "pinned": "numpy==2.5.3, pandas==3.0.6, pyarrow==25.0.1",
+      "latest_release": "2.5.4, 3.1.1, 26.0.1 (as read 2026-11-07)",
+      "reason": "the instrument shared by every arm including the ArcadeDB arms, not a comparator; build_images.sh says to move them deliberately; moving them changes how every vector and result set is converted, and pyarrow 26 is a major",
+      "date": "2026-11-25",
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
+    }
+  ]
+}

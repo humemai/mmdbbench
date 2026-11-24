@@ -1673,6 +1673,7 @@ class DuckE2:
         self.cx.execute(f"PRAGMA threads={self._threads}")
         self.cx.execute("INSTALL vss; LOAD vss;")
         self.cx.execute("INSTALL duckpgq FROM community; LOAD duckpgq;")
+        bench_common.duckpgq_enable(self.cx)
         self.cx.execute("SET hnsw_enable_experimental_persistence=true;")
         ext = dict(self.cx.execute("SELECT extension_name, extension_version FROM duckdb_extensions() "
                                    "WHERE extension_name IN ('vss', 'duckpgq')").fetchall())
@@ -1690,6 +1691,7 @@ class DuckE2:
         flat = pa.array(vecs.astype("float32").reshape(-1), type=pa.float32())
         tbl = pa.table({"pid": pa.array(range(len(vecs)), type=pa.int64()),
                         "emb": pa.FixedSizeListArray.from_arrays(flat, DIM)})
+        bench_common.duckdb_drain(self.cx)
         self.cx.register("src", tbl)
         self.cx.execute(f"CREATE TABLE product AS SELECT pid, 0::INTEGER AS views, emb::FLOAT[{DIM}] AS embedding FROM src")
         self.cx.unregister("src")
@@ -1698,6 +1700,7 @@ class DuckE2:
         self.cx.execute("CREATE UNIQUE INDEX product_pid ON product (pid)")
         etbl = pa.table({"src": pa.array([a for a, _ in edges], type=pa.int64()),
                          "dst": pa.array([b for _, b in edges], type=pa.int64())})
+        bench_common.duckdb_drain(self.cx)
         self.cx.register("esrc", etbl)
         self.cx.execute("CREATE TABLE related AS SELECT src, dst FROM esrc")
         self.cx.unregister("esrc")

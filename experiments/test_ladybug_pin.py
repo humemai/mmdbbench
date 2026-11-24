@@ -16,7 +16,7 @@ import textwrap
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PIN = "0.22.0"
+PIN = "0.22.3"
 BUILD = (HERE / "build_images.sh").read_text()
 DOCKERFILE = (HERE / "Dockerfile.bench").read_text()
 BAKE = HERE / "bake_ladybug_extensions.py"
@@ -38,7 +38,7 @@ def test_the_documents_name_the_pin_and_no_other_current_one():
         if not (HERE / name).exists():     # a document that is not in this checkout is skipped
             continue
         text = (HERE / name).read_text()
-        stale = [l[:100] for l in text.splitlines() if re.search(r"ladybug==0\.2[01]\.\d+", l) and "0.22.0" not in l]
+        stale = [l[:100] for l in text.splitlines() if re.search(r"ladybug==0\.2[01]\.\d+", l) and "0.22.0" not in l and PIN not in l]
         assert not stale, (name, stale)
     assert f"`ladybug=={PIN}`" in (HERE / "COMPARATORS.md").read_text()
 

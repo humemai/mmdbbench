@@ -23,8 +23,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 NEO4J_RECOMMENDATION_FILE = os.path.join(HERE, "neo4j_memory_recommendation.json")
 
-# The image the tool ran from: the digest every Neo4j arm in runner.BACKENDS pins (2026.10.0-community).
-NEO4J_IMAGE_DIGEST = "sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731"
+# The image the tool ran from: the digest every Neo4j arm in runner.BACKENDS pins (2026.10.2-community; 2026.10.0, sha256:c3903fa9..., until 2026-11-25).
+NEO4J_IMAGE_DIGEST = "sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854"
 # The command that produced the table, per cap (`{cap}` is the cell's memory cap). It runs against an empty data directory, so
 # the page cache it recommends is the one for a server whose memory is the only input, as for the cells that build their store.
 NEO4J_RECOMMENDATION_COMMAND = ("docker run --rm -m 2g --entrypoint neo4j-admin neo4j@" + NEO4J_IMAGE_DIGEST

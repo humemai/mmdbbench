@@ -17,6 +17,13 @@
 # and votes that artifact through as the release, so there is no non-rc build
 # to pin to and "latest stable" for AGE means the newest -rc0 for the major.
 #
+# MOVED TO POSTGRESQL 18.7 ON 2026-11-25 (humemai/mmdbbench#114, #175; the owner: "I go with your recommendations"). The base is the 0.8.7-pg18
+# build of 2026-11-12, whose image reads PG_VERSION=18.7-1.pgdg12+2 (the registry config), from `pgvector/pgvector@sha256:ad249f9fb957...` on
+# PostgreSQL 18.6. The AGE package moves with it, from 1.8.0~rc0-2.pgdg12+1 to 1.8.0~rc0-2.pgdg12+2: PGDG rebuilt AGE for 18.7 (the +2 build
+# declares `Depends: postgresql-18 (>> 18.7)`, the +1 build `postgresql-18`), and PostgreSQL 18.7's release notes say a minor release
+# changes the server's ABI for C-language extensions. Same AGE version (1.8.0, read back onto every row), so the rows still say age:1.8.0.
+# PostgreSQL 19.0 is NOT used: Apache AGE supports PostgreSQL up to 18 (comparator_constraints.json).
+#
 # THE PACKAGE IS PINNED TOO (2026-10-02, CAMPAIGN section 7 row 26). The base
 # image is pinned by digest, but `postgresql-18-age` unversioned took whatever
 # PGDG served on the build day, so two builds of this file could carry two
@@ -24,6 +31,6 @@
 # measured on (`dpkg-query` on dbbench:pg-age: 1.8.0~rc0-2.pgdg12+1, which the
 # rows record as age:1.8.0). If PGDG stops serving it, the build fails here
 # rather than moving AGE silently.
-FROM pgvector/pgvector@sha256:ad249f9fb9572979643a47694e59b9a8cdcdf6abc6accebf49bb80ad5f20ff9b
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-18-age=1.8.0~rc0-2.pgdg12+1 \
+FROM pgvector/pgvector@sha256:4bdc16048580b56345bca441bffe8d9b45dd2f5d76963808c853df1661df6e00
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-18-age=1.8.0~rc0-2.pgdg12+2 \
     && rm -rf /var/lib/apt/lists/*

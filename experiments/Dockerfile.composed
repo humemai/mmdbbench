@@ -1,5 +1,6 @@
-# The composed cross-model stack's server: Neo4j 2026.10.0-community + Qdrant
-# v1.20.0 in one container (BUGS F133, DECISIONS #117).
+# The composed cross-model stack's server: Neo4j 2026.10.2-community + Qdrant
+# v1.20.2 in one container (moved from 2026.10.0 + v1.20.0 on 2026-11-25,
+# humemai/mmdbbench#114 and #175; the old digests stay in COMPARATORS.md) (BUGS F133, DECISIONS #117).
 #
 # WHY. The composed stack's vector half was QdrantClient(location=":memory:"),
 # the qdrant-client package's pure-Python local mode, which the comparator
@@ -20,8 +21,8 @@
 # are Debian 13), so nothing is fetched from a package mirror.
 #
 # Built as dbbench:composed by build_images.sh.
-FROM qdrant/qdrant@sha256:2d1b0bfd0a961275481ea09400fc98008216ae54e1b52ed7d24520d63050c644 AS qdrant
-FROM neo4j@sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731
+FROM qdrant/qdrant@sha256:c5e32ee251293d2e1f4dd34890ad75eeee5a4f3821a121d6d8b7e4323448b386 AS qdrant
+FROM neo4j@sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854
 COPY --from=qdrant /qdrant /qdrant
 COPY --from=qdrant /lib/x86_64-linux-gnu/libunwind-ptrace.so.0 /lib/x86_64-linux-gnu/libunwind-x86_64.so.8 /lib/x86_64-linux-gnu/libunwind.so.8 /lib/x86_64-linux-gnu/
 COPY docker-conf/composed-entrypoint.sh /usr/local/bin/composed-entrypoint.sh

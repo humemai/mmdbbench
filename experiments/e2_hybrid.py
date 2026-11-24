@@ -1673,6 +1673,7 @@ class DuckE2:
         self.cx.execute(f"PRAGMA threads={self._threads}")
         self.cx.execute("INSTALL vss; LOAD vss;")
         self.cx.execute("INSTALL duckpgq FROM community; LOAD duckpgq;")
+        bench_common.duckpgq_enable(self.cx)
         self.cx.execute("SET hnsw_enable_experimental_persistence=true;")
         ext = dict(self.cx.execute("SELECT extension_name, extension_version FROM duckdb_extensions() "
                                    "WHERE extension_name IN ('vss', 'duckpgq')").fetchall())

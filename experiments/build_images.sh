@@ -53,6 +53,13 @@ declare -A PKGS=(
   # months behind is unfair in our favour, and it is the first thing a reviewer
   # checks. qdrant-client, pymilvus, elasticsearch and ladybug were all behind.
   [arcadedb]="$ARCADE_PKGS"
+  # 2.0.1 FROM 2026-11-25 (humemai/mmdbbench#114, #175). THE HOLD BELOW WAS LIFTED: it said DuckPGQ registers no syntax on 2.0.0, and that
+  # check never set DuckDB 2.0's grammar-extension switch. After `LOAD duckpgq`, `SET active_grammar_extensions = ['duckpgq']` makes
+  # CREATE PROPERTY GRAPH and GRAPH_TABLE ... MATCH parse on duckdb 2.0.0 (duckpgq 29ca668a22) and 2.0.1 (7e300af593); without it 2.0.1
+  # answers `Parser Error` at PROPERTY (laptop probe 2026-11-25, in memory). The adapters set it (bench_common.duckpgq_enable) on 2.x and do
+  # nothing on 1.x. The 2.0.1 community builds exist for `vss` and `duckpgq` (HTTP 200, 2026-11-25). The comment that follows is the
+  # 2026-10-23 record of the hold, kept as history; the pin it names (1.5.6) is the one this line replaced.
+  #
   # 1.5.6, NOT 2.0.0 (2026-10-23, the bump from 1.5.4): DuckDB 2.0.0 is out and
   # its `vss` build and the `duckpgq` community build both exist for it, but
   # DuckPGQ LOADs on 2.0.0 (build 29ca668a22) without registering any of its
@@ -69,7 +76,11 @@ declare -A PKGS=(
   # below), so documents, time series, dense VSS and the DuckPGQ graph arm
   # all pin here. The client and dense lines carry the OCTOBER RE-PIN of
   # 2026-09-19 (COMPARATORS.md, "The October re-pin").
-  [duckdb]="duckdb==1.5.6 $HARNESS_PKGS"
+  [duckdb]="duckdb==2.0.1 $HARNESS_PKGS"
+  # ladybug 0.22.3 FROM 2026-11-25 (0.22.0 from 2026-10-25; 0.22.3 is the newest, PyPI 2026-11-06). The baked `vector` extension is the
+  # v0.22.0 file: on Python 3.12 with a temporary HOME, 0.22.3 fetched the same file as 0.22.0 (sha256 23da57e8..., equal to the pin
+  # below), so LADYBUG_EXTENSIONS is unchanged and bake_ladybug_extensions.py still refuses any other binary. The 0.22.1 notes list planner
+  # fixes that change answers (OPTIONAL MATCH, EXISTS, COUNT subquery), so every LadybugDB arm is re-measured.
   # ladybug 0.22.0 (2026-10-25), from 0.21.2 (2026-10-02, #129, which had moved off 0.20.4). 0.20.4 crashes the dense
   # arm's mutation phase after a deleted vector key is re-inserted (the process dies at `mutate-insert-start`; re-run
   # untimed on the laptop 2026-10-25, micro, BENCH_DENSE_MUTATE=1: 0.20.4 dies there, 0.22.0 completes it, recall
@@ -78,14 +89,14 @@ declare -A PKGS=(
   # of the 0.22 sources, and `LOAD vector` fails with an undefined symbol (LadybugDB/ladybug#1390). The 0.21.x line has
   # no way back to a working extension but the vendor restoring the file; 0.22.0 is the newest stable and its
   # extension loads. The extension is baked into the client image below, pinned by sha256 (LADYBUG_EXTENSIONS).
-  [client]="requests==2.34.2 psycopg[binary]==3.3.6 $HARNESS_PKGS surrealdb==2.0.0 qdrant-client==1.20.0 pymilvus[bulk_writer]==3.0.2 minio==7.2.20 azure-storage-blob==12.31.0 ml-dtypes==0.6.0 elasticsearch==9.5.1 neo4j==6.4.1 ladybug==0.22.0 pymongo==4.18.1 python-arango==8.3.6 falkordb==1.7.1 redis==8.1.0 neo4j-rust-ext==6.4.1.0 pgvector==0.5.1 arcadedb-driver==0.2.0"
+  [client]="requests==2.34.2 psycopg[binary]==3.3.6 $HARNESS_PKGS surrealdb==2.0.0 qdrant-client==1.20.0 pymilvus[bulk_writer]==3.0.2 minio==7.2.20 azure-storage-blob==12.31.0 ml-dtypes==0.6.0 elasticsearch==9.5.1 neo4j==6.4.1 ladybug==0.22.3 pymongo==4.18.1 python-arango==8.3.6 falkordb==1.7.1 redis==8.1.0 neo4j-rust-ext==6.4.1.0 pgvector==0.5.1 arcadedb-driver==0.2.0"
   # arcadedb-driver==0.2.0 on the client line stays 0.2.0 ON PURPOSE (DECISIONS #259 (2)): this line is the build arg of dbbench:client, the
   # image every comparator's measured rows ran on, and any edit to it rebuilds that image under a new digest. The served ArcadeDB arms run on
   # the `client-arcadedb` layer below (ARCADEDB_DRIVER_PKGS, lean_http.OFFICIAL_PIN = 0.4.0), not on this driver.
-  # ladybug==0.22.0 is the SAME pin as the client line above, here for the composed embedded cross-model arm
+  # ladybug==0.22.3 is the SAME pin as the client line above, here for the composed embedded cross-model arm
   # (composed_embedded_sqlite_lance_ladybug, 2026-10-25): SQLite + LanceDB + LadybugDB must import in ONE process, and
   # lancedb lives in this image. No new version: the dense lane's arms import none of it.
-  [dense]="chromadb==1.5.9 lancedb==0.39.0 sqlite-vec==0.1.9 duckdb==1.5.6 ladybug==0.22.0 $HARNESS_PKGS"
+  [dense]="chromadb==1.5.9 lancedb==0.39.0 sqlite-vec==0.1.9 duckdb==2.0.1 ladybug==0.22.3 $HARNESS_PKGS"
 )
 # RUNTIME EXTENSIONS ARE PINNED BY SHA256 AND INSTALLED AT IMAGE BUILD TIME (2026-10-25). The client image's LadybugDB arms
 # (ladybug_e2, ladybug_dense, ladybug_lifecycle) used to run `INSTALL vector` in every cell, which downloads the binary from
@@ -199,7 +210,7 @@ for be in "${targets[@]}"; do
     continue
   fi
   if [ "$be" = "mongo-search" ]; then
-    # MongoDB Community 9.0.4 + mongot (MongoDB Search Community) 1.70.5 in
+    # MongoDB Community 9.0.8 + mongot (MongoDB Search Community) 1.79.1 in
     # one container (Dockerfile.mongosearch), the dense and cross-model arms'
     # server. Both halves pinned by digest inside the Dockerfile, so a local
     # build has the same provenance a pulled image would.

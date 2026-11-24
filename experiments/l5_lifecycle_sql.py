@@ -132,6 +132,7 @@ class DuckEngine(Engine):
             cx.execute("SET hnsw_enable_experimental_persistence=true")
         elif self.situation == "graph":
             cx.execute("LOAD duckpgq")
+            bench_common.duckpgq_enable(cx)
         return cx
 
     def version(self):
@@ -359,7 +360,7 @@ def _cold_process(eng, situation):
         imp, opn = "import sqlite3", f"cx = sqlite3.connect({eng.db_path!r})"
     else:
         imp = "import duckdb"
-        ext = {"vector": "; cx.execute('LOAD vss')", "graph": "; cx.execute('LOAD duckpgq')"}.get(situation, "")
+        ext = {"vector": "; cx.execute('LOAD vss')", "graph": "; cx.execute('LOAD duckpgq'); duckdb.__version__.startswith('1.') or cx.execute(\"SET active_grammar_extensions = ['duckpgq']\")"}.get(situation, "")
         opn = f"cx = duckdb.connect({eng.db_path!r}){ext}"
     boot = subprocess.run(
         [sys.executable, "-c",

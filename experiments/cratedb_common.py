@@ -1,6 +1,6 @@
 """CrateDB plumbing shared by the three lanes (documents analytics, dense, time series).
 
-CrateDB 6.4.6 over the PostgreSQL wire (port 5432, user `crate`, schema `doc`), the wire the PostgreSQL arms use, through the
+CrateDB 6.4.7 (6.4.6 until 2026-11-25) over the PostgreSQL wire (port 5432, user `crate`, schema `doc`), the wire the PostgreSQL arms use, through the
 `psycopg` the client image already has. Nothing here is a tuning knob of ours; every setting is either the vendor's documented
 recommendation or the matched value of the lane, and every one is READ BACK from the engine onto the row (F15):
 

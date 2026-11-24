@@ -1,5 +1,6 @@
-# MongoDB Community 9.0.4 + MongoDB Search (mongot) Community 1.70.5 in one
-# container: the self-hosted, generally available way to run $vectorSearch.
+# MongoDB Community 9.0.8 + MongoDB Search (mongot) Community 1.79.1 in one
+# container (moved from 9.0.4 + 1.70.5 on 2026-11-25, humemai/mmdbbench#114 and #175; the old pair stays
+# recorded in COMPARATORS.md, "Pins moved for the 26.12.1 small pass"): the self-hosted, generally available way to run $vectorSearch.
 #
 # THE OCTOBER HOLD AT mongod 8.2.12 / mongot 1.70.4 WAS LIFTED ON 2026-10-23.
 # 8.3.13 still refuses to boot on the bench kernel (SERVER-121912, the
@@ -15,7 +16,10 @@
 # newest, and why". It is still the SAME mongod digest every other MongoDB arm
 # runs, so the vector rows and the document rows come from one engine build.
 #
-# mongot 1.70.5 (2026-09-29) is the newest Search Community release: security
+# mongot 1.79.1 (Docker Hub tag pushed 2026-11-18, image config created 2026-10-28) is the newest Search Community release on 2026-11-25; its
+# release notes between 1.70.5 and 1.79.1 were not read, and MongoDB's compatibility table for Search still has no 9.0 row (the pair is
+# exercised, not documented: see comparator_constraints.json). The fallback if the smoke fails is 1.78.0. The line below is about 1.70.5, the
+# pin until 2026-11-25: 1.70.5 (2026-09-29) was the newest Search Community release then: security
 # dependency upgrades only, and its default image moved to a distroless UBI9
 # base; /mongot-community is laid out as before, so the COPY below is unchanged.
 # Both digests are the amd64 MANIFEST digest (not the multi-arch index digest),
@@ -41,8 +45,8 @@
 # document rows come from one engine build rather than two.
 #
 # Built as dbbench:mongo-search by build_images.sh.
-FROM mongodb/mongodb-community-search@sha256:6232a8acec5ea4cce2cf52fa7c17b57da5758eac11538ffc35dab43abde8d366 AS mongot
-FROM mongo@sha256:b609cdfba3a865331378cc4158bc52522a3bf176d59a7ff2c43fab52f5d9d5cb
+FROM mongodb/mongodb-community-search@sha256:4512001a59ea05f7ee79dc1d6a86ad677d92d739617d2193568ed354f01e611e AS mongot
+FROM mongo@sha256:e5964383224061a512e9a886a4beaf6ed299f0237b7239dbf9876cbc7882910d
 # mongot bundles its own jlink'd JDK under bin/jdk, so the whole directory is
 # self-contained and nothing has to be installed into the mongod image.
 COPY --from=mongot /mongot-community /mongot-community

@@ -129,6 +129,38 @@
       "source_url": "https://raw.githubusercontent.com/arangodb/arangodb/3.12/CHANGELOG",
       "date_read": "2026-11-25",
       "lanes": "tables, graphs, vectors, cross-model, time series"
+    },
+    {
+      "backend": "MongoDB",
+      "component": "PyMongo 4.20.1 (client)",
+      "supported_versions": "Python 3.11 or later; PyMongo 4.18 to 4.20 fully compatible with MongoDB 9.0; 4.20.0 removes beta encryption query types and text_opts (not used by the harness)",
+      "source_url": "https://pymongo.readthedocs.io/en/stable/changelog.html",
+      "date_read": "2026-11-25",
+      "lanes": "all MongoDB lanes"
+    },
+    {
+      "backend": "Redis",
+      "component": "redis-py 8.2.0 (client)",
+      "supported_versions": "Python 3.11 or later; 8.2.0 deprecates CacheConfig.DEFAULT_ALLOW_LIST and READ_COMMANDS (not used by the harness); its stated Redis range: not found",
+      "source_url": "https://github.com/redis/redis-py/releases/tag/v8.2.0",
+      "date_read": "2026-11-25",
+      "lanes": "vectors, tables"
+    },
+    {
+      "backend": "PostgreSQL",
+      "component": "psycopg 3.3.9 (client of the PostgreSQL, pgvector, AGE and CrateDB arms)",
+      "supported_versions": "Python 3.10 or later; 3.3.9 notes are fixes (the 3.3.7 and 3.3.8 notes were not read)",
+      "source_url": "https://www.psycopg.org/psycopg3/docs/news.html",
+      "date_read": "2026-11-25",
+      "lanes": "tables, vectors, graph (AGE), CrateDB tables"
+    },
+    {
+      "backend": "ArangoDB",
+      "component": "python-arango 8.3.7 (client)",
+      "supported_versions": "Python 3.10 or later; its stated ArangoDB range: not found; the smoke runs it against 3.12.14",
+      "source_url": "https://github.com/arangodb/python-arango/releases/tag/8.3.7",
+      "date_read": "2026-11-25",
+      "lanes": "tables, graphs, vectors"
     }
   ],
   "exceptions": [
@@ -189,12 +221,36 @@
       "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
     },
     {
-      "backend": "client packages (build_images.sh PKGS[client]): pymongo, psycopg, python-arango, falkordb, pymilvus, redis-py, lancedb",
-      "pinned": "pymongo 4.18.1, psycopg 3.3.6, python-arango 8.3.6, falkordb 1.7.1, pymilvus 3.0.2, redis 8.1.0, lancedb 0.39.0",
-      "latest_release": "4.20.1, 3.3.9, 8.3.7, 1.8.2, 3.0.3, 8.2.0, 0.41.0",
-      "reason": "the standing client hold of COMPARATORS.md (\"Client holds\"); not part of the approved recommendations. The ladybug bump rebuilds dbbench:client anyway, so this PR is the one rebuild in which they could move: left for the owner to say",
+      "backend": "falkordb (client of the FalkorDB arms)",
+      "pinned": "falkordb==1.7.1",
+      "latest_release": "1.8.2 (2026-11-11)",
+      "reason": "FalkorDB is not run in the 26.12.1 small pass and its server stays 6.0.1 (6.2.x changes the default image to Valkey); a client moves with its server. Notes of 1.8.x not read",
       "date": "2026-11-25",
-      "decided_by": "open: the recommendations of #114 name engines only; the owner has not said"
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
+    },
+    {
+      "backend": "pymilvus with minio, azure-storage-blob and ml-dtypes (clients of the Milvus arms)",
+      "pinned": "pymilvus[bulk_writer]==3.0.2, minio==7.2.20, azure-storage-blob==12.31.0, ml-dtypes==0.6.0",
+      "latest_release": "3.0.3, 7.2.20, 12.31.1, 0.7.0",
+      "reason": "Milvus is not run in this pass; Milvus's compatibility table names pymilvus 3.0.2 for the v3.0.3 server. `minio`, `azure-storage-blob` and `ml-dtypes` are its `bulk_writer` dependencies and stay with it",
+      "date": "2026-11-25",
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
+    },
+    {
+      "backend": "arcadedb-driver on the client line",
+      "pinned": "arcadedb-driver==0.2.0",
+      "latest_release": "0.4.0 (2026-11-05)",
+      "reason": "unused by any cell: the served ArcadeDB arms run the official driver layer (0.4.0); left at 0.2.0 on purpose (DECISIONS #259 (2))",
+      "date": "2026-11-25",
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
+    },
+    {
+      "backend": "numpy, pandas, pyarrow (harness libraries)",
+      "pinned": "numpy==2.5.3, pandas==3.0.6, pyarrow==25.0.1",
+      "latest_release": "2.5.4, 3.1.1, 26.0.1 (as read 2026-11-07)",
+      "reason": "the instrument shared by every arm including the ArcadeDB arms, not a comparator; build_images.sh says to move them deliberately; moving them changes how every vector and result set is converted, and pyarrow 26 is a major",
+      "date": "2026-11-25",
+      "decided_by": "decided by the 2026-11-24 latest-compatible directive (humemai/mmdbbench#175)"
     }
   ]
 }

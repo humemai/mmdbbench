@@ -89,7 +89,11 @@ declare -A PKGS=(
   # of the 0.22 sources, and `LOAD vector` fails with an undefined symbol (LadybugDB/ladybug#1390). The 0.21.x line has
   # no way back to a working extension but the vendor restoring the file; 0.22.0 is the newest stable and its
   # extension loads. The extension is baked into the client image below, pinned by sha256 (LADYBUG_EXTENSIONS).
-  [client]="requests==2.34.2 psycopg[binary]==3.3.6 $HARNESS_PKGS surrealdb==2.0.0 qdrant-client==1.20.0 pymilvus[bulk_writer]==3.0.2 minio==7.2.20 azure-storage-blob==12.31.0 ml-dtypes==0.6.0 elasticsearch==9.5.1 neo4j==6.4.1 ladybug==0.22.3 pymongo==4.18.1 python-arango==8.3.6 falkordb==1.7.1 redis==8.1.0 neo4j-rust-ext==6.4.1.0 pgvector==0.5.1 arcadedb-driver==0.2.0"
+  # CLIENT MOVES OF 2026-11-25 (the latest-compatible directive of 2026-11-24, humemai/mmdbbench#175): psycopg 3.3.6 to 3.3.9, pymongo 4.18.1 to 4.20.1,
+  # python-arango 8.3.6 to 8.3.7, redis 8.1.0 to 8.2.0. Each is the latest on PyPI and supports Python 3.12; the readings and every client that STAYS
+  # behind its latest (with its exception line) are in COMPARATORS.md, "Client packages", and comparator_constraints.json. The image is rebuilt anyway
+  # (ladybug 0.22.3), so this is the one rebuild in which they move.
+  [client]="requests==2.34.2 psycopg[binary]==3.3.9 $HARNESS_PKGS surrealdb==2.0.0 qdrant-client==1.20.0 pymilvus[bulk_writer]==3.0.2 minio==7.2.20 azure-storage-blob==12.31.0 ml-dtypes==0.6.0 elasticsearch==9.5.1 neo4j==6.4.1 ladybug==0.22.3 pymongo==4.20.1 python-arango==8.3.7 falkordb==1.7.1 redis==8.2.0 neo4j-rust-ext==6.4.1.0 pgvector==0.5.1 arcadedb-driver==0.2.0"
   # arcadedb-driver==0.2.0 on the client line stays 0.2.0 ON PURPOSE (DECISIONS #259 (2)): this line is the build arg of dbbench:client, the
   # image every comparator's measured rows ran on, and any edit to it rebuilds that image under a new digest. The served ArcadeDB arms run on
   # the `client-arcadedb` layer below (ARCADEDB_DRIVER_PKGS, lean_http.OFFICIAL_PIN = 0.4.0), not on this driver.

@@ -13,6 +13,10 @@ The benchmark was called DBBench until 2026-11-07. The old URLs for the reposito
 - **Results:** <https://humem.ai/research/mmdbbench>
 - **Documentation:** <https://docs.humem.ai/mmdbbench/> (methodology, engine settings, how to reproduce, how to contribute a correction)
 
+## Run it yourself
+
+One cell for one engine on a clean checkout, with `uv` and nothing else: `e2` takes about 10 seconds. The guide has the commands, the datasets with source and checksum, the environment variables, the time and memory of each small cell, and how to compare your row with the published ones: [docs/reproduce.md](docs/reproduce.md) (<https://docs.humem.ai/mmdbbench/latest/reproduce/>). A weekly workflow runs its first cell on a clean runner, so the commands stay true.
+
 ## Lanes
 
 Tables (documents and SQL analytics), graphs (interactive and analytical queries), vectors (dense and sparse), time series, cross-model queries, and lifecycle (durability and restarts).

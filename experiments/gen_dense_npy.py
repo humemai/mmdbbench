@@ -14,7 +14,7 @@ corpus already staged on the bench host.
 
 Usage:
   # download once, into data/<subdir>/
-  curl -LO http://ann-benchmarks.com/sift-128-euclidean.hdf5
+  curl -LO https://ann-benchmarks.com/sift-128-euclidean.hdf5
   curl -LO http://ann-benchmarks.com/deep-image-96-angular.hdf5
 
   uv run --no-project --with h5py --with numpy python gen_dense_npy.py sift
@@ -53,7 +53,7 @@ def main(name):
     src = os.path.join(d, h5)
     if not os.path.exists(src):
         sys.exit(f"{src} not found; download it first:\n"
-                 f"  curl -L -o {src} http://ann-benchmarks.com/{h5}")
+                 f"  curl -L -o {src} https://ann-benchmarks.com/{h5}")
     with h5py.File(src, "r") as f:
         for key, stem in outputs.items():
             ds = f[key]

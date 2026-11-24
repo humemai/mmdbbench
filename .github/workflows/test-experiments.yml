@@ -8,6 +8,9 @@ on:
     paths:
       - 'experiments/**'
       - 'benchmarks/**'
+      - 'docs/reproduce.md'
+      - 'README.md'
+      - 'mkdocs.yml'
       - '.github/workflows/test-experiments.yml'
   push:
     branches:
@@ -15,6 +18,9 @@ on:
     paths:
       - 'experiments/**'
       - 'benchmarks/**'
+      - 'docs/reproduce.md'
+      - 'README.md'
+      - 'mkdocs.yml'
       - '.github/workflows/test-experiments.yml'
   workflow_dispatch:
 

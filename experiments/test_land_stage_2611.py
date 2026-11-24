@@ -365,8 +365,9 @@ def test_two_worktrees_land_from_a_pre_created_union_of_the_sparse_and_e4_files(
         (e4 / f"decomp3m_{PIN}_rep{rep}.json").write_text(json.dumps({"rep": rep}))
     landing["host"].put_rows(_fixture_rows()[:20])                    # the host has the rows file and neither directory
     before = {p.name: p.read_bytes() for d in (sp, e4) for p in d.iterdir()}
-    assert _land(landing, "--dry-run") == 0
+    rc = _land(landing, "--dry-run")
     out = capsys.readouterr().out
+    assert rc == (1 if "WOULD REFUSE" in out else 0), (rc, out[-300:])      # the exit status says what the text says (#163); this test is about the union, not about the owed files
     assert f"sparse_mp_{PIN}: 2 file(s)" in out and f"e4decomp_{PIN}: 3 rep file(s)" in out
     assert {p.name: p.read_bytes() for d in (sp, e4) for p in d.iterdir()} == before
 

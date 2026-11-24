@@ -1211,9 +1211,12 @@ def main():
 
     # THE OVERLAY FILES THE EXPORTER WILL NEED ARE THERE, OR THE LANDING REFUSES HERE, BEFORE THE MERGE (humemai/mmdbbench#160). Silent when it cannot decide.
     _gaps = overlay_gaps(_read_jsonl(RESULTS / "runs.jsonl"), keep, args.pin, scope=_lanes, comparator_pins=size_classes.comparator_pins())
+    _would_refuse = False
     if _gaps:
         if args.dry_run:
-            # A dry run says it and goes on to its usual stop (rc 0): it merges nothing either way, and the same list is the refusal of the run without --dry-run.
+            # A dry run says it and goes on to its usual stop, with rc 1 (humemai/mmdbbench#163): it merges nothing either way, and the same list is the refusal of
+            # the run without --dry-run, so a script that runs a dry run first sees the refusal in the exit status and not only in the text.
+            _would_refuse = True
             print("\n  " + format_overlay_gaps(_gaps).replace("REFUSING:", "WOULD REFUSE (the run without --dry-run stops here):", 1).replace("\n", "\n  "))
         else:
             sys.exit(format_overlay_gaps(_gaps))
@@ -1228,7 +1231,9 @@ def main():
         print(f"\n  DRY RUN: {n} row(s) would be merged into results/runs.jsonl,"
               f"\n           then the gates would run and the diff would print."
               f"\n           Nothing was written. Drop --dry-run to proceed.")
-        return 0
+        if _would_refuse:
+            print("\n  The run without --dry-run would refuse (WOULD REFUSE above), so this dry run exits 1.")
+        return 1 if _would_refuse else 0
 
     step(3, "merge into results/runs.jsonl")
     before = SITE_PAYLOAD.read_text() if SITE_PAYLOAD.exists() else "{}"

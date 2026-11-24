@@ -243,3 +243,7 @@ Run `campaign_switch_check.py --new-pin <pin>` first. It changes nothing: it rep
 Then, in order: land the final stage and freeze; run every gate on the new payload, including the manifest coverage check; publish with `refresh_web_page.py`; publish the results asset; update the files the check listed that are not historical mentions; update the documentation lines it listed that the new instrument changes; and rebuild both sites, checking that the page's link to the docs and the docs' links to the page still resolve.
 
 Pruning comes before the documentation pass, and the documentation pass is not optional: removing a rule leaves sentences elsewhere that referred to it, and a document describing something that no longer exists is worse than no document. The check is a report rather than a gate on purpose: a file naming the old pin may be recording history rather than describing the present, and a tool that decided that for you would be wrong in both directions.
+
+## The "Run it yourself" guide at a landing
+
+`docs/reproduce.md` names the ArcadeDB wheel of the published rows (`arcadedb-jvm==<version>`), the packages of `build_images.sh`, and a table of the time and memory of the small cells that `tools/small_cell_cost.py` prints from `results/runs_paper.csv`. A landing that moves the engine version or the rows changes the guide in the same pull request: `test_reproduce_guide.py` fails otherwise and prints the table to paste. The weekly `reproduce-smoke.yml` runs the guide's e2 cell from the blocks it marks as runnable.

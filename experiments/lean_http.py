@@ -174,6 +174,28 @@ def _decode_body(raw, encoding):
     return raw
 
 
+DNS_LABEL_MAX = 63           # RFC 1035; the runner's cell_host() keeps every container name inside it
+DNS_NAME_MAX = 253
+
+
+def host_problem(host):
+    """Why `host` cannot be resolved, as a sentence, or None. A name with an empty label or a label over 63 characters makes `http.client` (through
+    `socket.getaddrinfo`'s IDNA encoding) raise `UnicodeError: encoding with 'idna' codec failed`, before any socket opens, and that says nothing
+    about which name it was. The rehearsal of the 26.11.1 pin lost the lean restart cell of the time series that way: its server container,
+    `srv-<run id>`, was 65 characters (humemai/mmdbbench#166)."""
+    if not isinstance(host, str) or not host:
+        return f"no host name to connect to ({host!r})"
+    name = host[:-1] if host.endswith(".") else host
+    if len(name) > DNS_NAME_MAX:
+        return f"the host name has {len(name)} characters, over the DNS limit of {DNS_NAME_MAX}: {host!r}"
+    for label in name.split("."):
+        if not label:
+            return f"the host name has an empty label: {host!r}"
+        if len(label) > DNS_LABEL_MAX:
+            return f"the host name has a label of {len(label)} characters, over the DNS limit of {DNS_LABEL_MAX}: {host!r}"
+    return None
+
+
 # How much of an early answer goes into a ConnectionError, and how long the client waits for one (bytes, seconds).
 EARLY_ANSWER_BYTES = 500
 EARLY_ANSWER_WAIT_S = 5.0
@@ -215,6 +237,9 @@ class LeanSession:
 
     # -- connections
     def _connect(self, scheme, host, port, timeout):
+        problem = host_problem(host)
+        if problem:
+            raise ConnectionError(problem)       # a ConnectionError that says why, in place of http.client's UnicodeError (humemai/mmdbbench#166)
         if scheme == "https":
             conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl.create_default_context())
         else:
@@ -241,6 +266,8 @@ class LeanSession:
                 conn = self._connect(key[0], key[1], key[2], timeout)
             except socket.timeout as e:
                 raise Timeout(f"connect to {key[1]}:{key[2]} timed out") from e
+            except UnicodeError as e:        # the IDNA encoding of a host name http.client could not make (host_problem catches the usual two)
+                raise ConnectionError(f"cannot connect to {key[1]}:{key[2]}: {e}") from e
             except OSError as e:
                 raise ConnectionError(f"cannot connect to {key[1]}:{key[2]}: {e}") from e
             self._conns[key] = conn

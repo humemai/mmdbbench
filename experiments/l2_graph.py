@@ -1556,6 +1556,7 @@ class DuckpgqGraph(Base):
         def flush():
             columns = list(zip(*buf))
             tbl = pa.table({c: pa.array(columns[i]) for i, c in enumerate(cols)})
+            bench_common.duckdb_drain(self.cx)
             self.cx.register("_src", tbl)
             self.cx.execute(f"INSERT INTO {table} SELECT * FROM _src")
             self.cx.unregister("_src")

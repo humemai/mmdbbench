@@ -44,6 +44,18 @@ def instrument_at_least(version):
     return INSTRUMENT >= version
 
 
+def duckdb_drain(cx):
+    """Finish any result the DuckDB connection still holds, before `cx.register(...)`.
+
+    DuckDB 2.x raises `ResourceInUseException: connection has an unfinished result from execute()` when a table is registered while an earlier
+    `execute(...).fetchone()` (or an INSERT's row count) was not read to its end; 1.x did not check. The e2 cell of the guide failed on it with
+    duckdb 2.0.1 (humemai/mmdbbench CI, 2026-11-25). Reading the rest of the result is harmless on 1.x and when nothing is pending."""
+    try:
+        cx.fetchall()
+    except Exception:  # nothing pending, or a version that has no pending result to read
+        pass
+
+
 def duckpgq_enable(cx):
     """Switch DuckPGQ's grammar on after `LOAD duckpgq` when DuckDB is 2.x; do nothing on 1.x.
 

@@ -186,6 +186,7 @@ def _insert(eng, cx, table, ncols, rows, select=None):
         expr = select or ", ".join(f"c{k}" for k in range(ncols))
         for batch in _batched(rows):
             cols = list(zip(*batch))
+            bench_common.duckdb_drain(cx)
             cx.register("lc_batch", pa.table({f"c{k}": list(cols[k]) for k in range(ncols)}))
             cx.execute(f"INSERT INTO {table} SELECT {expr} FROM lc_batch")
             cx.unregister("lc_batch")

@@ -446,6 +446,7 @@ class DuckTPC:
         # from the registered frame, DuckDB's columnar bulk path.
         first = True
         for df in li.frames():
+            bench_common.duckdb_drain(self.cx)
             self.cx.register("li_src", df)
             if first:
                 self.cx.execute("CREATE TABLE lineitem AS SELECT * FROM li_src")
@@ -453,6 +454,7 @@ class DuckTPC:
             else:
                 self.cx.execute("INSERT INTO lineitem SELECT * FROM li_src")
             self.cx.unregister("li_src")
+        bench_common.duckdb_drain(self.cx)
         self.cx.register("p_src", part)
         self.cx.execute("CREATE TABLE part AS SELECT *, 100 AS stock FROM p_src")
         self.cx.execute("CREATE TABLE orders_new (okey BIGINT, pkey BIGINT, qty INT, paid INT DEFAULT 0)")

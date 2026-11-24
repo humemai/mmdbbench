@@ -1,6 +1,6 @@
 {
- "image": "neo4j@sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731",
- "command": "docker run --rm -m 2g --entrypoint neo4j-admin neo4j@sha256:c3903fa96db31479c2a28e5d00e05260b039ff856f8b2cca7280c78299877731 server memory-recommendation --memory={cap} --docker",
+ "image": "neo4j@sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854",
+ "command": "docker run --rm -m 2g --entrypoint neo4j-admin neo4j@sha256:b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854 server memory-recommendation --memory={cap} --docker",
  "caps": {
   "8g": {
    "heap_initial": "3600m",

@@ -25,6 +25,7 @@ import base64
 import csv
 import fcntl
 import glob
+import hashlib
 import json
 import os
 import pwd
@@ -3536,6 +3537,31 @@ def precell_gate_stamp(row, environ=None):
     return row
 
 
+DNS_LABEL_MAX = 63          # RFC 1035: a name between dots is at most 63 characters, and the container name has no dots
+HOST_HASH_LEN = 8
+
+
+def cell_host(prefix, run_id):
+    """The host name of a cell's container (`prefix` is `srv` for the server, the sidecar's name for a sidecar): `<prefix>-<run_id>` when that is
+    one valid DNS label (at most 63 characters), otherwise `<prefix>-<head of run_id>-<8 hex of sha256(run_id)>`, 63 characters or fewer.
+
+    WHY (humemai/mmdbbench#166). Docker resolves a container by its name, the client connects by that name, and Python's `http.client` (the lean
+    client) raises `UnicodeError: encoding with 'idna' codec failed` (`label too long`) for a label over 63 characters, before it opens a socket;
+    libpq (the PostgreSQL-wire twin) cannot resolve such a name either. `srv-restart_arcadedb_ts_native_server_restart_clientlean_ts100_r1` is 65
+    characters, and so are the lean restart cells of ts1000 and the PostgreSQL-wire twins of the fp32 sparse search at small and medium, in the
+    rehearsal of the 26.11.1 pin. A name that already fits is returned unchanged, so every cell that ran before keeps its host name. The hash is of the whole
+    run id, so two cells cut to the same head still get different names; it is deterministic, so a rerun of a cell gets the same name. The row records the
+    name (`server_host`), next to the `run_id` it was made from."""
+    if len(prefix) + HOST_HASH_LEN + 2 >= DNS_LABEL_MAX:
+        raise ValueError(f"host prefix {prefix!r} leaves no room in a {DNS_LABEL_MAX}-character DNS label")
+    name = f"{prefix}-{run_id}"
+    if len(name) <= DNS_LABEL_MAX:
+        return name
+    digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:HOST_HASH_LEN]
+    head = run_id[:DNS_LABEL_MAX - len(prefix) - HOST_HASH_LEN - 2].rstrip("_-.")
+    return f"{prefix}-{head}-{digest}"
+
+
 def run_cell(job, rep, scale, cpuset, tier, net_name):
     job["_scale"] = scale
     """Run one cell (backend x workload x scale, one repeat). Returns row dict."""
@@ -3693,8 +3719,12 @@ def run_cell(job, rep, scale, cpuset, tier, net_name):
             row["server_shm_size"] = str(server_mem)
             # SIDECARS (the Milvus compose standalone: etcd and MinIO beside the server). They share the cell's
             # cpuset and network, carry their own memory caps, are recorded on the row, and are removed in `finally`.
+            # THE SERVER'S HOST NAME: its container name and the client's BENCH_SERVER_HOST, at most one DNS label (cell_host, #166).
+            # It is on the row, so a name cut to fit still maps back to its cell (run_id is the cell, server_host the container).
+            server_host = cell_host("srv", run_id)
+            row["server_host"] = server_host
             for _s in be.get("sidecars", []):
-                _sc[_s["name"]] = f"{_s['name']}-{run_id.replace('_', '-')}"  # MinIO endpoints refuse underscores in a hostname
+                _sc[_s["name"]] = cell_host(_s["name"], run_id.replace("_", "-"))  # MinIO endpoints refuse underscores in a hostname
             for _s in be.get("sidecars", []):
                 _scid = sh(["docker", "run", "-d", "--network", net_name, *RUNNER_LABELS,
                             "--name", _sc[_s["name"]], "--cpuset-cpus", cpuset,
@@ -3714,7 +3744,7 @@ def run_cell(job, rep, scale, cpuset, tier, net_name):
                     row["native_dropped_flags"] = " ".join(be["native_dropped_flags"])
             server_cid = sh(["docker", "run", "-d", "--network", net_name,
                              *RUNNER_LABELS,
-                             "--name", f"srv-{run_id}",
+                             "--name", server_host,
                              "--cpuset-cpus", cpuset,
                              "--memory", str(server_mem), "--memory-swap", str(server_mem),
                              "--shm-size", str(server_mem)]
@@ -3820,7 +3850,7 @@ def run_cell(job, rep, scale, cpuset, tier, net_name):
             s_srv.start()
             samplers.append(("server", s_srv))
             client_caps = ["--memory", str(client_mem), "--memory-swap", str(client_mem)]
-            bench_env = ["-e", f"BENCH_SERVER_HOST=srv-{run_id}",
+            bench_env = ["-e", f"BENCH_SERVER_HOST={server_host}",
                          "-e", f"BENCH_SERVER_PORT={be['server_port']}"]
             if "arcadedb" in job["backend"]:
                 bench_env += ["-e", f"BENCH_ARCADEDB_SERVER_BUILD={row['server_build']}"]

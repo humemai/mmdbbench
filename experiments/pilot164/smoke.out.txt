@@ -1,0 +1,45 @@
+ok    plan L1: the same seed gives the same order (salt 1)
+ok    plan L1: balanced as built (equal runs per level, positions within one, drift correlation at most 0.3)
+ok    plan L2: the same seed gives the same order (salt 0)
+ok    plan L2: balanced as built (equal runs per level, positions within one, drift correlation at most 0.3)
+ok    plan L3: the same seed gives the same order (salt 0)
+ok    plan L3: balanced as built (equal runs per level, positions within one, drift correlation at most 0.3)
+ok    plan L4: the same seed gives the same order (salt 0)
+ok    plan L4: balanced as built (equal runs per level, positions within one, drift correlation at most 0.3)
+ok    plan L5: the same seed gives the same order (salt 0)
+ok    plan L5: balanced as built (equal runs per level, positions within one, drift correlation at most 0.3)
+ok    plan L6: the same seed gives the same order (salt 0)
+ok    plan L6: balanced as built (equal runs per level, positions within one, drift correlation at most 0.3)
+ok    plan L1: lane positions over all runs [4, 3, 3] (within one)
+ok    plan L3: the compare1 claims carry the class of the stream they host (bw_heavy), compare2 and compare3 only compute
+ok    plan L3: a membw stream is on compare1 only, so its target is never on compare1
+ok    t quantile 0.975 at 5, 13 and 30 degrees of freedom equals 2.5706, 2.1604 and 2.0423
+ok    recovery over 100 simulated pilots: interval covers the truth for the idle figure, the compute effect and the membw effect in 99, 98 and 97 of 100
+ok    recovery: mean error of the idle figure, compute and membw effects -0.00000, +0.00027, -0.00019 (log scale, noise sd 0.004)
+ok    truth idle +1 percent over solo, noise sd 0.4 percent: verdict PASS (ratio 1.0073, half-width 0.34 percent)
+ok    neighbour effect membw recovered: x0.9223 [0.9165, 0.9282] for a truth of x0.92
+ok    lane position effect of compare1 recovered: x1.0020 for a truth of x1.0040
+ok    truth idle +6 percent over solo: verdict FAIL (ratio 1.0572)
+ok    noise sd 3 percent: verdict UNDECIDED, half-width 4.58 percent (never PASS with a half-width above 3 percent)
+ok    design check: an order sorted by level (all idle runs first) is refused as confounded with drift: cpu: run order is confounded with level compute (correlation +0.87)
+ok    design check: every run of one level on a single lane is refused: cpu/compute: lane positions not equal within one {'compare1': 0, 'compare2': 0, 'compare3': 5}
+ok    design check: a run on a lane that the record does not admit for its class is refused
+ok    analyze.py exits 2 with REFUSED for the unbalanced order (REFUSED: the order is not a balanced design:)
+ok    analyze.py end to end on a balanced L1 order through files: exit 0, verdict PASS
+ok    one missing run of 10 is tolerated: verdict PASS, invalid 1
+ok    three missing runs of 10: UNDECIDED with the reason 3 of 10 planned permuted runs are invalid or missing (at most 1)
+ok    two throttled runs (5 s of 60 s) are invalid and listed: throttled 5000 ms of 60000 ms
+ok    a neighbour that covered 30 s of a 60 s run makes the run invalid (coverage rule)
+ok    invalid.json lists the 3 units to replace: 3 ids
+ok    plan.py topup: 3 replacement units in stages ['t1c'], claims ['pilot164-l1@t1c-c1', 'pilot164-l1@t1c-c2', 'pilot164-l1@t1c-c3']
+ok    after the top-up stage the three runs are replaced: invalid 0, verdict PASS [] []
+ok    a second top-up stage is refused (one per leg)
+ok    a failed row and the later row of the same run in two files: read, exit 0
+ok    two usable rows of one run: REFUSED, exit 2
+ok    the start and the end set of solo runs 8 percent apart: UNDECIDED, reason: the start and the end median of the solo runs differ by 0.080
+ok    interim read, truth idle +15 percent over solo: EARLY-FAIL
+ok    interim read, truth +1 percent: NO-EARLY-FAIL
+ok    heat leg: no throttle and 83 C at most is HEAT-PASS
+ok    heat leg: 40 s of throttle on one lane in 1800 s (2.2 percent) is HEAT-FAIL
+
+SMOKE OK: 43 checks

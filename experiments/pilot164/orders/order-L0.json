@@ -1,0 +1,191 @@
+{
+ "claimable": true,
+ "claims": [
+  {
+   "cell_class": null,
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-l0@s1-solo",
+   "lane": "solo",
+   "note": "pilot of #164, leg L0, stage s1, lane solo; order.json in the study folder",
+   "out": "s1-solo",
+   "stage": "s1",
+   "study": "pilot164-l0"
+  },
+  {
+   "cell_class": "compute",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-l0@s2-c1",
+   "lane": "compare1",
+   "note": "pilot of #164, leg L0, stage s2, lane compare1; order.json in the study folder",
+   "out": "s2-c1",
+   "stage": "s2",
+   "study": "pilot164-l0"
+  },
+  {
+   "cell_class": "compute",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-l0@s2-c2",
+   "lane": "compare2",
+   "note": "pilot of #164, leg L0, stage s2, lane compare2; order.json in the study folder",
+   "out": "s2-c2",
+   "stage": "s2",
+   "study": "pilot164-l0"
+  },
+  {
+   "cell_class": "compute",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-l0@s2-c3",
+   "lane": "compare3",
+   "note": "pilot of #164, leg L0, stage s2, lane compare3; order.json in the study folder",
+   "out": "s2-c3",
+   "stage": "s2",
+   "study": "pilot164-l0"
+  }
+ ],
+ "corr_max": 0.3,
+ "data": false,
+ "format": 1,
+ "lanes_proven": {
+  "bw_heavy": 1,
+  "compute": 3,
+  "io_heavy": 1,
+  "none": 1
+ },
+ "leg": "L0",
+ "levels": [
+  "idle",
+  "compute"
+ ],
+ "mid_n": 0,
+ "needs": null,
+ "picks_json_sha256": "82ac20cd16dff84f1218f95df24debf91a4223004eb35803b16671afc3f1a4bc",
+ "plan_py_sha256": "e3c33dac5c9b059e84378b3081e758ba2834e2e0701bccb18d027fb8dbb2c1f1",
+ "ref_n": 1,
+ "reps": 2,
+ "salt": 0,
+ "seed": 20261124,
+ "targets": [
+  {
+   "box_s": 60,
+   "cls": "compute",
+   "id": "cpu",
+   "probe": true,
+   "unit": "ops/s",
+   "workload": "probe:cpu"
+  }
+ ],
+ "title": "smoke of the chain on the mini (shortened, never data)",
+ "topup_of": null,
+ "units": [
+  {
+   "box_s": 5,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "L0.s.cpu.start0",
+   "idx": null,
+   "kind": "solo",
+   "level": null,
+   "light_lanes": [],
+   "position": "solo",
+   "rep": 0,
+   "round": null,
+   "set": "start",
+   "stage": "s1",
+   "target": "cpu"
+  },
+  {
+   "box_s": 5,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "L0.a.cpu.start0",
+   "idx": null,
+   "kind": "alone2",
+   "level": null,
+   "light_lanes": [],
+   "position": "compare3",
+   "rep": 0,
+   "round": null,
+   "set": "start",
+   "stage": "s2",
+   "target": "cpu"
+  },
+  {
+   "box_s": 5,
+   "busy_lane": "compare1",
+   "busy_stream": "probe:cpu",
+   "id": "L0.p.cpu.compute.r0",
+   "idx": 0,
+   "kind": "perm",
+   "level": "compute",
+   "light_lanes": [
+    "compare3"
+   ],
+   "position": "compare2",
+   "rep": 0,
+   "round": 0,
+   "set": null,
+   "stage": "s2",
+   "target": "cpu"
+  },
+  {
+   "box_s": 5,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "L0.p.cpu.idle.r0",
+   "idx": 1,
+   "kind": "perm",
+   "level": "idle",
+   "light_lanes": [
+    "compare1",
+    "compare3"
+   ],
+   "position": "compare2",
+   "rep": 0,
+   "round": 0,
+   "set": null,
+   "stage": "s2",
+   "target": "cpu"
+  },
+  {
+   "box_s": 5,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "L0.p.cpu.idle.r1",
+   "idx": 2,
+   "kind": "perm",
+   "level": "idle",
+   "light_lanes": [
+    "compare2",
+    "compare3"
+   ],
+   "position": "compare1",
+   "rep": 1,
+   "round": 1,
+   "set": null,
+   "stage": "s2",
+   "target": "cpu"
+  },
+  {
+   "box_s": 5,
+   "busy_lane": "compare1",
+   "busy_stream": "probe:cpu",
+   "id": "L0.p.cpu.compute.r1",
+   "idx": 3,
+   "kind": "perm",
+   "level": "compute",
+   "light_lanes": [
+    "compare2"
+   ],
+   "position": "compare3",
+   "rep": 1,
+   "round": 1,
+   "set": null,
+   "stage": "s2",
+   "target": "cpu"
+  }
+ ]
+}

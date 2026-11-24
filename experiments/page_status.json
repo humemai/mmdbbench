@@ -1,0 +1,12 @@
+{
+  "instrument": "2026-11",
+  "instrument_month": "November 2026",
+  "small_release": "26.11.1",
+  "large_release": "26.11.1",
+  "final_release": "26.12.1",
+  "release_date": "2026-12-02",
+  "rerun_start": "2026-12-03",
+  "rerun_state": "scheduled",
+  "large_run_year": "2027",
+  "large_run_host": "the new host"
+}

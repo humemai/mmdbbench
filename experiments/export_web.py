@@ -48,6 +48,7 @@ from runner import BACKENDS, MEM_BY_SCALE, HEAP_BY_SCALE  # noqa: E402  (path se
 import bench_common  # noqa: E402
 import arm_identity as _AI  # noqa: E402
 import size_classes as _SC  # noqa: E402
+import page_status as _PS  # noqa: E402  (the page's statement of its own engine release and rerun, humemai/mmdbbench#173)
 import large_entry_gate as _LG  # noqa: E402  (a large dense entry keeps the metric keys the published payload has, humemai/mmdbbench#146)
 import memory_per_million as _MPM  # noqa: E402  (peak memory per million records, humemai/mmdbbench#133)
 import overlay_merge as _OM  # noqa: E402  (which overlay file a table reads when the name carries the client, humemai/mmdbbench#62)
@@ -1020,10 +1021,13 @@ SIZE_CLASS = _SC.SIZE_CLASS    # the table itself is in size_classes.py, so the 
 PLANNED_LARGE = {
     ("l2", "sf1full"): "the full SF10 network",
 }
-# The two facts of the plan the page states (humemai/mmdbbench#114): the release whose final numbers are the small size of every table, and
-# the year of the full run of the large sizes. Typed here once; every sentence that says either one reads it from here.
-FINAL_SMALL_RELEASE = "26.12.1"
-LARGE_RUN_YEAR = "2027"
+# The facts of the plan the page states (humemai/mmdbbench#114, #173): the release whose final numbers are the small size of every table, and
+# the year and host of the full run of the large sizes. They are typed once, in page_status.json, which is also where the page's status block
+# reads the rest; every sentence that says one of them reads it from there.
+_STATUS = _PS.load()
+FINAL_SMALL_RELEASE = _STATUS["final_release"]
+LARGE_RUN_YEAR = _STATUS["large_run_year"]
+LARGE_RUN_HOST = _STATUS["large_run_host"]
 # WHAT THE SMALL SIZES CANNOT SHOW, said in the same paragraph as the two sizes. No engine and no failure is named: it is a statement
 # about what a size can show, for every engine alike. It carries no number (the large size of a pair is about ten times its small one;
 # test_small_and_large_sizes holds "about ten times" against the lanes' own constants).
@@ -1046,6 +1050,18 @@ def size_class(lane: str, scale: str) -> str:
 def size_label(lane: str, scale: str) -> str:
     """The Size label a reader sees: the class word, then the corpus (scale_label)."""
     return f"{size_class(lane, scale).capitalize()}: {scale_label(lane, scale)}"
+
+
+def _stamp_status(payload, generated_on=None):
+    """Write the payload's `status` block (page_status.block) and refuse one that disagrees with the rows it sits on.
+
+    The date is the day the data was generated; BENCH_GENERATED_ON fixes it (tests, a rehearsal that must reproduce a payload byte for byte)."""
+    import datetime
+    day = generated_on or os.environ.get("BENCH_GENERATED_ON", "").strip() or datetime.date.today().isoformat()
+    payload["status"] = _PS.block(_STATUS, day)
+    bad = _PS.problems(payload, _STATUS)
+    if bad:
+        raise SystemExit("REFUSING: the page's status does not match its rows: " + "; ".join(bad))
 
 
 def _release_of(version_name) -> str | None:
@@ -1140,8 +1156,8 @@ def _classify_sizes(payload):
         absent += [(None, PLANNED_LARGE[(lane, sid)]) for sid in by_size if (lane, sid) in PLANNED_LARGE]
         for sid, name in absent:
             t["sizes"].append({"id": sid, "class": "large", "label": f"Large: {name}", "rows": 0})
-            notes.append(_gen(f"Large size ({name}): not run yet. The full benchmark with the large datasets is planned for {LARGE_RUN_YEAR}.",
-                              name, LARGE_RUN_YEAR))
+            notes.append(_gen(f"Large size ({name}): no rows yet, planned for {LARGE_RUN_YEAR} on {LARGE_RUN_HOST}.",
+                              name, LARGE_RUN_YEAR, LARGE_RUN_HOST))
         extra = [rec["label"].split(": ", 1)[1] for rec in by_size.values() if rec["class"] == "extra"]
         if extra:
             notes.append(_gen(f"Beside its small and its large size, this table has {'an extra size' if len(extra) == 1 else 'extra sizes'}: "
@@ -8548,6 +8564,8 @@ def main() -> int:
     # is where a row's Size label gets its class word.
     _classify_sizes(payload)
     _per_million_notes(payload)
+    # THE PAGE'S STATEMENT OF ITSELF (humemai/mmdbbench#173): the stamp line and the status block, from page_status.json, held to the rows.
+    _stamp_status(payload)
 
     # A table can draw on more than one artifact, so this is a LIST. It was a
     # single string, and on 2026-08-13 that made the page lie: the DEEP-10M

@@ -598,6 +598,19 @@ def _check_instrument(payload):
     return bad
 
 
+def _check_status(payload):
+    """The payload's status block is the one page_status.json gives, and the releases it names are the releases of the rows of each size class
+    (humemai/mmdbbench#173). A status that claims 26.12.1 over 26.11.1 rows, or the reverse, or one edited by hand, fails here. Returns the bad count."""
+    import page_status
+    found = page_status.problems(payload)
+    for f in found:
+        print(f"  STATUS: {f}")
+    if not found:
+        got = payload["status"]
+        print(f"  {got['stamp']}")
+    return len(found)
+
+
 def _rows_for_pairs(args):
     rows_path = Path(args.rows) if args.rows else _frozen_path()
     return list(csv.DictReader(rows_path.open())) if rows_path.exists() else []
@@ -631,6 +644,8 @@ def main() -> int:
     print(f"  {len(payload['tables'])} tables, {len(cells)} published cells")
     print("\nthe payload's instrument")
     i_bad = _check_instrument(payload)
+    print("\nthe page's status block, against page_status.json and the rows")
+    st_bad = _check_status(payload)
 
     print("\nDEEP-10M tier, page table vs the generated table")
     d_checked, d_bad = _check_dense_10m(payload)
@@ -700,7 +715,7 @@ def main() -> int:
     print("\nno page prose names a backend by its raw key (the roster's display names are the page's names)")
     raw_bad = _check_raw_backend_keys(payload)
     print(f"  {raw_bad} raw backend key(s) in page prose")
-    return 1 if (i_bad or d_bad or a_bad or l_bad or c_bad
+    return 1 if (i_bad or st_bad or d_bad or a_bad or l_bad or c_bad
                  or r_bad or b_bad or m_bad or not u_ok or k_bad or o_bad or n_bad or iv_bad or ov_bad or j_bad or l_notice_bad
                  or ban_bad or raw_bad) else 0
 

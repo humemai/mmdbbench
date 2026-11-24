@@ -200,7 +200,7 @@
       "backend": "CrateDB (cratedb_tpc)",
       "pinned": "6.4.7",
       "latest_release": "6.5.1 (2026-11-04)",
-      "reason": "6.5 rewrites the planner for TPC-H analytics and announces wire protocol 15; psycopg against 6.5 was not tested. 6.5.1 moves only after a smoke clears it (the smoke study lists it as a candidate)",
+      "reason": "6.5 rewrites the planner for TPC-H analytics and announces wire protocol 15; psycopg against 6.5 was not tested. 6.5.1 moves only after a smoke clears it on the TPC-H analytics (it passed a group-by and count(DISTINCT) smoke as a candidate on 2026-11-24, which is not that)",
       "date": "2026-11-25",
       "decided_by": "the owner, by \"I go with your recommendations\" on the proposal of humemai/mmdbbench#114"
     },

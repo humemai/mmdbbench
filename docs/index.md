@@ -24,7 +24,7 @@ Every engine is compared only in the lanes it is built for. An in-process engine
 ## Where to go next
 
 - [Methodology](methodology.md): the rules every run follows.
-- [Engines](engines.md): what we run for each engine, and how to tell us it is wrong (generated from the first 2026-11 rows when they land).
+- [Engines](engines.md): what we run for each engine, and how to tell us it is wrong (generated from the 2026-11 rows; not generated yet).
 - [Reproduce](reproduce.md): how to repeat a result on your own hardware.
 - [Result rows](results-schema.md): what one published measurement contains.
 - [Related work](related-work.md): the academic multi-model benchmarks and how MMDBBench differs.

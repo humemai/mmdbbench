@@ -18,6 +18,15 @@ Run it after **any** re-measure, after any change to the tables or figures, and 
 
 Flags: `--site <path>` if humem.ai is not a sibling checkout; `--no-build` to skip the Next.js build (do not, normally: the build is what catches a page that names something the payload does not carry).
 
+## The status block and the update on a rerun day
+
+The page's results open with a stamp line (instrument, ArcadeDB release, day generated) and the status sentences: which release the rows are, what the rerun of the final release does to them, which sizes keep their rows. They are written from `experiments/page_status.json` (see `page_status.py`), never typed into the site. The status is held to the rows: `page_check`, the exporter and `restate_web_page.py` refuse a payload whose small or large release is not the one the file names.
+
+- On the day the rerun starts (2026-12-03), change one line, `"rerun_state": "scheduled"` to `"running"`, then `uv run python experiments/restate_web_page.py --status-only --site <humem.ai checkout>` and publish (the site PR carries `src/data/dbbench-benchmarks.json`).
+- When the 26.12.1 small rows land, the full export writes the new rows; set `small_release` to `26.12.1` and `rerun_state` to `landed` in the same change (the file refuses one without the other, and the gates refuse a release the rows are not).
+
+`restate_web_page.py` also applies, to the payload of the last landing, the statements the exporter has learned since (size classes, the full-network size label and caption, precision and deployment of a cell with no result, one statement per absent cell, the dash legend). It is for a payload that cannot be exported where the bench host's row log and overlay directories are missing: it changes no row and no cell, records what it applied in the payload's `restated` field, and the next full export replaces it. A payload the exporter wrote (it carries the size classes and no `restated` field) gets only its status block refreshed.
+
 ## The Engines documentation page
 
 The Engines page of the documentation site (humemai/mmdbbench, `docs/engines.md`) is generated, never edited: `uv run python experiments/gen_engines_doc.py <path to docs/engines.md>` from the repo root. It reads the frozen 2026-11 rows (`make_paper_tables.load_canonical`), the arm names (`export_web.py`) and the override sentences (`override_registry.py`), so nothing on it is typed. Regenerate it at every landing and commit the result in humemai/mmdbbench; `--check <path>` exits 1 when it is out of date. Lanes and arms without rows yet are on its gap list.

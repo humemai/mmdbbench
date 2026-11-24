@@ -43,7 +43,7 @@ def _classified(*tables):
 GRAPH = _table("l2", [_row("sf1", "SF1 (10k people, 181k friendships)"), _row("sf10", "SF10 (66k people, 1.9M friendships)"),
                       _row("sf1", "SF1 (10k people, 181k friendships)", arcadedb=False)])
 ANALYTICS = _table("l2olap", [_row("sf1full", EW.scale_label("l2", "sf1full"))])
-NOT_RUN = "Large size ({}): not run yet. The full benchmark with the large datasets is planned for 2027."
+NOT_RUN = "Large size ({}): no rows yet, planned for 2027 on the new host."
 
 
 def test_every_size_with_a_label_has_a_class():
@@ -81,7 +81,7 @@ def test_a_row_says_small_or_large_and_its_label_starts_with_the_word():
     EW._classify_sizes(payload)                                                # a second pass adds no second word
     assert rows[1]["scale_label"] == "Large: SF10 (66k people, 1.9M friendships)", rows[1]
     # Both sizes have rows: nothing is called not run.
-    assert not [c for c in payload["tables"][0]["conditions"] if "not run yet" in c], payload["tables"][0]["conditions"]
+    assert not [c for c in payload["tables"][0]["conditions"] if "no rows yet" in c], payload["tables"][0]["conditions"]
 
 
 def test_graph_analytics_says_its_large_size_is_not_run():
@@ -90,7 +90,7 @@ def test_graph_analytics_says_its_large_size_is_not_run():
     want = NOT_RUN.format("the full SF10 network")
     assert want in table["conditions"], table["conditions"]
     assert {"id": None, "class": "large", "label": "Large: the full SF10 network", "rows": 0} in table["sizes"], table["sizes"]
-    assert any(g["text"] == want and EW.LARGE_RUN_YEAR in g["values"] for g in EW._GENERATED)   # generated, with the year as its value
+    assert any(g["text"] == want and EW.LARGE_RUN_YEAR in g["values"] and EW.LARGE_RUN_HOST in g["values"] for g in EW._GENERATED)   # generated, with the year and the host as its values
 
 
 def test_a_large_size_without_rows_is_said_and_a_withheld_one_is_not():
@@ -99,7 +99,7 @@ def test_a_large_size_without_rows_is_said_and_a_withheld_one_is_not():
     assert NOT_RUN.format(EW.scale_label("l3d", "deep10m")) in table["conditions"], table["conditions"]
     assert [(s["id"], s["rows"]) for s in table["sizes"]] == [("small", 1), ("deep10m", 0)], table["sizes"]
     withheld = _classified(_table("l3d", [_row("small", "1M vectors")], withheld_scales=["deep10m"]))["tables"][0]
-    assert not [c for c in withheld["conditions"] if "not run yet" in c], withheld["conditions"]   # "Not shown" says it, with its reason
+    assert not [c for c in withheld["conditions"] if "no rows yet" in c], withheld["conditions"]   # "Not shown" says it, with its reason
 
 
 def test_an_extra_size_stays_on_the_table_and_is_named():

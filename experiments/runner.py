@@ -4542,17 +4542,46 @@ def sweep_orphans(proc_root="/proc"):
         subprocess.run(["docker", "rm", "-f"] + [c for c, _ in gone], capture_output=True)
 
 
+def _cpu_numbers(cpuset):
+    """The CPU numbers a docker cpuset string names ('0-11', '0-5,8-11', '4,6', '3'), sorted. The same grammar as _cpuset_size."""
+    cpus = set()
+    for part in str(cpuset).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            cpus.update(range(int(a), int(b) + 1))
+        else:
+            cpus.add(int(part))
+    return sorted(cpus)
+
+
+def _cpuset_text(cpus):
+    """A docker cpuset string for sorted CPU numbers: runs of two or more as 'a-b', the rest alone ([4, 6] -> '4,6')."""
+    parts, i = [], 0
+    while i < len(cpus):
+        j = i
+        while j + 1 < len(cpus) and cpus[j + 1] == cpus[j] + 1:
+            j += 1
+        parts.append(str(cpus[i]) if i == j else f"{cpus[i]}-{cpus[j]}")
+        i = j + 1
+    return ",".join(parts)
+
+
 def split_cpuset(cpuset, n):
-    """Split a 'a-b' cpuset into n disjoint contiguous shards ('a-m', ...)."""
-    lo, hi = (int(x) for x in cpuset.split("-"))
-    cpus = list(range(lo, hi + 1))
+    """Split a cpuset into n disjoint shards of consecutive CPUs. A single 'a-b' range gives 'a-m' shards as it always did. A list
+    ('4,6' is a compare lane of the mini, '0-5,8-11') gives docker cpuset strings of the same cores: it used to raise ValueError at
+    the start of main(), so no cell could run on a lane whose cores are not next to each other (humemai/mmdbbench#184)."""
+    cpus = _cpu_numbers(cpuset)
     if n > len(cpus):
         raise ValueError(f"{n} workers > {len(cpus)} cpus in {cpuset}")
     size = len(cpus) // n
+    one_range = "," not in str(cpuset) and "-" in str(cpuset)
     shards = []
     for w in range(n):
         chunk = cpus[w * size:(w + 1) * size] if w < n - 1 else cpus[(n - 1) * size:]
-        shards.append(f"{chunk[0]}-{chunk[-1]}")
+        shards.append(f"{chunk[0]}-{chunk[-1]}" if one_range else _cpuset_text(chunk))
     return shards
 
 

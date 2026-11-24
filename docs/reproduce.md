@@ -37,6 +37,13 @@ Every command below runs from `experiments/` inside the clone. The repository's 
 cd experiments
 ```
 
+A cell builds its database at a fixed path under `/tmp` and stops with `Database '/tmp/e2_arcade' already exists` when the path is left over from an earlier run. Remove the paths before you run a cell again:
+
+<!-- runnable: clean -->
+```bash
+rm -rf /tmp/e2_arcade /tmp/e2_duck.db /tmp/tpc_arcade /tmp/tpc_sqlite.db /tmp/l3d_arcade /tmp/l3d_sqlitevec.db /tmp/l2_arcade
+```
+
 The packages are named on the command line, `uv run --no-project --with <package>==<version>`: nothing is installed into your system and nothing is added to the repository. The versions are the ones the published images carry (`experiments/build_images.sh`): `numpy==2.5.3`, `pandas==3.0.6`, `pyarrow==25.0.1`, `duckdb==1.5.6`, and the ArcadeDB wheel of the published rows, `arcadedb-jvm==26.11.1` (the Java engine through JPype) or `arcadedb==26.11.1` (the native build). A test fails when a version on this page differs from `build_images.sh`. A cell writes its result row next to the script, to the file you give with `--out`; delete the rows when you are done.
 
 ## The cells

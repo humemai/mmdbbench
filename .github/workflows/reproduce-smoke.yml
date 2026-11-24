@@ -72,7 +72,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           uv run --no-project python experiments/tools/guide_blocks.py docs/reproduce.md --list
           uv run --no-project python experiments/tools/guide_blocks.py docs/reproduce.md \
-            --name enter --name e2-arcadedb --name e2-compare --name e2-duckdb > "$RUNNER_TEMP/guide-e2.sh"
+            --name enter --name clean --name e2-arcadedb --name e2-compare --name e2-duckdb > "$RUNNER_TEMP/guide-e2.sh"
           cat "$RUNNER_TEMP/guide-e2.sh"
           bash -n "$RUNNER_TEMP/guide-e2.sh"
 

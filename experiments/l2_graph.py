@@ -1403,7 +1403,7 @@ class LadybugGraph(Base):
 
 class DuckpgqGraph(Base):
     """DuckDB with the DuckPGQ community extension (embedded, in-process through
-    the duckdb Python package on the pinned dbbench:duckdb image, duckdb==1.5.6).
+    the duckdb Python package on the pinned dbbench:duckdb image, duckdb==2.0.1 from 2026-11-25, 1.5.6 before).
     The persons-and-knows data lives in two DuckDB tables; a PROPERTY GRAPH over
     them answers every graph read in SQL/PGQ (`GRAPH_TABLE ... MATCH`), and the
     writes are plain SQL on the underlying tables, one statement group per

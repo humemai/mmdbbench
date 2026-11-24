@@ -8,7 +8,7 @@ numbers in docs/reproduce.md before it trusts the data (the file bytes depend on
 
 Usage (from experiments/, `uv` only):
   export BENCH_TPC_DATA=$HOME/bench-data/tpch
-  uv run --no-project --with duckdb==1.5.6 python gen_tpch_parquet.py --sf 1
+  uv run --no-project --with duckdb==2.0.1 python gen_tpch_parquet.py --sf 1
 
 DuckDB installs its `tpch` extension from extensions.duckdb.org on the first call, so the machine needs network access once.
 `--sf 1` is the `tpch1` scale of the lane; `--sf 10` is its large size and takes about 15 GB of memory and 10 GB of disk.

@@ -44,7 +44,7 @@ A cell builds its database at a fixed path under `/tmp` and stops with `Database
 rm -rf /tmp/e2_arcade /tmp/e2_duck.db /tmp/tpc_arcade /tmp/tpc_sqlite.db /tmp/l3d_arcade /tmp/l3d_sqlitevec.db /tmp/l2_arcade
 ```
 
-The packages are named on the command line, `uv run --no-project --with <package>==<version>`: nothing is installed into your system and nothing is added to the repository. The versions are the ones the published images carry (`experiments/build_images.sh`): `numpy==2.5.3`, `pandas==3.0.6`, `pyarrow==25.0.1`, `duckdb==1.5.6`, and the ArcadeDB wheel of the published rows, `arcadedb-jvm==26.11.1` (the Java engine through JPype) or `arcadedb==26.11.1` (the native build). A test fails when a version on this page differs from `build_images.sh`. A cell writes its result row next to the script, to the file you give with `--out`; delete the rows when you are done.
+The packages are named on the command line, `uv run --no-project --with <package>==<version>`: nothing is installed into your system and nothing is added to the repository. The versions are the ones the published images carry (`experiments/build_images.sh`): `numpy==2.5.3`, `pandas==3.0.6`, `pyarrow==25.0.1`, `duckdb==2.0.1`, and the ArcadeDB wheel of the published rows, `arcadedb-jvm==26.11.1` (the Java engine through JPype) or `arcadedb==26.11.1` (the native build). A test fails when a version on this page differs from `build_images.sh`. A cell writes its result row next to the script, to the file you give with `--out`; delete the rows when you are done.
 
 ## The cells
 
@@ -81,7 +81,7 @@ A comparator that needs nothing but a package is DuckDB with its `vss` and `duck
 
 <!-- runnable: e2-duckdb -->
 ```bash
-uv run --no-project --with duckdb==1.5.6 --with numpy==2.5.3 --with pyarrow==25.0.1 \
+uv run --no-project --with duckdb==2.0.1 --with numpy==2.5.3 --with pyarrow==25.0.1 \
   python e2_hybrid.py --backend duckdb_e2 --workload hybrid --scale e2 --out e2_duckdb.json
 ```
 
@@ -99,7 +99,7 @@ The lane reads `sf1_lineitem.parquet` and `sf1_part.parquet` from `$BENCH_TPC_DA
 <!-- runnable: tpch1-data -->
 ```bash
 export BENCH_TPC_DATA=$HOME/bench-data/tpch
-uv run --no-project --with duckdb==1.5.6 python gen_tpch_parquet.py --sf 1
+uv run --no-project --with duckdb==2.0.1 python gen_tpch_parquet.py --sf 1
 ```
 
 This takes about 10 seconds. DuckDB installs its `tpch` extension on the first call, so the machine needs network access once. The analytics cell of ArcadeDB embedded (five queries, 100 timed runs each):

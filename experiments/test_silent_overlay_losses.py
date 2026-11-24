@@ -357,8 +357,9 @@ def test_the_landing_refuses_before_the_merge_for_missing_overlay_files_and_writ
     assert not any("merge_campaign" in c or "refresh_web_page" in c for c in cmds) and before == after, (cmds, outcome)       # nothing reached the store, no gate ran
     outcome, cmds, _b, text = _land(argv + ["--dry-run"], lambda res: _write_sparse(res / f"sparse_mp_{NEW}", X), [], rows)    # complete: the check says nothing
     assert outcome == "returned 0" and "DRY RUN" in text, (outcome, text[-300:])
-    outcome, cmds, (before, after), text = _land(argv + ["--dry-run"], union_only, [], rows)                                  # a dry run says it, and stops as it always does
-    assert outcome == "returned 0" and "WOULD REFUSE (the run without --dry-run stops here): the exporter reads overlay files" in text and "sp_qdrant_small.json" in text, (outcome, text[-400:])
+    outcome, cmds, (before, after), text = _land(argv + ["--dry-run"], union_only, [], rows)                                  # a dry run says it, and stops as it always does, with rc 1 (#163)
+    assert outcome == "returned 1" and "WOULD REFUSE (the run without --dry-run stops here): the exporter reads overlay files" in text and "sp_qdrant_small.json" in text, (outcome, text[-400:])
+    assert "would refuse (WOULD REFUSE above), so this dry run exits 1." in text and "DRY RUN" in text, text[-400:]
     assert before == after
 
 

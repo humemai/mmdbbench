@@ -91,7 +91,7 @@ The cells of the other lanes, the comparator engines and the served and native a
 
 ## Known issue: the native server at 10 million vectors
 
-The two dense-vector cells with ten million vectors on the native ArcadeDB server end with an out-of-memory error during the index build, with the default settings. The published rows show that failure. A server flag made the same cells finish in our tests, but it is a workaround whose cause is not known, so the published rows do not use it. The report is [ArcadeData/arcadedb#12639](https://github.com/ArcadeData/arcadedb/issues/12639) and the tracking issue is [#99](https://github.com/humemai/mmdbbench/issues/99).
+The two dense-vector cells with ten million vectors on the native ArcadeDB server end with an out-of-memory error during the index build, with the default settings. The published rows show that failure. A server flag made the same cells finish in our tests, but it is a workaround whose cause is not known, so the published rows do not use it. The report is [ArcadeData/arcadedb#12639](https://github.com/ArcadeData/arcadedb/issues/12639), closed on 2026-11-21; the fix in flight is [ArcadeData/arcadedb#12675](https://github.com/ArcadeData/arcadedb/pull/12675), still open. The tracking issue is [#99](https://github.com/humemai/mmdbbench/issues/99): the two cells are rerun with the large sizes after February 2027.
 
 ## Questions about a result
 

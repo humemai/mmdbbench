@@ -1,5 +1,5 @@
 {
-  "about": "Pin freshness data of humemai/mmdbbench#175: what limits each comparator below its latest stable release (constraints), and every deliberate hold with its exception line (exceptions). A pin may stay behind the latest release only at the latest compatible one, or with an exception line (version, reason, date, who decided). The rows are only what was read; a blank means not found, never a guess. Started on 2026-11-25 from the pins audit of humemai/mmdbbench#114 and the PR that moved the pins for the 26.12.1 small pass. No script reads it yet (#175 item 1 and 2); test_comparator_constraints.py checks its shape.",
+  "about": "Pin freshness data of humemai/mmdbbench#175: what limits each comparator below its latest stable release (constraints), and every deliberate hold with its exception line (exceptions). A pin may stay behind the latest release only at the latest compatible one, or with an exception line (version, reason, date, who decided). The rows are only what was read; a blank means not found, never a guess. Started on 2026-11-25 from the pins audit of humemai/mmdbbench#114 and the PR that moved the pins for the 26.12.1 small pass. pin_freshness.py reads it for its report (#175 item 1); no gate reads it yet (item 2); test_comparator_constraints.py checks its shape.",
   "started": "2026-11-25",
   "constraints": [
     {

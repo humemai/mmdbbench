@@ -3262,6 +3262,16 @@ def sparse_files_owed(tier, rows, run):
     return plain, native
 
 
+def _scoped_sparse_multipass_table():
+    """`_sparse_multipass_table`, or None when the landing's lanes (BENCH_ONLY_LANES) leave l3s out (item 7 of humemai/mmdbbench#157). Such a page does not carry
+    the sparse lane, so a leftover partial `sparse_mp_<pin>` must not refuse a landing of other lanes. Decided where the page is assembled: the reader stays strict."""
+    only = {x.strip() for x in os.environ.get("BENCH_ONLY_LANES", "").split(",") if x.strip()}
+    if only and "l3s" not in only:
+        print(f"  l3s second-pass table omitted: not in this landing's lanes ({','.join(sorted(only))})")
+        return None
+    return _sparse_multipass_table()
+
+
 def _sparse_multipass_table():
     """What a second pass buys each engine on the sparse lane.
 
@@ -8353,7 +8363,7 @@ def main() -> int:
     # Python-cost table are built from artifacts of the campaign, not from the
     # frozen rows; the durability table sits beside the session-cost table
     # (DECISIONS #90) and is built from the same rows the write tables are.
-    _extras = [_sparse_multipass_table(), _l4_table(rows), _lifecycle_table(rows), _durability_table(_all_rows),
+    _extras = [_scoped_sparse_multipass_table(), _l4_table(rows), _lifecycle_table(rows), _durability_table(_all_rows),
                _e4_table(), _python_cost_table()]
     for extra in _extras:
         if extra and extra["entries"]:

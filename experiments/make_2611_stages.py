@@ -1866,13 +1866,40 @@ rep_gate() {  # <label>: true when this pass may run the cell; says why when it 
 """.replace("@INSTRUMENT@", INSTRUMENT)
 
 
+# A REHEARSAL'S OWN REP-STATE DIRECTORY (humemai/mmdbbench#162). A run at a pin that already has a state file would continue, and write to, the real state of
+# the earlier landing. --repstate-dir DIR writes stages whose rep-state files are in ${BENCH_REPSTATE_DIR:-DIR}; without it the line is the one the stages
+# always had, so every draft stays byte for byte (stage_drafts_2611.sha256).
+REPSTATE_DEFAULT_LINE = "REPSTATE=$HOME/rep-state-"
+REPSTATE_DIR_LINES = ("REPSTATE_DIR=${BENCH_REPSTATE_DIR:-@DIR@}   # --repstate-dir: not the real state of this pin\n"
+                      'mkdir -p "$REPSTATE_DIR" || { say "$ID ABORT: no rep-state directory $REPSTATE_DIR"; exit 1; }\n'
+                      "REPSTATE=$REPSTATE_DIR/rep-state-")
+
+
+def repstate_dir_arg(text):
+    """--repstate-dir as the stages get it, "" when not given. It is written unquoted into an assignment of a bash script, so it is held to the rule of
+    BENCH_STAGE_REPO (stage_repo), and it must not be relative: a stage changes directory into the checkout."""
+    if text is None:
+        return ""
+    v = text.strip()
+    if not _STAGE_REPO_OK.match(v) or ".." in v.split("/") or not v.startswith(("/", "~/", "$")):
+        raise SystemExit(f"REFUSING: --repstate-dir {text!r} is not a plain absolute path (it starts with /, ~/ or $; letters, digits, _ . / ~ $ {{ }} -, no '..'): "
+                         f"it is written unquoted into every stage")
+    return v
+
+
 # THE REP-STATE FILE IS PER BUILD in an ArcadeDB release chain (rep-state-<instrument>-<pin>-jvm.tsv, ...-native.tsv): the JVM and the native
 # chain label their cells identically, so one shared file would show the chain that runs second every cell as already clean and it would run
 # none. The comment lives here, not in the template, so every other stage stays byte for byte what it was.
-def rep_helpers():
+def rep_helpers(repstate_dir=""):
     """REP_HELPERS for the chain being generated: the rep-state file carries the build ("-jvm", "-native") in an ArcadeDB release chain
-    and is the plain one (no suffix, byte for byte what the comparators always had) when CHAIN_BUILD is empty."""
-    return REP_HELPERS.replace("@BUILD@", f"-{CHAIN_BUILD}" if CHAIN_BUILD else "")
+    and is the plain one (no suffix, byte for byte what the comparators always had) when CHAIN_BUILD is empty. The file is in $HOME, or
+    with `repstate_dir` (--repstate-dir) in ${BENCH_REPSTATE_DIR:-<repstate_dir>}."""
+    text = REP_HELPERS.replace("@BUILD@", f"-{CHAIN_BUILD}" if CHAIN_BUILD else "")
+    if not repstate_dir:
+        return text
+    if text.count(REPSTATE_DEFAULT_LINE) != 1:
+        raise SystemExit(f"generator drift: {REPSTATE_DEFAULT_LINE!r} is in REP_HELPERS {text.count(REPSTATE_DEFAULT_LINE)}x, expected 1")
+    return text.replace(REPSTATE_DEFAULT_LINE, REPSTATE_DIR_LINES.replace("@DIR@", repstate_dir))
 
 
 TEMP_GATE_HELPERS = r"""
@@ -1912,13 +1939,13 @@ temp_gate() {  # <label>: wait for GATE_MAX_C, then go on either way; says what 
 """
 
 
-def stage_params(reps):
+def stage_params(reps, repstate_dir=""):
     """What the template takes besides the stage and the pins: the instrument, REPS and the banner, the suffix of the rows
     files they write, the pin whose rows cell_cost_check scores a tier from until this pass has measured it, the JPype pin and
     the cap rule's bash."""
     return {"instrument": INSTRUMENT, "reps": reps, "banner": BANNER, "rows_suffix": ROWS_SUFFIX, "prior": PRIOR_PIN,
             "jpype_version": bench_common.JPYPE_PIN, "cap_rule_helpers": CAP_RULE_HELPERS.lstrip("\n"),
-            "rep_helpers": rep_helpers().lstrip("\n"), "temp_gate_helpers": TEMP_GATE_HELPERS.lstrip("\n"), "pass_no": 1}
+            "rep_helpers": rep_helpers(repstate_dir).lstrip("\n"), "temp_gate_helpers": TEMP_GATE_HELPERS.lstrip("\n"), "pass_no": 1}
 
 
 NATIVE_EXPORT = ('export ARCADEDB_NATIVE_SERVER_IMAGE="{img}" BENCH_SERVER_BUILD="native"\n'
@@ -1999,7 +2026,7 @@ def stage_script(idx, total, spec, after, pins, params):
     return apply_cap_rule(body, lane, set(backends), set(workloads))
 
 
-def emit_all(out, stages, pins, first_after, reps, tiers=False):
+def emit_all(out, stages, pins, first_after, reps, tiers=False, repstate_dir=""):
     """Write every stage script. `pins` holds ARCADEDB_WHEEL, ARCADEDB_SERVER_IMAGE and ARCADEDB_ENGINE_COMMIT, and may hold
     ARCADEDB_WHEEL_SHA256 for a release that is not on disk at generation (--arcadedb-release); otherwise the file's own
     sha256 is what the stages demand."""
@@ -2009,7 +2036,7 @@ def emit_all(out, stages, pins, first_after, reps, tiers=False):
     plan = pass_plan(stages, reps, tiers)
     for i, (spec, pass_no) in enumerate(plan):
         after = first_after if i == 0 else plan[i - 1][0][0]
-        params = dict(stage_params(reps), pass_no=pass_no)
+        params = dict(stage_params(reps, repstate_dir), pass_no=pass_no)
         p = os.path.join(out, f"{spec[0]}.sh")
         with open(p, "w", encoding="utf-8") as fh:
             fh.write(stage_script(i, len(plan), spec, after, pins, params))
@@ -2360,6 +2387,9 @@ def main(argv=None) -> int:
     ap.add_argument("--harness-sha", metavar="40HEX",
                     help="the stages run from a worktree of this repository pinned at this commit (BENCH_STAGE_REPO names it): they check HEAD "
                          "instead of pulling, and the pair install creates the worktree's own wheel directory instead of archiving another release's")
+    ap.add_argument("--repstate-dir", metavar="DIR",
+                    help="for a rehearsal, or any run at a pin that already has a rep-state file: the stages keep their rep-state files in ${BENCH_REPSTATE_DIR:-DIR} "
+                         "instead of $HOME, so they neither read nor write the real state. Without it the drafts are unchanged")
     ap.add_argument("--engine-commit")
     ap.add_argument("--image-digest")
     ap.add_argument("--wheel-name")
@@ -2367,6 +2397,7 @@ def main(argv=None) -> int:
     ap.add_argument("--wheel-url")
     a = ap.parse_args(argv)
     stage_repo()  # refuse a BENCH_STAGE_REPO that bash could read as more than a path BEFORE any stage is written
+    repstate_dir = repstate_dir_arg(a.repstate_dir)
     status_file = None if a.status_file is None or a.status_file.strip().lower() == "none" else a.status_file
 
     problems = instrument_problems()
@@ -2463,7 +2494,7 @@ def main(argv=None) -> int:
     if pair_id:
         write_pair(a.out, pair_id, a, after)
         first_after = pair_id
-    emit_all(a.out, stages, pins, first_after, a.reps, a.tiers)
+    emit_all(a.out, stages, pins, first_after, a.reps, a.tiers, repstate_dir)
     drafts = lint_drafts(a.out, set(engines), None, a.profile, sizes)
     for p in drafts:
         print(f"  PROBLEM {p}")

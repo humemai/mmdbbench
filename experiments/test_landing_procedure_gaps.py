@@ -3,8 +3,8 @@
 The rehearsal (2026-11-23, a scratch copy of the store, small rows relabelled to a made-up release, large rows at the 26.11.1 commit, nothing pushed) ran the real
 `land_stage.py` and found: (1) the comparators' chain pin is in no procedure document and a failed comparator cell at it is dropped without a word, (2) a forgotten
 large pin refuses after the merge, (3) a large tier with no rows at all refuses the landing, (4) the small sparse tier needs six arms and the pull takes one directory,
-(5) `current_pin()` answers with the OLD commit before the first landing of a release, (6) one sentence is printed once per row. Item 7 (a scope without l3s still reads
-`sparse_mp_<pin>`) is not fixed here: see the pull request.
+(5) `current_pin()` answers with the OLD commit before the first landing of a release, (6) one sentence is printed once per row, (7) a scope without l3s still reads
+`sparse_mp_<pin>`, so a leftover partial directory refuses a landing of other lanes.
 
 Plain functions with `unittest.mock`, temporary directories and synthetic rows, so they run under the suite or as
 `python test_landing_procedure_gaps.py [name-substring ...]` from this directory. The exporter is imported, so numpy and pandas are needed, as everywhere else;
@@ -396,6 +396,21 @@ def test_a_partial_medium_overlay_still_refuses_and_names_its_directory():
         (d / f"sparse_mp_{OLD}" / "sp_qdrant_medium.json").unlink()
         msg = _refusal(X._sparse_multipass_table)
         assert f"sparse_mp_{OLD} has 1 of 6 files missing" in msg and "sp_qdrant_medium.json" in msg, msg
+
+
+# ------------------------------------------------------------------------------------------------ 7. a scope without l3s does not read its overlay
+def test_a_landing_whose_lanes_leave_l3s_out_is_not_refused_by_a_partial_sparse_overlay():
+    with _results({NEW: ("small", "tiny")}) as (X, _F, d):
+        (d / f"sparse_mp_{NEW}" / "sp_qdrant_small.json").unlink()                          # the leftover partial directory
+        for scope in ("l2", "l1tpc,l2,e4"):
+            os.environ["BENCH_ONLY_LANES"] = scope
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                assert X._scoped_sparse_multipass_table() is None, scope
+            assert "l3s second-pass table omitted" in out.getvalue(), out.getvalue()
+        for scope in ("l2,l3s", "l3s", ""):                                                    # l3s lands, or the whole store: the refusal is what it was
+            os.environ["BENCH_ONLY_LANES"] = scope
+            msg = _refusal(X._scoped_sparse_multipass_table)
+            assert f"sparse_mp_{NEW} has 1 of 6 files missing (sp_qdrant_small.json)" in msg, (scope, msg)
 
 
 # ------------------------------------------------------------------------------------------------ 4. the comparators' sparse files

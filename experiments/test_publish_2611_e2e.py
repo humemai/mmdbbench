@@ -181,6 +181,23 @@ def test_a_row_of_another_instrument_is_refused_with_a_clear_message(tmp_path, s
     assert "2026-11" in proc.stderr and "REFUSING" in proc.stderr
 
 
+def test_a_landing_without_l3s_is_exported_beside_a_partial_sparse_overlay(tmp_path):
+    """Item 7 of humemai/mmdbbench#157, through the two scripts a publish runs: a leftover partial `sparse_mp_<pin>` refuses a landing that carries l3s only."""
+    results = _stage(tmp_path / "results")
+    (results / f"sparse_mp_{PIN}" / "sp_qdrant_small.json").unlink()
+    scoped = {"BENCH_ONLY_LANES": "l2"}
+    freeze = _run("make_paper_tables.py", results, **scoped)
+    assert freeze.returncode == 0, freeze.stderr[-2000:]
+    export = _run("export_web.py", results, **scoped)
+    assert export.returncode == 0, export.stderr[-2000:]
+    assert "l3s second-pass table omitted" in export.stdout, export.stdout[-2000:]
+    ids = {t["id"] for t in json.loads((results / "web_benchmarks.json").read_text())["tables"]}
+    assert not [i for i in ids if i.startswith("l3s")], ids
+    assert _run("make_paper_tables.py", results).returncode == 0
+    full = _run("export_web.py", results)
+    assert full.returncode != 0 and "sp_qdrant_small.json" in full.stderr, full.stderr[-2000:]
+
+
 def test_the_old_selector_is_refused(tmp_path):
     results = _stage(tmp_path / "results")
     proc = _run("make_paper_tables.py", results, BENCH_INSTRUMENT="2026-10")

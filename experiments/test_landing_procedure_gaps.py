@@ -410,7 +410,7 @@ def test_a_landing_whose_lanes_leave_l3s_out_is_not_refused_by_a_partial_sparse_
         for scope in ("l2,l3s", "l3s", ""):                                                    # l3s lands, or the whole store: the refusal is what it was
             os.environ["BENCH_ONLY_LANES"] = scope
             msg = _refusal(X._scoped_sparse_multipass_table)
-            assert f"sparse_mp_{NEW} has 1 of 4 files missing (sp_qdrant_small.json)" in msg, (scope, msg)
+            assert f"sparse_mp_{NEW} has 1 of 6 files missing (sp_qdrant_small.json)" in msg, (scope, msg)
 
 
 # ------------------------------------------------------------------------------------------------ 4. the comparators' sparse files

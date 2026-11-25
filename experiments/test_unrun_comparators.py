@@ -59,6 +59,18 @@ def test_every_comparator_with_no_row_is_declared_and_the_roster_gate_takes_it()
     assert {"Qdrant", "pgvector"} <= by_id["l3s"] and "TimescaleDB" in by_id["l4"] and by_id["lifecycle"] == {"SurrealDB"} and "Neo4j" in by_id["restart"], by_id
 
 
+def test_the_coverage_table_reads_the_declarations_and_names_them_in_its_legend():
+    done = []
+    for tid in LANE_OF:
+        table, rows = _table(tid)
+        done.append(dict(_declare(table, rows)[1], title=tid))
+    with mock.patch.dict(X._DECLARED_ABSENCES, clear=True):
+        coverage = X._multimodel_table(done)                           # it refuses a declared kind that its legend does not name
+    surreal = next(e for e in coverage["entries"] if e["backend"] == "SurrealDB")
+    assert surreal["metrics"]["l4"]["text"] == "declared, not measured", surreal["metrics"]
+    assert "not measured, the engine was not run on that table" in coverage["conditions"][0], coverage["conditions"]
+
+
 def test_without_the_declarations_the_roster_gate_refuses_the_same_tables():
     bad, text = _roster([dict(_table(tid)[0], declared_absences=[]) for tid in LANE_OF])
     assert bad > 0 and "no row and no declaration" in text, text

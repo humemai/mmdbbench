@@ -4148,6 +4148,8 @@ def _multimodel_table(finished):
         "failed": "failed, the cell reported an error inside its budget",
         "not comparable": "not comparable, a defect in the engine's own release decided "
                           "the result, and the note under that table names it",
+        # a multi-model engine whose comparator arm no chain of the pass ran (_unrun_comparators)
+        "not measured": "not measured, the engine was not run on that table, and the note under that table says so",
     }
     # ITERATE THE KINDS THAT ARE PRESENT, not a list typed beside the legend.
     # The tuple this replaces named three, so "failed" -- a kind

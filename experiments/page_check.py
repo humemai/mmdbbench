@@ -1034,10 +1034,11 @@ NOT_PRINTED = [
      "Neo4j's page cache size and checkpoint interval, read from the engine "
      "(`SHOW SETTINGS`): the sentences under every table that shows Neo4j say "
      "how each was set"),
-    (r"^(arcadedb_add_hierarchy|arcadedb_add_hierarchy_source)$",
-     "whether ArcadeDB's vector index was built with a hierarchy, and whether "
-     "that was read from the engine (embedded) or recorded as the request "
-     "(served, whose HTTP API returns no index metadata)"),
+    (r"^(arcadedb_add_hierarchy|arcadedb_add_hierarchy_source|arcadedb_add_hierarchy_schema_json)$",
+     "whether ArcadeDB's vector index was built with a hierarchy, where that was "
+     "learned (read from the engine, or, on a served engine that reports no index "
+     "metadata, recorded as the request), and what the closed embedded database's "
+     "schema file says beside an engine read-back"),
     (r"^index_kinds(_error)?$",
      "the index kinds an ArcadeDB arm's engine reports after its schema is built (SELECT FROM "
      "schema:indexes, type-level entries), or why it could not be asked: the evidence the "

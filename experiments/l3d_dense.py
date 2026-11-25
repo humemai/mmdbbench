@@ -718,7 +718,11 @@ class ArcadeEmbedded(Base):
     def readbacks_after_close(self):
         # Source 3 of the stamp: the database directory's schema.json, which holds the setting on both wheels once the database is
         # closed. A small file read, after the last timed phase and after `close_s`; with no stamp and no source it records the error.
+        # Beside a stamp the engine gave through source 1 the file is read too, so the row shows that the two agree (humemai/mmdbbench#168).
         if not self.hierarchy_unresolved:
+            stamp = self._hierarchy_stamp or {}
+            if stamp.get("arcadedb_add_hierarchy_source") == bench_common.HIERARCHY_SOURCE_SQL:
+                return bench_common.arcadedb_hierarchy_cross_check(self.DB_PATH, self.HIERARCHY_INDEX, stamp)
             return {}
         return bench_common.arcadedb_hierarchy_after_close(self.DB_PATH, self.HIERARCHY_INDEX, self._hierarchy_tried)
 
@@ -791,6 +795,7 @@ class ArcadeServer(Base):
     _quant_ddl = ""
     name = "arcadedb_dense_server"
     ID_INDEX_DDL = "CREATE INDEX ON Article (vid) UNIQUE_HASH"
+    HIERARCHY_INDEX = "Article[embedding]"   # the index whose `addHierarchy` the row records
     # Rows per `INSERT ... CONTENT :rows` request; #8337 suggests 2,000-5,000
     # for vector rows; swept on the bench host at the re-pin, recorded per row.
     load_batch = int(os.environ.get("BENCH_SERVED_LOAD_BATCH") or 2000)
@@ -819,7 +824,7 @@ class ArcadeServer(Base):
         # call would sit inside the timed ingest.
         if str(command)[:40].lstrip().upper().startswith("CREATE INDEX"):
             # The statement as sent, kept so the row can say what the index was
-            # asked for (the server returns no index metadata; override_registry.py).
+            # asked for when the server reports no index metadata (readbacks(), override_registry.py).
             self._index_ddl = str(command)
         r = self.rq.post(f"{self.base}/command/bench", json=body, timeout=timeout)
         r.raise_for_status()
@@ -871,11 +876,15 @@ class ArcadeServer(Base):
         self.index_s = round(time.perf_counter() - _t1, 2)
 
     def readbacks(self):
-        # What the CREATE INDEX statement asked for, recorded as a REQUEST
-        # because the HTTP API returns no index metadata at this pin (CAMPAIGN
-        # section 7 row 21, override_registry.py); the embedded arm reads it back from
-        # the engine. Taken after the build timer, not inside build().
-        return bench_common.arcadedb_hierarchy_requested(getattr(self, "_index_ddl", ""))
+        # THE SETTING IN FORCE WHERE THE SERVER REPORTS IT (humemai/mmdbbench#168): `schema:index` over HTTP, which has a `metadata` map from
+        # ArcadeData/arcadedb#13097 on. A server without it (26.11.1) records what the CREATE INDEX statement asked for, as a REQUEST and with
+        # why (CAMPAIGN section 7 row 21, override_registry.py). Taken after the build timer, not inside build().
+        return bench_common.arcadedb_hierarchy_served(getattr(self, "_index_ddl", ""), self.HIERARCHY_INDEX, self._select)
+
+    def _select(self, sql):
+        r = self.rq.post(f"{self.base}/query/bench", json={"language": "sql", "command": sql}, timeout=60)
+        r.raise_for_status()
+        return r.json().get("result", [])
 
     def search(self, qvec, k):
         # BOUND, AS THE EMBEDDED ARM ALREADY IS (DECISIONS #116 item 2): the

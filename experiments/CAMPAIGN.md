@@ -266,6 +266,8 @@ The default order is the core block first, then (under `--profile full`) the sec
 
 Tracker: humemai/mmdbbench#114. On 2026-11-21 the owner decided to stop the `26.11.1.postN` releases (row 94), to fix the ArcadeDB engine and the `arcadedb-python` glue for `26.12.1`, and to take the final numbers on that stable release. The scope in #114 is the ArcadeDB arms (embedded and served, JVM and native) of every lane with landed rows and, as far as they are ready, of the pending lanes; the comparators are not rerun while their pins and images do not change. Its rules are three repetitions everywhere, the stock settings of the released engine and wheels with no workaround flag, and the engine commit, the wheel or image digest and the configuration profile on every row. The plan dates in #114 are estimates.
 
+**The two sources of the `addHierarchy` stamp, on the first `26.12.1` smoke cell (humemai/mmdbbench#168).** Read two rows before the chain starts. A dense embedded row must say `arcadedb_add_hierarchy_source` `schema:index`, hold `arcadedb_add_hierarchy_schema_json` equal to `arcadedb_add_hierarchy`, and hold no `arcadedb_readback_error`. A dense served row must say `schema:index` too; a source that starts with `requested in the CREATE INDEX statement` means the server's engine reported no `metadata`, and the rest of the text says why.
+
 These open items moved here from section 7 (the owner's decision of 2026-11-11 on humemai/mmdbbench#109); each old row stays as a record with a pointer to this section:
 
 - Row 6, the PostgreSQL-wire twin of the served SQL cells: the mini run and the numbers. The twin cells of the 26.11.1 pass are humemai/mmdbbench#23.

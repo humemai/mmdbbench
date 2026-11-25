@@ -813,6 +813,9 @@ def neo4j_readback(session, checkpoint=False):
 #   schema.json   the file the engine keeps in the database directory. It holds the setting on both wheels, but only once the database is
 #                 closed, so this one is read AFTER the cell's close, outside every timer (readbacks_after_close on the adapter).
 #
+# The served arm asks source 1 over HTTP and otherwise records the request (`arcadedb_hierarchy_served`, humemai/mmdbbench#168). When
+# source 1 answered an embedded cell, schema.json is read after the close as well and put beside it (`arcadedb_hierarchy_cross_check`).
+#
 # The first two are read while the database is open, by `readbacks()` after the build timer, exactly where the Java read always was. The
 # third is read by the lane after `close()` and after `close_s` is recorded. A cell that no source can answer records
 # `arcadedb_readback_error` with a message naming each source and why it gave nothing, and prints it; it never writes an empty stamp, and the
@@ -821,6 +824,8 @@ HIERARCHY_SOURCE_SQL = "schema:index"
 HIERARCHY_SOURCE_JAVA = "java-schema"
 HIERARCHY_SOURCE_FILE = "schema.json"
 HIERARCHY_SOURCES = (HIERARCHY_SOURCE_SQL, HIERARCHY_SOURCE_JAVA, HIERARCHY_SOURCE_FILE)
+# the served arm's fallback, which is not a read-back (arcadedb_hierarchy_served)
+HIERARCHY_SOURCE_REQUEST = "requested in the CREATE INDEX statement"
 
 
 class HierarchyStampError(RuntimeError):
@@ -999,14 +1004,50 @@ def arcadedb_index_readback(query):
         return {"index_kinds_error": f"{type(e).__name__}: {e}"}
 
 
+def arcadedb_hierarchy_served(ddl, index_name, query):
+    """The served arm's stamp (humemai/mmdbbench#168): `schema:index` asked over HTTP, where the engine reports `metadata` (ArcadeData/arcadedb#13097,
+    26.12.1), else what the CREATE INDEX statement sent, with why the engine gave nothing (26.11.1 has no `metadata` map, and the server's schema.json is
+    inside its container). `query(sql)` returns the rows as dicts. Only `addHierarchy` is read from the map: it reports `pqSubspaces` as -1 (auto), which a
+    CREATE INDEX refuses, so the map is never fed back into one."""
+    try:
+        value, why = hierarchy_from_sql_rows(query(hierarchy_index_statement(index_name)))
+    except Exception as e:  # noqa: BLE001 - a reason on the row, never a swallowed error
+        value, why = None, f"{type(e).__name__}: {e}"
+    if value is not None:
+        return _hierarchy_stamp(value, HIERARCHY_SOURCE_SQL)
+    stamp = arcadedb_hierarchy_requested(ddl)
+    if stamp:
+        stamp["arcadedb_add_hierarchy_source"] = f"{HIERARCHY_SOURCE_REQUEST} ({HIERARCHY_SOURCE_SQL} gave nothing: {why[:200]})"
+        return stamp
+    return {"arcadedb_readback_error": f"`addHierarchy` of {index_name}: {HIERARCHY_SOURCE_SQL} gave nothing ({why[:200]}) and no CREATE INDEX statement was kept"}
+
+
+def arcadedb_hierarchy_cross_check(db_dir, index_name, stamp, err=None):
+    """Beside a stamp the engine gave through `schema:index`: what schema.json of the CLOSED database says, as `arcadedb_add_hierarchy_schema_json`
+    (humemai/mmdbbench#168, the two sources on one row). A disagreement is also `arcadedb_readback_error`, and printed. A file that cannot be read adds
+    nothing to the row, because the engine already answered, and is printed."""
+    err = err if err is not None else sys.stderr
+    try:
+        in_file = hierarchy_from_schema_json(db_dir, index_name)
+    except HierarchyStampError as e:
+        print(f"HIERARCHY CROSS-CHECK NOT DONE: {e}", file=err, flush=True)
+        return {}
+    out = {"arcadedb_add_hierarchy_schema_json": in_file}
+    if in_file != stamp["arcadedb_add_hierarchy"]:
+        msg = (f"`addHierarchy` of {index_name}: {HIERARCHY_SOURCE_SQL} says {stamp['arcadedb_add_hierarchy']}, "
+               f"{HIERARCHY_SOURCE_FILE} says {in_file}")
+        print(f"HIERARCHY SOURCES DISAGREE: {msg}", file=err, flush=True)
+        out["arcadedb_readback_error"] = msg
+    return out
+
+
 def arcadedb_hierarchy_requested(ddl):
-    """What the CREATE INDEX statement SENT, for the served arm: the HTTP API
-    returns no index metadata at this pin, so the field says it is a request."""
+    """What the CREATE INDEX statement SENT: the served arm's last resort (`arcadedb_hierarchy_served`), and the field says it is a request."""
     m = re.search(r'"addHierarchy"\s*:\s*(true|false)', ddl)
     if not m:
         return {}
     return {"arcadedb_add_hierarchy": m.group(1) == "true",
-            "arcadedb_add_hierarchy_source": "requested in the CREATE INDEX statement; the server returns no index metadata"}
+            "arcadedb_add_hierarchy_source": HIERARCHY_SOURCE_REQUEST}
 
 
 def _host_identity():

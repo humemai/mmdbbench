@@ -3242,18 +3242,22 @@ SPARSE_MP_ARMS = [
     ("milvus", "milvus_sparse", "Milvus"),
     ("qdrant", "qdrant_sparse", "Qdrant"),
 ]
-# THE TWO ARMS THE 2026-11 SUBSET LEAVES OUT (make_2611_stages.OUTSIDE: Elasticsearch and Milvus, humemai/mmdbbench#157). No chain of the rerun runs them, so a
-# small tier cannot hold their files. Every other arm of SPARSE_MP_ARMS is required of a tier, as before; these two are required only when the overlay holds a file of
-# them at some tier (all-or-nothing, as the dense optional arms are: none is absent, some is a refusal naming the missing files). With none the page declares them not run
-# (`_oct_conditions`, the l3s block).
-SPARSE_MP_BY_PRESENCE = ("elastic", "milvus")
+# THE ARMS NO CHAIN OF THE RERUN MAY RUN. Elasticsearch and Milvus are outside the 2026-11 subset (make_2611_stages.OUTSIDE, humemai/mmdbbench#157), and no chain of
+# the 26.12.1 pass runs a comparator of the sparse lane, Qdrant included (humemai/mmdbbench#21, decided 2026-11-24). So a small tier need not hold their files. Every
+# other arm of SPARSE_MP_ARMS is required of a tier, as before; these are required only when the overlay holds a file of them at some tier, or the frozen rows hold an
+# l3s row of them (all-or-nothing, as the dense optional arms are: none is absent, some is a refusal naming the missing files). With neither, the page declares them
+# not run (`_oct_conditions`).
+SPARSE_MP_BY_PRESENCE = ("elastic", "milvus", "qdrant")
 
 
-def sparse_run_arms(roots):
-    """The arms of SPARSE_MP_ARMS a landing's sparse overlay is held to: every required one, and `SPARSE_MP_BY_PRESENCE` arms only when a directory of `roots`
-    holds a file of them."""
-    return {arm for arm, _b, _l in SPARSE_MP_ARMS
-            if arm not in SPARSE_MP_BY_PRESENCE or any(r.is_dir() and _OM.files(r, f"sp_{arm}_*.json") for r in roots)}
+def sparse_run_arms(roots, rows=()):
+    """The arms of SPARSE_MP_ARMS a landing's sparse overlay is held to: every required one, and a `SPARSE_MP_BY_PRESENCE` arm only when a directory of `roots`
+    holds a file of it or `rows`, the frozen rows, hold an l3s row of it."""
+    held = {str(r.get("backend")) for r in rows if r.get("lane") == "l3s"}
+    return {arm for arm, backend, _l in SPARSE_MP_ARMS
+            if arm not in SPARSE_MP_BY_PRESENCE or backend in held
+            # the tier is named: `sp_qdrant_*` would also match the files of the uint8 arm
+            or any(r.is_dir() and _OM.files(r, f"sp_{arm}_{tier}.json") for r in roots for tier in ("medium", "small", "tiny"))}
 
 
 def sparse_files_owed(tier, rows, run):
@@ -3293,7 +3297,7 @@ def _sparse_multipass_table():
     """
     entries = []
     _roots = [_pinned_dir("sparse_mp", size_class=_SC.SIZE_CLASS[("l3s", t)]) for t in ("medium", "small", "tiny")]
-    _run = sparse_run_arms(_roots)
+    _run = sparse_run_arms(_roots, _FROZEN_ROWS)
     # 100k joined the second-pass run (qDP); its files are
     # optional so the table renders before they land, and the sparse
     # condition says whether 100k has a second pass by looking, not by text.
@@ -5640,6 +5644,34 @@ def _imgdefaults_not_measured_note(table):
     return _gen(text, label)
 
 
+# THE COMPARATORS NO CHAIN OF THE 26.12.1 PASS RUNS (humemai/mmdbbench#21, decided 2026-11-24). The sparse, time-series, lifecycle and server restart tables publish
+# with the arms that have rows, and every other comparator of the lane is declared not run, in the words Elasticsearch and Milvus have. The other lanes are rerun or keep
+# landed rows, so a comparator with no row there is still a finding (`page_check._check_lane_roster`).
+COMPARATORS_MAY_BE_UNRUN_LANES = ("l3s", "l4", "lifecycle", "restart")
+
+
+def _unrun_comparators(table, rows):
+    """The engines of `table` to declare not run: comparators the roster gate owes a row on it, with no row of the lane in `rows`, no failed or censored cell of the lane
+    in the run log (it has its own outcome row) and no entry of the engine on the table. Empty outside COMPARATORS_MAY_BE_UNRUN_LANES and while the lane has no row at all (a pending table, or a payload
+    built without rows). An engine with one arm on the table and another missing is not declared: that is a partial run, and the roster gate refuses it."""
+    lane, workload = _TABLE_LANE.get(table.get("id"), (None, None))
+    if lane not in COMPARATORS_MAY_BE_UNRUN_LANES:
+        return []
+    have = {str(r.get("backend")) for r in rows if r.get("lane") == lane}
+    if not have:
+        return []
+    import make_2611_stages as _MS   # the roster the gate reads: outside the subset and not yet measured are owed nothing
+    entries = table.get("entries", [])
+    have |= {str(e.get("backend_key")) for e in entries}
+    # an arm whose every cell failed has no frozen row, and its outcome row is appended after this reads the table
+    have |= {str(backend).partition("@")[0] for (ln, _scale, backend, _w) in _censored_cells() if ln == lane}
+    shown = {entry_engine(e) for e in entries}
+    missing = [a for a in LANES_RUNNER.get(lane, ())
+               if not a.startswith("arcadedb") and a not in have and a not in OFF_PAGE_ARMS
+               and not _MS.is_outside(a) and not _MS.not_yet_measured(a) and _runner_mod.arm_runs(lane, workload, a)]
+    return sorted({engine_family(display_name(a)) for a in missing} - shown, key=str.lower)
+
+
 def _oct_conditions(table):
     """The registered and generated sentences a table carries beyond
     what its builder and main() already put there: (head, tail)."""
@@ -5697,6 +5729,10 @@ def _oct_conditions(table):
             why = _gen(f"{engine} was not run at this release.", engine)
             tail.append(why)
             _declare_absence("l3s", engine, None, "not measured", why)
+    for engine in _unrun_comparators(table, _FROZEN_ROWS):
+        why = _gen(f"{engine} was not run at this release.", engine)
+        tail.append(why)
+        _declare_absence(tid, engine, None, "not measured", why)
     if tid == "lifecycle" and any(n == "Dense vectors (embedded)" for n in names):
         tail.append(_R("lifecycle", "vector_stats"))
     if tid == "lifecycle" and any("SurrealDB" in n for n in names):

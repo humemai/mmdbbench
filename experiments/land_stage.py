@@ -417,7 +417,7 @@ def overlay_gaps(store_rows, landing_rows, pin, scope=(), results=None, comparat
 
     if want_sparse:
         roots = {t: results / f"sparse_mp_{size_classes.pin_of_size_class(size_classes.SIZE_CLASS[('l3s', t)], landing=pin)}" for t in ("medium", "small", "tiny")}
-        run = X.sparse_run_arms(list(roots.values()))
+        run = X.sparse_run_arms(list(roots.values()), frozen)
         for tier, root in roots.items():
             check(root, sum(X.sparse_files_owed(tier, frozen, run), []))
     if want_dense:

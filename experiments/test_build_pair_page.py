@@ -429,6 +429,55 @@ def test_a_lane_with_one_build_prints_the_other_as_not_measured_and_the_gate_rea
     assert PC._check_build_pair({"tables": [_t(part, "docs_oltp"), stripped]}, []) > 0       # undeclared, the page is refused
 
 
+def test_a_failed_native_cell_is_declared_once_on_a_full_export_and_not_also_not_measured(pages):
+    """The order of a full export: the missing builds are read after a table's outcome rows and its failed and censored statements exist, so an
+    arm that was attempted and failed is not also declared "not measured" (humemai/mmdbbench#124). An arm that never ran still is."""
+    d = pages[3] / "attempted"
+    shutil.copytree(pages[3] / "partial", d)
+    failed = {"lane": "l2", "scale": "sf1", "workload": "oltp", "backend": "arcadedb_graph_server", "engine_backend": "native",
+              "engine_version": V, "engine_commit": PIN, "rep": 1, "error": "RuntimeError: the failed native cell of this test"}
+    with (d / "runs.jsonl").open("a") as fh:
+        fh.write(json.dumps(failed) + "\n")
+    done = _run("export_web.py", d)
+    assert done.returncode == 0, done.stderr[-2000:]
+    t = _t(json.loads((d / "web_benchmarks.json").read_text()), "l2")
+    arm = "ArcadeDB (server, native build)"
+    assert [e.get("outcome") for e in t["entries"] if e["backend"] == arm] == ["failed"]
+    said = [a for a in t["declared_absences"] if a["backend"] == arm and a["column"] is None]
+    assert [a["kind"] for a in said] == ["failed"], said
+    assert not [c for c in t["conditions"] if "was not measured for" in c and arm in c], t["conditions"]
+    other = "ArcadeDB (embedded, native build)"                                   # no row and no run: still said
+    assert [a["kind"] for a in t["declared_absences"] if a["backend"] == other and a["column"] is None] == ["not measured"]
+    assert [c for c in t["conditions"] if "was not measured for" in c and other in c]
+    assert PC._check_build_pair({"tables": [t]}, []) == 0
+
+
+def test_a_build_whose_missing_arms_all_carry_a_statement_gets_no_sentence(monkeypatch):
+    """Only a whole-row statement that names the size stands for the missing arm; when every missing arm of a build has one, the table gets
+    no "was not measured for" sentence at all (never one with an empty list), and a statement about one column suppresses nothing."""
+    pytest.importorskip("numpy")
+    pytest.importorskip("pandas")
+    import collections
+
+    import export_web as X
+    monkeypatch.setattr(X, "_SPLIT", True)
+    monkeypatch.delenv("BENCH_ENGINE_BACKEND", raising=False)
+    jvm = {"backend": "ArcadeDB (server, JVM build)", "build": "jvm", "scale_label": "SF1 (11k people)"}
+    arm = "ArcadeDB (server, native build)"
+    why = f"{arm} at SF1 (11k people): the cell failed."
+
+    def declared(column):
+        monkeypatch.setattr(X, "_DECLARED_ABSENCES", collections.defaultdict(list))
+        X._declare_absence("l2", arm, column, "failed", why)
+        table = {"id": "l2", "entries": [dict(jvm)], "conditions": []}
+        X._declare_missing_builds([table])
+        return table["conditions"], [a["kind"] for a in X._DECLARED_ABSENCES["l2"]]
+
+    assert declared(None) == ([], ["failed"])
+    conditions, kinds = declared("point p50 ms")
+    assert kinds == ["failed", "not measured"] and len(conditions) == 1 and arm in conditions[0]
+
+
 def test_a_freeze_whose_builds_name_two_commits_is_not_exported(pages):
     d = pages[3] / "mixed"
     shutil.copytree(pages[3] / "base", d)

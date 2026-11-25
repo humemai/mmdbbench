@@ -2128,6 +2128,9 @@ def _declare_missing_builds(tables):
     entries at a size and the other has none, the missing arm is declared (kind "not measured", whole row) and one sentence per table
     and build names the arms and sizes. A deliberate one-build freeze (BENCH_ENGINE_BACKEND) declares nothing: the other build was
     left out on purpose, and the arm labels still say which build the page is.
+
+    Called by _finish_table, last: a cell that was attempted shows as an outcome row or as a whole-row statement, and both exist only
+    once the table is finished. Read earlier, a failed cell was also declared "not measured" (humemai/mmdbbench#124).
     """
     if not _SPLIT or _AI.wanted_build():
         return
@@ -2149,7 +2152,8 @@ def _declare_missing_builds(tables):
             for label, sizes in sorted(arms.items()):
                 arm = _with_build(label, b)
                 # An arm with a statement for a size (failed, censored, out of memory) was attempted there: it is not also "not measured".
-                said = [a["why"] for a in _DECLARED_ABSENCES[t["id"]] if a["backend"] == arm and a["kind"] != "not measured"]
+                said = [a["why"] for a in _DECLARED_ABSENCES[t["id"]]
+                        if a["backend"] == arm and a["column"] is None and a["kind"] != "not measured"]
                 sizes = [z for z in sizes if not any(z in why for why in said)]
                 if not sizes:
                     continue
@@ -2157,6 +2161,8 @@ def _declare_missing_builds(tables):
                                  f"{arm} was not measured at {_join_and(sizes)}.")
                 parts.append(f"{arm} at {_join_and(sizes)}")
                 vals += [arm, *sizes]
+            if not parts:
+                continue
             t.setdefault("conditions", [])
             note = _gen(f"The {_AI.BUILD_NAMES[b]} was not measured for {_join_and(parts)}, so those rows are absent.", *vals)
             if note not in t["conditions"]:
@@ -7787,6 +7793,8 @@ def _finish_table(table: dict) -> dict:
         elif c.endswith(" ms") or c.endswith(" s") or c.endswith(" GiB") or _MPM.unit_of(c) or c in ("torn results", "vs Java"):
             dirs[c] = "down"
     table["directions"] = dirs
+    # LAST, after the outcome rows and every statement above: a build with no row and no statement is declared not measured.
+    _declare_missing_builds([table])
     # Every absence this table declares, as data (page_check.OPERATION_MANIFEST
     # reads it). Written after the notes above, because the notes are what
     # register them.
@@ -8462,7 +8470,6 @@ def main() -> int:
             _t.setdefault("conditions", [])
             if _note not in _t["conditions"]:
                 _t["conditions"].append(_note)
-    _declare_missing_builds(tables)
     _declare_arm_runs_absences(tables)
     _declare_unexpressible_columns(tables)
     _declare_excluded_at_tier_absences(tables)

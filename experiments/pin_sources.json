@@ -1,0 +1,235 @@
+{
+  "about": "Where pin_freshness.py (humemai/mmdbbench#175, item 1) reads the releases of every pin. An image entry names the version its digest stands for, so a new digest needs a new version here (test_pin_freshness.py). `stable` picks the stable releases (group v is the version). `compatible.tags` narrows them to the ones every lane can use and names the row of comparator_constraints.json that says why. `exception` is the `backend` of an exception line there. `own` marks ArcadeDB and its client layer, which are listed and not judged. A Python package with no entry is read from PyPI and has no hold.",
+  "images": {
+    "arangodb": {
+      "digest": "b3a7b110e12770ea9558e125b34d672703daf2473bdad5447f026364cb338899",
+      "version": "3.12.14",
+      "source": "dockerhub",
+      "repository": "library/arangodb",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "arcadedata/arcadedb": {
+      "own": "ArcadeDB is what is measured: the campaign's engine pin replaces this image"
+    },
+    "crate": {
+      "digest": "978bd9be5585eef8dc11d29043c858278ef25fb0ec3b160c2c18bea0da9115b8",
+      "version": "6.4.7",
+      "source": "dockerhub",
+      "repository": "library/crate",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)$",
+      "exception": "CrateDB (cratedb_tpc)"
+    },
+    "docker.elastic.co/elasticsearch/elasticsearch": {
+      "digest": "33178ff49e06da93e3c51c5d87401b26e7a6dea0ef9bb26539cfddc46478b420",
+      "version": "9.5.4",
+      "source": "github",
+      "repository": "elastic/elasticsearch",
+      "stable": "^v(?P<v>\\d+\\.\\d+\\.\\d+)$",
+      "exception": "FalkorDB, Milvus, Elasticsearch (not run in the 26.12.1 small pass)"
+    },
+    "falkordb/falkordb": {
+      "digest": "2756fdea96acff753e49c459dc279a21a50915d7b2b38bff8a3950d10f984fd8",
+      "version": "6.0.1",
+      "source": "dockerhub",
+      "repository": "falkordb/falkordb",
+      "stable": "^v?(?P<v>\\d+\\.\\d+\\.\\d+)$",
+      "exception": "FalkorDB, Milvus, Elasticsearch (not run in the 26.12.1 small pass)"
+    },
+    "memgraph/memgraph": {
+      "digest": "c7478d1737edb77fa2b1fcd4e37e34a68f10272d0ec7d7f9aa92d0afc8e0be9f",
+      "version": "3.14.0",
+      "source": "dockerhub",
+      "repository": "memgraph/memgraph",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "milvusdb/milvus": {
+      "digest": "812cb91ad04e847e5ebb4d19593c69f2e207593073063ede0fd604bbba5fddf1",
+      "version": "v3.0.3",
+      "source": "github",
+      "repository": "milvus-io/milvus",
+      "stable": "^v(?P<v>\\d+\\.\\d+\\.\\d+)$",
+      "exception": "FalkorDB, Milvus, Elasticsearch (not run in the 26.12.1 small pass)"
+    },
+    "milvusdb/minio": {
+      "digest": "34c8e2f52a5984492555427fee07254c80036bdb7079bb91679232abd7a4fa20",
+      "version": "RELEASE.2024-12-18T13-15-44Z",
+      "source": "dockerhub",
+      "repository": "milvusdb/minio",
+      "stable": "^(?P<v>RELEASE\\.\\d{4}-\\d\\d-\\d\\dT\\d\\d-\\d\\d-\\d\\dZ)$"
+    },
+    "mongo": {
+      "digest": "e5964383224061a512e9a886a4beaf6ed299f0237b7239dbf9876cbc7882910d",
+      "version": "9.0.8",
+      "source": "dockerhub",
+      "repository": "library/mongo",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "mongodb/mongodb-community-search": {
+      "digest": "4512001a59ea05f7ee79dc1d6a86ad677d92d739617d2193568ed354f01e611e",
+      "version": "1.79.1",
+      "source": "dockerhub",
+      "repository": "mongodb/mongodb-community-search",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "neo4j": {
+      "digest": "b022ed3441c7dbf07cdc8ddddeccc370dff1181aa1ce126158ae29a13817c854",
+      "version": "2026.10.2",
+      "source": "dockerhub",
+      "repository": "library/neo4j",
+      "stable": "^(?P<v>\\d{4}\\.\\d\\d\\.\\d+)-community$",
+      "name_filter": "community"
+    },
+    "pgvector/pgvector": {
+      "digest": "4bdc16048580b56345bca441bffe8d9b45dd2f5d76963808c853df1661df6e00",
+      "version": "0.8.7",
+      "source": "dockerhub",
+      "repository": "pgvector/pgvector",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)-pg\\d+$",
+      "compatible": {
+        "tags": "-pg18$",
+        "because": "Apache AGE supports PostgreSQL up to 18, and the PostgreSQL family moves as one unit",
+        "constraint": "Apache AGE (graph arm, cross-model arm)"
+      },
+      "exception": "PostgreSQL (postgres, postgres_tuned, postgres_ts, pgvector, pgage_graph, pg_age_e2)"
+    },
+    "postgres": {
+      "digest": "32f5fdbf4d27ebe0d4552313126a593400f40b21bff207e43617b2305838bce3",
+      "version": "18.7",
+      "source": "dockerhub",
+      "repository": "library/postgres",
+      "stable": "^(?P<v>\\d+\\.\\d+)$",
+      "compatible": {
+        "tags": "^18\\.",
+        "because": "Apache AGE supports PostgreSQL up to 18, and the PostgreSQL family moves as one unit",
+        "constraint": "Apache AGE (graph arm, cross-model arm)"
+      },
+      "exception": "PostgreSQL (postgres, postgres_tuned, postgres_ts, pgvector, pgage_graph, pg_age_e2)",
+      "pages": 10
+    },
+    "qdrant/qdrant": {
+      "digest": "c5e32ee251293d2e1f4dd34890ad75eeee5a4f3821a121d6d8b7e4323448b386",
+      "version": "v1.20.2",
+      "source": "dockerhub",
+      "repository": "qdrant/qdrant",
+      "stable": "^v(?P<v>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "quay.io/coreos/etcd": {
+      "digest": "dc2bdc588d2adc5272204a1fff7f1d89f31e8caacea78fdf509fd409d7162a9d",
+      "version": "v3.5.25",
+      "source": "github",
+      "repository": "etcd-io/etcd",
+      "stable": "^v(?P<v>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "questdb/questdb": {
+      "digest": "931af4156771ee2948ec2431988c3a93b257487d993f1b74771545c8dce5c23d",
+      "version": "10.0.1",
+      "source": "dockerhub",
+      "repository": "questdb/questdb",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)$",
+      "exception": "TimescaleDB, QuestDB, LanceDB (no landed rows)"
+    },
+    "redis": {
+      "digest": "29f0fcb48d8fe958e80767ca3f92d30aae798f940f257764620be3eec1b2fce5",
+      "version": "8.12.0",
+      "source": "dockerhub",
+      "repository": "library/redis",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "surrealdb/surrealdb": {
+      "digest": "516880cf27ee605f026cbd4f9381d154bc6d7c46a7d1d128205c9686ef234ff3",
+      "version": "v3.2.6",
+      "source": "dockerhub",
+      "repository": "surrealdb/surrealdb",
+      "stable": "^v(?P<v>\\d+\\.\\d+\\.\\d+)$",
+      "exception": "SurrealDB server (surrealdb_graph_server, _tpc_server, _e2_server)"
+    },
+    "timescale/timescaledb": {
+      "digest": "26e20a5e5a7ab6bec7ff217a52ffe21c9f4799603816718b2a573e7be839d8b4",
+      "version": "2.31.0",
+      "source": "dockerhub",
+      "repository": "timescale/timescaledb",
+      "stable": "^(?P<v>\\d+\\.\\d+\\.\\d+)-pg\\d+$",
+      "compatible": {
+        "tags": "-pg18$",
+        "because": "Apache AGE supports PostgreSQL up to 18, and the PostgreSQL family moves as one unit",
+        "constraint": "Apache AGE (graph arm, cross-model arm)"
+      },
+      "name_filter": "-pg",
+      "exception": "TimescaleDB, QuestDB, LanceDB (no landed rows)"
+    }
+  },
+  "packages": {
+    "arcadedb-driver": {
+      "exception": "arcadedb-driver on the client line"
+    },
+    "surrealdb": {
+      "exception": "SurrealDB embedded (surrealdb_graph, _tpc, _e2)"
+    },
+    "falkordb": {
+      "exception": "falkordb (client of the FalkorDB arms)"
+    },
+    "lancedb": {
+      "exception": "TimescaleDB, QuestDB, LanceDB (no landed rows)"
+    },
+    "pymilvus": {
+      "exception": "pymilvus with minio, azure-storage-blob and ml-dtypes (clients of the Milvus arms)"
+    },
+    "minio": {
+      "exception": "pymilvus with minio, azure-storage-blob and ml-dtypes (clients of the Milvus arms)"
+    },
+    "azure-storage-blob": {
+      "exception": "pymilvus with minio, azure-storage-blob and ml-dtypes (clients of the Milvus arms)"
+    },
+    "ml-dtypes": {
+      "exception": "pymilvus with minio, azure-storage-blob and ml-dtypes (clients of the Milvus arms)"
+    },
+    "numpy": {
+      "exception": "numpy, pandas, pyarrow (harness libraries)"
+    },
+    "pandas": {
+      "exception": "numpy, pandas, pyarrow (harness libraries)"
+    },
+    "pyarrow": {
+      "exception": "numpy, pandas, pyarrow (harness libraries)"
+    },
+    "httpx": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "httpcore": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "h11": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "anyio": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "idna": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "certifi": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "attrs": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "typing-extensions": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    },
+    "websockets": {
+      "own": "the official ArcadeDB driver layer of the served arms and its locked dependencies"
+    }
+  },
+  "apt": {
+    "postgresql-18-age": {
+      "source": "apt",
+      "url": "https://apt.postgresql.org/pub/repos/apt/dists/bookworm-pgdg/main/binary-amd64/Packages.gz",
+      "exception": "PostgreSQL (postgres, postgres_tuned, postgres_ts, pgvector, pgage_graph, pg_age_e2)"
+    }
+  },
+  "floating": {
+    "python:3.12-slim": {
+      "exception": "SQLite (sqlite, composed_embedded; sqlite-vec loads into it)"
+    }
+  }
+}

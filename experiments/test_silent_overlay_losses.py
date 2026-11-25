@@ -98,6 +98,11 @@ def _sparse_rows(X, builds=("jvm", "native"), tiers=TIERS):
     return [_row("l3s", t, b, bld) for t in tiers for _a, b in _arc_arms(X) for bld in builds]
 
 
+def _comparator_sparse_rows(tiers=TIERS):
+    """The lane rows of the comparators' chain, when it ran: a Qdrant sparse row per tier."""
+    return [_row("l3s", t, "qdrant_sparse", "") for t in tiers]
+
+
 def _dense_rows(builds=("jvm", "native")):
     return [_row("l3d", "small", DENSE_KEYS[a], bld) for a in DENSE_ARMS for bld in builds]
 
@@ -270,7 +275,7 @@ def _gaps(X, rows, d, scope=(), comparator_pins=()):
 
 def test_the_pre_merge_check_lists_the_missing_sparse_files_and_the_step_that_makes_each():
     import export_web as X
-    rows = _sparse_rows(X)
+    rows = _sparse_rows(X) + _comparator_sparse_rows()
     with _landing(rows, dense=False, skip=["sp_qdrant_small.json", "sp_qdrant_tiny.json"]) as (X, d):                     # the comparators' files are not on the host
         got = _gaps(X, rows, d)
         assert got == {f"sparse_mp_{NEW}": ["sp_qdrant_small.json", "sp_qdrant_tiny.json"]}, got
@@ -345,7 +350,7 @@ def _land(argv, prep, store, pulled, env=None):
 
 def test_the_landing_refuses_before_the_merge_for_missing_overlay_files_and_writes_nothing():
     import export_web as X
-    rows = _sparse_rows(X)
+    rows = _sparse_rows(X) + _comparator_sparse_rows()
     argv = ["--pin", NEW, "--large-pin", OLD, "--only-lanes", "l3s", "--message", "m"]
 
     def union_only(res):                                                                   # the ArcadeDB union is pre-created, the comparators' files are not on the host

@@ -327,6 +327,89 @@ def test_every_other_arm_has_nothing_to_read_after_the_close(L):
     assert L.ArcadeServer().readbacks_after_close() == {}
 
 
+# ---------------------------------------------------------------------------
+# the served arm over HTTP, and the two sources on one embedded row (humemai/mmdbbench#168)
+
+DDL = 'CREATE INDEX ON Article (embedding) LSM_VECTOR METADATA { "dimensions": 128, "addHierarchy": true }'
+
+
+class _Session:
+    """The served arm's HTTP session: answers `/query/bench` with `rows`, or with a failed status."""
+
+    def __init__(self, rows, error=None):
+        self.rows, self.error, self.posts = rows, error, []
+
+    def post(self, url, json=None, timeout=None):
+        self.posts.append((url, json))
+        outer = self
+
+        class _Response:
+            def raise_for_status(self):
+                if outer.error:
+                    raise RuntimeError(outer.error)
+
+            def json(self):
+                return {"result": outer.rows}
+
+        return _Response()
+
+
+def _served(L, rows, error=None, cls="ArcadeServer"):
+    a = getattr(L, cls)()
+    a.rq, a.base, a._index_ddl = _Session(rows, error), "http://server:2480/api/v1", DDL
+    return a
+
+
+@pytest.mark.parametrize("cls", ["ArcadeServer", "ArcadeServerInt8"])
+@pytest.mark.parametrize("value", [True, False])
+def test_the_served_arm_reads_the_setting_in_force_over_http(L, cls, value):
+    """The engine's value wins over the request (the DDL asks for true), and nothing but that one statement is sent: no CREATE built from the map."""
+    a = _served(L, with_metadata(value), cls=cls)
+    assert a.readbacks() == stamp(value, "schema:index")
+    assert a.rq.posts == [("http://server:2480/api/v1/query/bench", {"language": "sql", "command": STATEMENT})]
+
+
+@pytest.mark.parametrize("rows,error,why", [(WITHOUT_METADATA, None, "no `metadata` map"), ([], None, "no row"), ([], "500 Server Error", "500 Server Error")])
+def test_a_served_engine_that_cannot_say_records_the_request_and_why(L, rows, error, why):
+    got = _served(L, rows, error).readbacks()
+    assert got["arcadedb_add_hierarchy"] is True and set(got) == {"arcadedb_add_hierarchy", "arcadedb_add_hierarchy_source"}
+    source = got["arcadedb_add_hierarchy_source"]
+    assert source.startswith("requested in the CREATE INDEX statement (schema:index gave nothing: ") and why in source, source
+
+
+def test_a_served_arm_with_no_answer_and_no_statement_records_the_error(L):
+    a = _served(L, WITHOUT_METADATA)
+    a._index_ddl = ""
+    got = a.readbacks()
+    assert set(got) == {"arcadedb_readback_error"} and "no CREATE INDEX statement" in got["arcadedb_readback_error"]
+
+
+@pytest.mark.parametrize("wheel", ["native", "jvm"])
+def test_an_engine_answer_is_put_beside_schema_json_after_the_close(L, monkeypatch, tmp_path, wheel):
+    write_schema(tmp_path, True, buckets=2)
+    a = _adapter(L, monkeypatch, tmp_path, wheel, rows=with_metadata(True))
+    assert a.readbacks() == stamp(True, "schema:index")
+    assert a.readbacks_after_close() == {"arcadedb_add_hierarchy_schema_json": True}
+    assert {"arcadedb_add_hierarchy_schema_json"} <= OV.STAMP_FIELDS
+
+
+def test_two_sources_that_disagree_are_an_error_on_the_row(L, monkeypatch, tmp_path, capsys):
+    write_schema(tmp_path, False)
+    a = _adapter(L, monkeypatch, tmp_path, "jvm", rows=with_metadata(True))
+    row = dict(a.readbacks())
+    row.update(a.readbacks_after_close())
+    assert row["arcadedb_add_hierarchy"] is True and row["arcadedb_add_hierarchy_source"] == "schema:index"     # the engine's answer stays the stamp
+    assert row["arcadedb_add_hierarchy_schema_json"] is False
+    assert "schema:index says True, schema.json says False" in row["arcadedb_readback_error"]
+    assert "HIERARCHY SOURCES DISAGREE" in capsys.readouterr().err
+
+
+def test_a_stamp_from_another_source_is_not_cross_checked(L, monkeypatch, tmp_path):
+    write_schema(tmp_path, True)
+    a = _adapter(L, monkeypatch, tmp_path, "jvm", rows=WITHOUT_METADATA, java_value=True)
+    assert a.readbacks() == stamp(True, "java-schema") and a.readbacks_after_close() == {}
+
+
 def test_the_lane_reads_schema_json_after_close_s_and_outside_the_close_phase():
     """The order in main(): the timed close, `close_s` on the row, the close phase over, and only then the file read."""
     src = (HERE / "l3d_dense.py").read_text()

@@ -631,7 +631,7 @@ OVERRIDES = (
                   Carrier("restart", "arcadedb_dense_server", "arcadedb_add_hierarchy")),
         check=_hierarchy_is_on, sentence=_arcadedb_hierarchy,
         says=(r"ArcadeDB", r"vector index", r"layer|hierarch"),
-        companions=("arcadedb_add_hierarchy_source", "arcadedb_readback_error")),
+        companions=("arcadedb_add_hierarchy_source", "arcadedb_add_hierarchy_schema_json", "arcadedb_readback_error")),
     Override(
         key="arcadedb_query_cap",
         setting=f"-D{CAP_PROPERTY}",

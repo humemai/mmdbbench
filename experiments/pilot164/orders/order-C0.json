@@ -1,0 +1,194 @@
+{
+ "claimable": true,
+ "claims": [
+  {
+   "cell_class": null,
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-c0@s1-solo",
+   "lane": "solo",
+   "note": "pilot of #164, leg C0, stage s1, lane solo; order.json in the study folder",
+   "out": "s1-solo",
+   "stage": "s1",
+   "study": "pilot164-c0"
+  },
+  {
+   "cell_class": null,
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-c0@s2-c1",
+   "lane": "compare1",
+   "note": "pilot of #164, leg C0, stage s2, lane compare1; order.json in the study folder",
+   "out": "s2-c1",
+   "stage": "s2",
+   "study": "pilot164-c0"
+  },
+  {
+   "cell_class": "compute",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-c0@s2-c2",
+   "lane": "compare2",
+   "note": "pilot of #164, leg C0, stage s2, lane compare2; order.json in the study folder",
+   "out": "s2-c2",
+   "stage": "s2",
+   "study": "pilot164-c0"
+  },
+  {
+   "cell_class": "compute",
+   "claimable": true,
+   "issue": "humemai/mmdbbench#164",
+   "job": "pilot164-c0@s2-c3",
+   "lane": "compare3",
+   "note": "pilot of #164, leg C0, stage s2, lane compare3; order.json in the study folder",
+   "out": "s2-c3",
+   "stage": "s2",
+   "study": "pilot164-c0"
+  }
+ ],
+ "corr_max": 0.3,
+ "data": false,
+ "format": 1,
+ "lanes_proven": {
+  "bw_heavy": 1,
+  "compute": 3,
+  "io_heavy": 1,
+  "none": 1
+ },
+ "leg": "C0",
+ "levels": [
+  "compute"
+ ],
+ "mid_n": 0,
+ "needs": null,
+ "picks_json_sha256": "82ac20cd16dff84f1218f95df24debf91a4223004eb35803b16671afc3f1a4bc",
+ "plan_py_sha256": "65a404270ba1fff6123ba65bed27a54fc3d48e817f1ea3a00b702707e8fee0d9",
+ "ref_n": 1,
+ "reps": 1,
+ "salt": 0,
+ "seed": 20261124,
+ "targets": [
+  {
+   "arm": "jvm-embedded",
+   "box_s": 575,
+   "cls": null,
+   "id": "l2_arcadedb_graph_embedded_oltp_sf1.jvm-embedded",
+   "probe": false,
+   "unit": "s",
+   "workload": "cell:l2_arcadedb_graph_embedded_oltp_sf1"
+  },
+  {
+   "arm": "jvm-server",
+   "box_s": 565,
+   "cls": null,
+   "id": "l2_arcadedb_graph_server_oltp_sf1.jvm-server",
+   "probe": false,
+   "unit": "s",
+   "workload": "cell:l2_arcadedb_graph_server_oltp_sf1"
+  }
+ ],
+ "title": "smoke of the cell command (two cells once each: solo, two cpus alone, beside one compute neighbour; never data)",
+ "topup_of": null,
+ "units": [
+  {
+   "box_s": 575,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "C0.s.l2_arcadedb_graph_embedded_oltp_sf1.jvm-embedded.start0",
+   "idx": null,
+   "kind": "solo",
+   "level": null,
+   "light_lanes": [],
+   "position": "solo",
+   "rep": 0,
+   "round": null,
+   "set": "start",
+   "stage": "s1",
+   "target": "l2_arcadedb_graph_embedded_oltp_sf1.jvm-embedded"
+  },
+  {
+   "box_s": 565,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "C0.s.l2_arcadedb_graph_server_oltp_sf1.jvm-server.start0",
+   "idx": null,
+   "kind": "solo",
+   "level": null,
+   "light_lanes": [],
+   "position": "solo",
+   "rep": 0,
+   "round": null,
+   "set": "start",
+   "stage": "s1",
+   "target": "l2_arcadedb_graph_server_oltp_sf1.jvm-server"
+  },
+  {
+   "box_s": 575,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "C0.a.l2_arcadedb_graph_embedded_oltp_sf1.jvm-embedded.start0",
+   "idx": null,
+   "kind": "alone2",
+   "level": null,
+   "light_lanes": [],
+   "position": "compare1",
+   "rep": 0,
+   "round": null,
+   "set": "start",
+   "stage": "s2",
+   "target": "l2_arcadedb_graph_embedded_oltp_sf1.jvm-embedded"
+  },
+  {
+   "box_s": 565,
+   "busy_lane": null,
+   "busy_stream": null,
+   "id": "C0.a.l2_arcadedb_graph_server_oltp_sf1.jvm-server.start0",
+   "idx": null,
+   "kind": "alone2",
+   "level": null,
+   "light_lanes": [],
+   "position": "compare1",
+   "rep": 0,
+   "round": null,
+   "set": "start",
+   "stage": "s2",
+   "target": "l2_arcadedb_graph_server_oltp_sf1.jvm-server"
+  },
+  {
+   "box_s": 575,
+   "busy_lane": "compare3",
+   "busy_stream": "probe:cpu",
+   "id": "C0.p.l2_arcadedb_graph_embedded_oltp_sf1.jvm-embedded.compute.r0",
+   "idx": 0,
+   "kind": "perm",
+   "level": "compute",
+   "light_lanes": [
+    "compare2"
+   ],
+   "position": "compare1",
+   "rep": 0,
+   "round": 0,
+   "set": null,
+   "stage": "s2",
+   "target": "l2_arcadedb_graph_embedded_oltp_sf1.jvm-embedded"
+  },
+  {
+   "box_s": 565,
+   "busy_lane": "compare3",
+   "busy_stream": "probe:cpu",
+   "id": "C0.p.l2_arcadedb_graph_server_oltp_sf1.jvm-server.compute.r0",
+   "idx": 1,
+   "kind": "perm",
+   "level": "compute",
+   "light_lanes": [
+    "compare2"
+   ],
+   "position": "compare1",
+   "rep": 0,
+   "round": 0,
+   "set": null,
+   "stage": "s2",
+   "target": "l2_arcadedb_graph_server_oltp_sf1.jvm-server"
+  }
+ ]
+}

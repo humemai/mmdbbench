@@ -13,6 +13,8 @@ by the leader for everybody (`abort`); two aborted units in a row end the stage.
 Worker tick apart); if it fails the claim exits 4 and is queued again with a new OUT.
 A unit that already has a row of this lane is skipped, so a claim that the Worker restarts after a halt resumes; a unit that was started but has no row is written
 as `failed: interrupted`. Nothing is timed outside the units. Heat leg: every lane runs its probe for the whole box and writes one row.
+A target whose workload is `cell:<name>` is one benchmark cell run by cell_run.py (legs L5 and L6, smoke leg C0): the pins are checked before the first
+rendezvous (a refusal is exit 4), the figure is the cell's wall time in seconds, and every role of such a unit waits for the target as long as the cell may run.
 """
 import glob
 import hashlib
@@ -37,6 +39,14 @@ LIGHT_BUSY_S, LIGHT_PERIOD_S = 0.0004, 0.04
 def load_probes():
     import importlib.util
     spec = importlib.util.spec_from_file_location("pilot_probes", os.path.join(HERE, "probes.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def load_cells():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pilot_cells", os.path.join(HERE, "cell_run.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -185,8 +195,11 @@ def wait_for(paths, timeout, stop_on=None):
 
 
 def prepare(probes, workload, cpus_text, iodir):
+    if workload.startswith("cell:"):
+        probes.pin(cpus_text)
+        return {"cell": workload.split(":", 1)[1], "allowed": probes.allowed_cpus()}
     if not workload.startswith("probe:"):
-        raise SystemExit("REFUSED: workload " + workload + " has no runner yet (the cell command is written and hashed in an amendment before its leg is locked)")
+        raise SystemExit("REFUSED: workload " + workload + " has no runner")
     name = workload.split(":", 1)[1]
     allowed = probes.pin(cpus_text)
     os.makedirs(iodir, exist_ok=True)
@@ -252,6 +265,7 @@ def main():
         print("REFUSED: this leg is not claimable yet: " + str(order.get("needs")), file=sys.stderr)
         return 2
     probes = load_probes()
+    cells, facts = None, None
     mine = parse_cpus(cpus_text)
     probes.pin(cpus_text)
     if len(probes.parse_cpus(probes.allowed_cpus())) != len(mine):
@@ -273,10 +287,20 @@ def main():
     shortened = not order["data"]
     provenance = {"runner_sha256": sha(__file__), "probes_sha256": sha(os.path.join(HERE, "probes.py")), "order_leg": order["leg"], "seed": order["seed"], "salt": order["salt"]}
 
+    # a lane that is the target of a cell checks the pins before anything else: a missing wheel or image ends the claim with no row
+    if any((lane_roles(u).get(lane) == "target") and order_workload(order, u).startswith("cell:") for u in units):
+        cells = load_cells()
+        try:
+            facts = cells.preflight(order["data"])
+        except cells.CellError as exc:
+            print("REFUSED: the cell pins: " + str(exc), file=sys.stderr)
+            return 4
+        provenance.update({"cell_run_sha256": sha(os.path.join(HERE, "cell_run.py")), "cell_json_sha256": sha(os.path.join(HERE, "cell.json"))})
+
     def write_row(row):
         row.update({"leg": order["leg"], "stage": stage, "out": out, "lane": lane, "cpus_expected": cpus_text, "shortened": shortened, "host_lane": lane, "cell_class": cell_class})
         row.update(provenance)
-        row["test_hooks"] = TEST_HOOKS
+        row["test_hooks"] = TEST_HOOKS or bool(row.get("test_hooks_cell"))
         with open(rows_path, "a") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
             fh.flush()
@@ -317,6 +341,8 @@ def main():
             continue
         box = float(u["box_s"])
         cap = box * 1.5 + 60
+        if u["kind"] != "heat" and order_workload(order, u).startswith("cell:"):
+            cap = load_cells().load_config()["timeout_s"] + 900  # neighbours cover the target for as long as the cell may run
         iodir = os.path.join(odir, "io")
         prep = None
         try:
@@ -369,9 +395,17 @@ def main():
                     is_target = role == "target"
                     if not is_target:
                         stopper(probes, stop_path, cap)
-                    res, t_start, t_end, partial = run_workload(probes, prep, box if (is_target or u["kind"] == "heat") else cap)
+                    if "cell" in prep:
+                        t_start = time.time()
+                        res = cells.run(facts, prep["cell"], cpus_text, odir, f"{out}_{uid}", {"ok": gate["ok"], "waited": gate["waited"], "temp": gate["temp"], "max_c": GATE_C})
+                        t_end, partial = time.time(), False
+                        row.update(res["extra"])
+                        row["unit_label"] = "s"
+                        row["test_hooks_cell"] = cells.test_hooks()
+                    else:
+                        res, t_start, t_end, partial = run_workload(probes, prep, box if (is_target or u["kind"] == "heat") else cap)
+                        row["unit_label"] = probes.UNITS[prep["name"]]
                     row["figure"] = res["value"] if is_target or u["kind"] == "heat" else None
-                    row["unit_label"] = probes.UNITS[prep["name"]]
                     row["cpus_allowed"] = prep["allowed"]
                     row["status"] = "partial" if partial and not is_target else "ok"
                     if is_target and u["kind"] != "heat":

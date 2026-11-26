@@ -1,0 +1,17 @@
+{
+ "bench_data": "~/bench-data",
+ "bench_host": "mini",
+ "client_image": "dbbench:client-arcadedb",
+ "embedded_image": "dbbench:arcadedb-26.11.1-jvm",
+ "engine_commit": "a3a5d124572608412aa187f9c4b290e071699473",
+ "engine_version": "26.11.1",
+ "harness_commit": "e7ddfe6548b8acc020d476ad0053e1787cba54c4",
+ "instrument": "2026-11",
+ "python": ["python3"],
+ "server_image": "arcadedb-c25:a3a5d1245",
+ "server_image_id": "sha256:14507d0d851cbce3bcb5549e88f5afdf5610e5abf4e7b43cc7bb42149bf80ffd",
+ "timeout_s": 3600,
+ "wheel_dirs": ["~/dress-2611/wt/jvm/bindings/python/dist", "~/leanov-wt/jvm/bindings/python/dist", "~/fourarm-catchup-wt/jvm/bindings/python/dist"],
+ "wheel_name": "arcadedb_jvm-26.11.1-py3-none-manylinux_2_28_x86_64.whl",
+ "wheel_sha256": "fb88664af2e9a52f0a8099e7b0e3d2bceb03437c1658f4c7fc825777b0db8934"
+}

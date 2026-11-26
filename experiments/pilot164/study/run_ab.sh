@@ -8,4 +8,7 @@ cd "$HERE"
 export PATH="$HOME/.local/bin:$PATH"
 : "${OUT:?OUT is not set}"
 case "$OUT" in "" | . | .. | */*) echo "OUT must be a plain label" >&2; exit 2 ;; esac
+if [ -f "$HERE/SHA256SUMS" ]; then
+    (cd "$HERE" && sha256sum --quiet -c SHA256SUMS) || { echo "the study folder differs from SHA256SUMS: a partial copy or an edit" >&2; exit 2; }
+fi
 uv run --no-project --python 3.12 python -I "$HERE/pilot_run.py"

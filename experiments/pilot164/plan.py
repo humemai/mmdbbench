@@ -69,12 +69,12 @@ LEGS = {
            "ref_n": 3, "mid_n": 1, "data": True, "claimable": True},
     "H": {"title": "heat run: compare1 membw, compare2 cpu, compare3 cpu at once for 30 minutes (decides whether three busy lanes may be used)", "heat": True,
           "data": True, "claimable": True},
+    "C0": {"title": "smoke of the cell command (two cells once each: solo, two cpus alone, beside one compute neighbour; never data)", "targets": ["picks:cache and latency"],
+           "levels": ["compute"], "reps": 1, "ref_n": 1, "mid_n": 0, "end_n": 0, "data": False, "claimable": True},
     "L5": {"title": "disk I/O: the two strict cells of picks.json (compare1 only) beside idle and compute neighbours", "targets": ["picks:disk I/O"],
-           "levels": ["idle", "compute"], "reps": 5, "ref_n": 3, "mid_n": 1, "data": True, "claimable": False,
-           "needs": "the cell command (one cell at its landed settings on the 26.11.1 pin) written and hashed in an amendment"},
+           "levels": ["idle", "compute"], "reps": 5, "ref_n": 3, "mid_n": 1, "data": True, "claimable": True},
     "L6": {"title": "cache and latency: the two relaxed cells of picks.json (compare1 only) beside idle and compute neighbours", "targets": ["picks:cache and latency"],
-           "levels": ["idle", "compute"], "reps": 5, "ref_n": 3, "mid_n": 1, "data": True, "claimable": False,
-           "needs": "the cell command, as L5"},
+           "levels": ["idle", "compute"], "reps": 5, "ref_n": 3, "mid_n": 1, "data": True, "claimable": True},
 }
 
 

@@ -133,9 +133,9 @@ def test_the_memory_example_is_one_cell_with_its_own_heap_and_names_its_size():
 # ---------------------------------------------------------------- (d) the cold column
 def test_the_cold_column_names_cratedbs_first_query_by_its_display_name():
     """CrateDB's first query is the insert (no new-order): the sentence printed the harness field 'crud_insert' in prose."""
-    lane, wl = EW.OCT_COLD_SOURCE["docs_oltp"]
+    lane, wl = EW.OCT_COLD_SOURCE["docs_olap"]
     rows = [{"lane": lane, "workload": wl, "cold_first_query_name": "new-order"}, {"lane": lane, "workload": wl, "cold_first_query_name": "crud_insert"}]
-    text = EW._cold_note("docs_oltp", rows)
+    text = EW._cold_note("docs_olap", rows, ["cold first query ms"])
     assert "crud_insert" not in text and "insert / new-order" in text, text
 
 

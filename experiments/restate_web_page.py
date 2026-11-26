@@ -6,7 +6,8 @@
 WHY THIS EXISTS. The page is the payload `results/web_benchmarks.json` as the last landing wrote it. Since that landing the exporter learned to say
 things the page should already say: the size class of every row (#132), the full-network label of Graph OLAP and its caption (#125), the precision and
 deployment of a cell with no result (#125), one statement per absent cell (#125), the dash legend (#125), and now the status block and stamp (#173,
-page_status.json). A full export needs the bench host's row log and overlay directories, which are on the mini only, so none of this reaches the page
+page_status.json), and the later corrections of #124 (reworded sentences, no sentence about a column a table does not print, the coverage table's
+Mode, and a statement where a large size has no result). A full export needs the bench host's row log and overlay directories, which are on the mini only, so none of this reaches the page
 until the 26.12.1 landing. This script applies exactly those statements to the payload as it is, with the exporter's own functions, and touches no number:
 no row is added, removed or changed, and no cell is computed. Each step is a label, a legend, a class word or a sentence.
 
@@ -38,6 +39,27 @@ OWNED_PREFIXES = ("Every table measured on a dataset has a small size and a larg
                   "Engine version of the ArcadeDB rows:", EW.VERSIONS_NOTE, EW.COVERAGE_VERSIONS_NOTE)
 OWNED_LARGE = re.compile(r"^Large size \(.+\): (not run yet\.|no rows yet, planned for )")
 OLD_LEGEND_TAIL = "A dash is an operation the engine cannot express, never a slow one."
+# THE SENTENCES THE EXPORTER HAS SINCE REWORDED (humemai/mmdbbench#124): a marked row is not "no row", budgets and memory envelopes are per size, and a
+# few sentences did not read. (old, new), applied to every sentence, declared absence and registry value.
+REWORDED = (
+    ("the same budget every engine on this table had", "the same budget every engine at this size had"),
+    ("the same envelope every engine on this table had", "the same envelope every engine at this size had"),
+    ("it did not run out of time, and there is no row.", "it did not run out of time, and no result was recorded."),
+    ("was not retried; there is no row.", "was not retried; no result was recorded."),
+    ("censors it at every larger size of this lane; there is no row.", "censors it at every larger size of this lane; no result was recorded."),
+    ("was not retried, so there is no row.", "was not retried, so no result was recorded."),
+    ("because it killed by the server", "because it was killed by the server"),
+    ("because it stopped by ", "because it was stopped by "),
+    ("'s hop3_visited answer is not compared", "'s count of the people three hops away is not compared"),
+    ("There is no cold column on this table, and the reason is recorded on the rows themselves: no cold/warm split: ",
+     "There is no cold column on this table: "),
+    ("`lost` means the connection dropped mid-query.", "`lost` means the connection to the server broke before the cell finished."),
+    ("the cell exceeded the budget every engine had", "the cell exceeded the budget every engine at that size had"),
+    ("the memory envelope every engine on that table had", "the memory envelope every engine at that size had"),
+    ("means the engine has at least one row on that table", "means the engine has at least one measured result on that table"),
+    ("means the table has no row for the engine", "means the table has no measured result for the engine"),
+)
+COLD_SENTENCE = "The cold column is the very first query of a session"
 
 
 def _owned(sentence: str) -> bool:
@@ -153,6 +175,77 @@ def _not_measured(payload, changes):
                 t["conditions"].append(EW._gen(f"The {name} was not measured for {EW._join_and(parts)}, so those rows are absent.", *vals))
 
 
+def _reword(text):
+    """One sentence, or one value a sentence inserted, as the exporter writes it now. Applying it twice changes nothing more."""
+    for old, new in REWORDED:
+        text = text.replace(old, new)
+    if text.startswith("There is no cold column on this table: ") and not text.endswith("."):
+        text += "."
+    text = text.removeprefix("no cold/warm split: ")
+    text = re.sub(r"(builds|lists); At ", r"\1; at ", text)
+    head, mark, reported = text.partition("What it reported: ")
+    if mark:
+        return head + mark + EW._reported(reported)
+    return EW._reported(text) if re.match(r"\S+Error: (?:[A-Z]+ )?https?://", text) else text
+
+
+def _corrected_sentences(payload, changes):
+    """Every sentence, declared absence and registry record carries the exporter's present wording."""
+    count = 0
+
+    def one(text):
+        nonlocal count
+        new = _reword(text)
+        count += new != text
+        return new
+
+    payload["conditions"] = [one(c) for c in payload.get("conditions") or []]
+    for t in payload["tables"]:
+        t["conditions"] = [one(c) for c in t.get("conditions") or []]
+        for a in t.get("declared_absences") or []:
+            a["why"] = one(a["why"])
+    for r in payload.get("condition_provenance", {}).get("generated", []):
+        r["text"] = _reword(r["text"])
+        r["values"] = [_reword(v) if isinstance(v, str) else v for v in r.get("values") or []]
+    if count:
+        changes.append(f"{count} sentence(s) and absence(s) carry the present wording")
+
+
+def _no_cold_column(payload, changes):
+    """A table that prints no cold column carries no sentence about one (export_web._cold_note)."""
+    for t in payload["tables"]:
+        if any(str(c).startswith("cold ") for c in t.get("columns") or []):
+            continue
+        keep = [c for c in t.get("conditions") or [] if not c.startswith(COLD_SENTENCE)]
+        if len(keep) != len(t.get("conditions") or []):
+            t["conditions"] = keep
+            changes.append(f"{t['id']}: no sentence about a cold column the table does not print")
+
+
+def _coverage_modes(payload, changes):
+    """The coverage table's Mode lists the deployments the other tables' rows have now (export_web.multimodel_modes)."""
+    sources = [t for t in payload["tables"] if t.get("id") != "multimodel"]
+    for t in payload["tables"]:
+        if t.get("id") != "multimodel":
+            continue
+        for e in t.get("entries") or []:
+            mode = ", ".join(EW.multimodel_modes(sources, e["backend"])) or "none"
+            if e.get("deployment") != mode:
+                changes.append(f"multimodel: {e['backend']} reads {mode}, not {e.get('deployment')}")
+                e["deployment"] = mode
+
+
+def _size_gaps(payload, changes):
+    """A large size an arm prints nothing at is said, where the roster or its small-size outcome says why (export_web.size_gap_statements)."""
+    for t in payload["tables"]:
+        for arms, text, values in EW.size_gap_statements(t, t.get("declared_absences") or []):
+            note = EW._gen(text, *values)
+            t.setdefault("declared_absences", []).extend({"backend": arm, "column": None, "kind": "not measured", "why": note} for arm in arms)
+            if note not in t["conditions"]:
+                t["conditions"].append(note)
+            changes.append(f"{t['id']}: {note}")
+
+
 def _registry(payload):
     """The generated-sentence registry holds the sentences the page carries, with the strings they inserted."""
     texts = set(_table_sentences(payload))
@@ -173,6 +266,10 @@ def restate(payload, generated_on=None, status_only=False):
         payload = _graph_olap_labels(payload, changes) or payload
         _legend(payload, changes)
         _not_measured(payload, changes)
+        _corrected_sentences(payload, changes)
+        _no_cold_column(payload, changes)
+        _coverage_modes(payload, changes)
+        _size_gaps(payload, changes)
         EW._classify_sizes(payload)
         _registry(payload)
         day = generated_on or datetime.date.today().isoformat()

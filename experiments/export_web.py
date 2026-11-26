@@ -2241,6 +2241,61 @@ def _declare_missing_builds(tables):
                 t["conditions"].append(note)
 
 
+# WHY AN ARM RUNS NO CELL AT A SIZE ITS ROSTER LEAVES OUT (runner.ARM_RUNS "scales"), in the page's words. An arm restricted to a size
+# with no reason here is only said not to have run.
+_SIZE_RESTRICTED_WHY = {"redis_tpc": "it keeps the data in memory, and its memory per row, measured at a smaller size, puts this size far "
+                                     "above the memory cap"}
+_SIZE_GAP_LANES = ("l1tpc", "l2", "l3d", "e2")      # the lanes whose tables carry one corpus per size
+
+
+def size_gap_statements(table, absences):
+    """[(arms, sentence, inserted values)] for the large sizes an arm prints nothing at while the table does, and nothing says why.
+
+    Two cases only, each read from what the payload and the roster already say: the roster leaves the size out for the arm
+    (runner.ARM_RUNS), or the arm exceeded its budget at the small size. Any other gap stays silent here, so a partial run is still
+    what the publish gates find (humemai/mmdbbench#124). `absences` are the table's declared absences."""
+    lane = (_TABLE_LANE.get(table.get("id")) or (None,))[0]
+    if lane not in _SIZE_GAP_LANES:
+        return []
+    entries = table.get("entries") or []
+    labels = {}
+    for e in entries:
+        labels.setdefault(str(e.get("scale")), str(e.get("size_corpus") or e.get("scale_label")))
+    restricted = _const("runner", "ARM_RUNS")
+    out, censored = [], collections.defaultdict(list)      # (large label, small label) -> arms
+    for arm in sorted({str(e["backend"]) for e in entries}):
+        mine = [e for e in entries if str(e["backend"]) == arm]
+        for scale, label in labels.items():
+            if SIZE_CLASS.get((lane, scale)) != "large" or any(str(e.get("scale")) == scale for e in mine):
+                continue
+            if any(a.get("backend") == arm and not a.get("column") and label in str(a.get("why")) for a in absences):
+                continue
+            key = str(mine[0].get("backend_key"))
+            runs = (restricted.get(key) or {}).get(lane)
+            if runs and scale not in runs.get("scales", (scale,)):
+                why = _SIZE_RESTRICTED_WHY.get(key)
+                out.append(([arm], f"{arm} was not run at {label}" + (f": {why}." if why else "."), [arm, label]))
+                continue
+            small = [str(e.get("size_corpus") or e.get("scale_label")) for e in mine
+                     if e.get("outcome") == "censored" and SIZE_CLASS.get((lane, str(e.get("scale")))) == "small"]
+            if small:
+                censored[(label, small[0])].append(arm)
+    for (label, small), arms in sorted(censored.items()):
+        verb, who = ("has", "it") if len(arms) == 1 else ("have", "each")
+        out.append((arms, f"{_join_and(arms)} {verb} no result at {label}; at {small} {who} exceeded its budget.", [*arms, label, small]))
+    return out
+
+
+def _declare_size_gaps(table):
+    """size_gap_statements on a finished table: the sentence under it and one declared absence per arm."""
+    for arms, text, values in size_gap_statements(table, _DECLARED_ABSENCES[table.get("id")]):
+        note = _gen(text, *values)
+        for arm in arms:
+            _declare_absence(table["id"], arm, None, "not measured", note)
+        if note not in table["conditions"]:
+            table["conditions"] = table["conditions"] + [note]
+
+
 _WORKLOAD_WORDS = {"oltp": "transaction", "olap": "analytics", "hybrid": "transaction", "atomicity": "atomicity"}
 
 
@@ -2450,6 +2505,19 @@ def _sparse_warmup_note(table_id, rows):
                 f"queries do not include a JVM engine's code compilation.", *counts, *srcs)
 
 
+# A query the answer check hashes that is no column of its table: what it is, in the reader's words.
+_PROBE_ANSWERS = {"hop3_visited": "count of the people three hops away"}
+
+
+def _uncompared_clause(engine, query, how):
+    """One clause of the answer-check sentence for an answer a budget stopped. `how` is what the row recorded: "stopped at its ...",
+    "stopped by ...", or "killed by the server ...", and the last two take "was"."""
+    what = _PROBE_ANSWERS.get(query, f"{query} answer")
+    if how.startswith(("killed ", "stopped by ")):
+        how = f"was {how}"
+    return f"{engine}'s {what} is not compared, because it {how}"
+
+
 def _equivalence_notes(rows):
     """table id -> one sentence about what its answer check could not compare."""
     import bench_common
@@ -2488,10 +2556,8 @@ def _equivalence_notes(rows):
                     # and its budget stopped it before every start was answered.
                     # Named by the column the reader sees, not the field stem.
                     _labels = (_QUERY_BUDGET_TABLES.get(tid) or (None, None, {}))[2]
-                    per_table[tid].append(
-                        f"{display_name(str(be))}'s {_labels.get(query, query)} answer is not "
-                        f"compared, because it "
-                        f"{str(d)[len(bench_common.CENSORED_ANSWER_PREFIX):]}")
+                    per_table[tid].append(_uncompared_clause(
+                        display_name(str(be)), _labels.get(query, query), str(d)[len(bench_common.CENSORED_ANSWER_PREFIX):]))
     for tid, by_reason in unexpr.items():
         grouped = {}      # the same reason for the same engines is said once, with every query it covers
         for (query, why), names in by_reason.items():
@@ -2584,7 +2650,11 @@ def _lifecycle_answer_note(groups):
 
 
 def _cold_note(table_id, rows, columns=()):
-    """The one clause this table owes about its cold column."""
+    """The one clause this table owes about its cold column.
+
+    A table that prints no cold column gets no sentence about one: the document transaction table shares its rows' lane with the analytics
+    table, and the rows record a first query it does not print (humemai/mmdbbench#124). Where the rows declare there is no cold and warm
+    split, the table says that instead."""
     src = OCT_COLD_SOURCE.get(table_id)
     if not src:
         return None
@@ -2600,8 +2670,10 @@ def _cold_note(table_id, rows, columns=()):
         # the registered one.
         if any(str(c).startswith("cold ") for c in columns):
             return None
-        return _gen("There is no cold column on this table, and the reason is "
-                    "recorded on the rows themselves: " + na[0], na[0])
+        reason = na[0].removeprefix("no cold/warm split: ").rstrip(".")
+        return _gen(f"There is no cold column on this table: {reason}.", reason)
+    if not any(str(c).startswith("cold ") for c in columns):
+        return None
     names = sorted({COLD_QUERY_NAMES.get(str(r.get("cold_first_query_name")),
                                          str(r.get("cold_first_query_name")))
                     for r in rs if r.get("cold_first_query_name")})
@@ -4153,6 +4225,18 @@ def multimodel_sources(finished):
     return sorted(sources, key=lambda t: (rank.get(t.get("id"), len(rank)), sources.index(t)))
 
 
+def multimodel_modes(sources, engine):
+    """The deployments one engine has rows for on the finished tables: the coverage table's Mode.
+
+    THE MODE COLUMN NAMES DEPLOYMENTS, and "all three" is not one. The client/server split table labels its rows "all three" because each
+    row holds the in-process, in-process-server, and separate-container arms; read as a deployment it printed "all three, embedded,
+    server" for ArcadeDB. Its three arms are the embedded engine and two servers."""
+    mode_of = {"all three": ("embedded", "server")}
+    return sorted({m for t in sources for e in t.get("entries", [])
+                   if multimodel_engine(entry_engine(e)) == engine and e.get("deployment")
+                   for m in mode_of.get(str(e.get("deployment")), (str(e.get("deployment")),))})
+
+
 def _multimodel_table(finished):
     """One row per engine in MULTIMODEL_ENGINES, one column per
     comparison table already in the payload (its title), each cell derived
@@ -4167,17 +4251,11 @@ def _multimodel_table(finished):
                          "capability table cannot key its columns on titles: "
                          f"{columns}")
     entries, kinds_seen = [], set()
-    # THE MODE COLUMN NAMES DEPLOYMENTS, and "all three" is not one. The
-    # client/server split table labels its rows "all three" because each row
-    # holds the in-process, in-process-server, and separate-container arms;
-    # read as a deployment it printed "all three, embedded, server" for
-    # ArcadeDB. Its three arms are the embedded engine and two servers.
-    _MODE_OF = {"all three": ("embedded", "server")}
     for engine in MULTIMODEL_ENGINES:
-        modes = sorted({m for t in sources
-                        for e in t.get("entries", [])
-                        if multimodel_engine(entry_engine(e)) == engine and e.get("deployment")
-                        for m in _MODE_OF.get(str(e.get("deployment")), (str(e.get("deployment")),))})
+        modes = multimodel_modes(sources, engine)
+        # How the engine gets to the three models, from its cross-model rows (mmdbbench#47).
+        models = sorted({str(e["models"]) for t in sources for e in t.get("entries", [])
+                         if multimodel_engine(entry_engine(e)) == engine and e.get("models")})
         metrics = {}
         for t, col in zip(sources, columns):
             text, kinds = multimodel_cell(t, engine)
@@ -4210,13 +4288,14 @@ def _multimodel_table(finished):
                 and e["version_name"].strip()})) or None,
             "host": None,
             "metrics": metrics,
+            **({"models": " / ".join(models)} if models else {}),
         })
     legend = {
-        "censored": "censored, the cell exceeded the budget every engine had",
+        "censored": "censored, the cell exceeded the budget every engine at that size had",
         "withheld": "withheld, the answer disagreed and the number was taken off the page",
         "unexpressible": "cannot express, the engine's own language cannot ask the query",
         "envelope": "out of memory, the cell reached the memory envelope every engine "
-                    "on that table had and was killed by the kernel or stopped by the engine's own out-of-memory error",
+                    "at that size had and was killed by the kernel or stopped by the engine's own out-of-memory error",
         "failed": "failed, the cell reported an error inside its budget",
         "not comparable": "not comparable, a defect in the engine's own release decided "
                           "the result, and the note under that table names it",
@@ -4238,10 +4317,10 @@ def _multimodel_table(finished):
     sentence = _gen(
         f"This table is derived from the {n_tables} tables above and carries no "
         f"measurement of its own. Each column is one of those tables. "
-        f"{MULTIMODEL_CELLS['measured']} means the engine has at least one row on "
+        f"{MULTIMODEL_CELLS['measured']} means the engine has at least one measured result on "
         f"that table, counting every arm of one engine as one, so both ArcadeDB "
         f"deployments are ArcadeDB and both SurrealDB modes are SurrealDB; "
-        f"{MULTIMODEL_CELLS['declared']} means the table has no row for the engine "
+        f"{MULTIMODEL_CELLS['declared']} means the table has no measured result for the engine "
         f"and says why beneath itself, in the words printed there"
         + (f" ({kinds_text})" if kinds_text else "")
         + f"; {MULTIMODEL_CELLS['none']} means the engine was not run on that "
@@ -5615,7 +5694,7 @@ def _arango_ivf_note(table, rows):
             per.append(f"{lead} {chose} lists{builds}")
             values += [size, f"{nps[0]:,}", f"{nps[-1]:,}"] + list(tg if len(tg) == 1 else [])
         if per:
-            parts.append("; ".join(per) + ".")
+            parts.append("; ".join([per[0]] + [p[0].lower() + p[1:] for p in per[1:]]) + ".")
     return _gen(" ".join(parts), *dict.fromkeys(values))
 
 
@@ -6103,7 +6182,7 @@ def _censored_cells():
             # mid-query, twice; a timeout-only rule left the page with
             # no row and no note, which reads as a cell nobody ran.
             # The reason is carried as a string so the note can say it.
-            timeouts[key] = err.strip().splitlines()[-1][:90] or "an error"
+            timeouts[key] = err.strip().splitlines()[-1][:400] or "an error"
     _CENSORED_CACHE = {k: v for k, v in timeouts.items() if k not in clean}
     # THE CAP RULE, AT REPORT TIME (DECISIONS #188): rows already measured meet the rule the unmeasured cells met when they ran.
     _CENSORED_CACHE.update(_rule_censored(set(_CENSORED_CACHE), clean))
@@ -6187,7 +6266,7 @@ def _cap_label(secs):
 # explaining it (BUGS F76's sibling).
 _MARK_MEANINGS = {
     "OOM": "ran out of memory at the cell's memory envelope, killed by the kernel or stopped by the engine's own out-of-memory error, rather than running out of time",
-    "lost": "the connection dropped mid-query",
+    "lost": "the connection to the server broke before the cell finished",
     "err": "the cell failed inside its budget; the note says what it reported",
     # Not `err`: the cell finished. A defect in the engine's own release decided
     # what it returned (_one_list_note).
@@ -6787,6 +6866,15 @@ def _jvm_defaults_notes(table):
     return [_gen(text, *values)]
 
 
+def _reported(error):
+    """What a failed cell reported, as the page prints it: without the request line and its container host name, and cut at a word
+    with "..." where it is long (the stored line was cut in the middle of a URL, humemai/mmdbbench#124)."""
+    text = re.sub(r"\s*\b(?:(?:GET|POST|PUT|DELETE) )?https?://\S*", "", str(error)).strip().rstrip(":").strip()
+    if len(text) > 90:
+        text = text[:90].rsplit(" ", 1)[0].rstrip(",;:") + " ..."
+    return text or "an error"
+
+
 def _censored_notes(table_id):
     lane_wl = _TABLE_LANE.get(table_id)
     if not lane_wl:
@@ -6826,7 +6914,7 @@ def _censored_notes(table_id):
                       else "and the engine stopped it with its own out-of-memory error")
             tail = (f" at {scale_label(lane, scale)}: {_cell} reached "
                     f"the {_cap_txt}{_peak_txt} {_ended}, the same envelope every "
-                    f"engine on this table had; it did not run out of time, and there is no row.")
+                    f"engine at this size had; it did not run out of time, and no result was recorded.")
             # EVERY DIGIT IN THE SENTENCE IS PINNED TO ITS SOURCE, including
             # the peak. page_check refuses an unpinned number in a generated
             # condition, and the peak comes off the row the same way the
@@ -6844,22 +6932,23 @@ def _censored_notes(table_id):
             elif isinstance(secs, RuleCensored):
                 tail = (f" at {scale_label(lane, scale)}: {_cell} was not run, because the engine was already censored at "
                         f"{scale_label(lane, secs.at)} and the cap rule censors it at every larger size of this lane; "
-                        f"there is no row.")
+                        f"no result was recorded.")
                 pins = [scale_label(lane, scale), scale_label(lane, secs.at)]
             else:
                 budget = f"{secs / 3600:g} hour" if secs else "its"
                 _phase = _CENSORED_PHASE.get((lane, str(scale), _qbackend, w))
                 _in = f" It was still in {_phase} when the budget ran out." if _phase else ""
                 tail = (f" at {scale_label(lane, scale)}: {_cell} exceeded "
-                        f"its {budget} budget, the same budget every engine on this table had, on its first "
-                        f"attempt and was not retried; there is no row.{_in}")
+                        f"its {budget} budget, the same budget every engine at this size had, on its first "
+                        f"attempt and was not retried; no result was recorded.{_in}")
                 # THE PHASE IS A GENERATED VALUE TOO ("query lsqb_q1" carries a digit that came off the row's timeout_phase_hint).
                 pins = [scale_label(lane, scale), budget] + ([_phase] if _phase else [])
         else:
+            said = _reported(secs)
             tail = (f" at {scale_label(lane, scale)}: {_cell} failed "
-                    f"inside its budget and was not retried, so there is no row. What it reported: "
-                    f"{secs}")
-            pins = [scale_label(lane, scale), str(secs)]
+                    f"inside its budget and was not retried, so no result was recorded. What it reported: "
+                    f"{said}")
+            pins = [scale_label(lane, scale), said]
         merged.setdefault((kind, tail, tuple(pins)), []).append(
             _with_build((_dense_arm_label(backend) if lane == "l3d" else None) or display_name(backend), _build))   # the label of the outcome row (#89)
 
@@ -7905,6 +7994,7 @@ def _finish_table(table: dict) -> dict:
     table["directions"] = dirs
     # LAST, after the outcome rows and every statement above: a build with no row and no statement is declared not measured.
     _declare_missing_builds([table])
+    _declare_size_gaps(table)
     # Every absence this table declares, as data (page_check.OPERATION_MANIFEST
     # reads it). Written after the notes above, because the notes are what
     # register them.

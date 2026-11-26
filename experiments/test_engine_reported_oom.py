@@ -163,7 +163,7 @@ def test_the_kernel_kill_note_is_unchanged(cells):
     cell = _only(cells([_row(rc=137, oom_killed=True, error=KERNEL_KILL)]))
     E._CENSORED_CACHE = {("l2", "sf1", "duckpgq_graph", "oltp"): cell}
     (note,) = E._censored_notes("l2")
-    assert "and was killed by the kernel, the same envelope every engine on this table had" in note
+    assert "and was killed by the kernel, the same envelope every engine at this size had" in note
 
 
 def test_the_legend_defines_oom_for_both_ways_of_getting_there():

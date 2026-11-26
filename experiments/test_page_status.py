@@ -123,7 +123,10 @@ def test_restate_applies_the_exporters_statements_and_touches_no_number():
     legend = [c for c in dense["conditions"] if c.startswith("In the cells")]
     assert len(legend) == 1 and "A dash means the column does not apply" in legend[0] and "cannot express the operation" in legend[0], legend
     assert not [c for c in dense["conditions"] if "was not measured for" in c], dense["conditions"]     # attempted, so not also "not measured"
-    assert [a["kind"] for a in dense["declared_absences"]] == ["failed"], dense["declared_absences"]
+    gap = "CrateDB (fp32) has no result at 9.99M vectors; at 1M vectors it exceeded its budget."
+    assert [a["kind"] for a in dense["declared_absences"]] == ["failed", "not measured"], dense["declared_absences"]
+    assert dense["declared_absences"][1]["why"] == gap and gap in dense["conditions"], dense["conditions"]
+    assert not [c for c in dense["conditions"] if "there is no row" in c], dense["conditions"]
     assert graph["dataset"] == "LDBC-SNB, SF1 full network", graph["dataset"]
     assert graph["entries"][0]["scale_label"] == "Small: SF1, full network (3.2M vertices, 13.8M edges)", graph["entries"][0]["scale_label"]
     assert OLD_SIZE not in json.dumps(after) and "SF1, full network (3.2M vertices, 13.8M edges)" in graph["conditions"][0]
@@ -155,6 +158,40 @@ def test_the_published_payload_carries_the_status_the_file_gives():
     assert [s["class"] for s in graph["sizes"]] == ["small", "large"] and graph["sizes"][1]["rows"] == 0, graph["sizes"]
     assert all(e["scale_label"].startswith("Small: ") for e in graph["entries"]), {e["scale_label"] for e in graph["entries"]}
     assert "SF10" not in graph["dataset"], graph["dataset"]
+
+
+def test_the_published_payload_restated_contradicts_itself_nowhere():
+    """The corrections of #124 on the payload the page serves today. REMOVE WHEN: a full export has replaced the restated payload (the 26.12.1 landing)."""
+    payload = json.loads((HERE / "results" / "web_benchmarks.json").read_text(encoding="utf-8"))
+    if "restated" not in payload:
+        return
+    after, _ = RW.restate(payload, DAY)
+    assert _numbers(after) == _numbers(payload)                                   # no row and no cell moved
+    tables = {t["id"]: t for t in after["tables"]}
+    said = json.dumps(after)
+    for old, _new in RW.REWORDED:
+        assert old not in said, old
+    assert "hop3_visited" not in "".join(c for t in after["tables"] for c in t["conditions"])
+    assert "http://srv-" not in said and "; At " not in said
+    for t in after["tables"]:
+        cold = [c for c in t["conditions"] if c.startswith(RW.COLD_SENTENCE)]
+        assert not cold or any(c.startswith("cold ") for c in t["columns"]), (t["id"], cold)
+    sources = [t for t in after["tables"] if t["id"] != "multimodel"]
+    for e in tables["multimodel"]["entries"]:
+        modes = {x["deployment"] for t in sources for x in t["entries"] if EW.multimodel_engine(EW.entry_engine(x)) == e["backend"]}
+        assert set(e["deployment"].split(", ")) == modes, (e["backend"], e["deployment"], modes)
+    # every large size an arm has no row at is said under its table
+    for t in after["tables"]:
+        large = {s["id"]: s["label"].removeprefix("Large: ") for s in t.get("sizes") or [] if s["class"] == "large" and s["rows"]}
+        for arm in {e["backend"] for e in t["entries"]}:
+            for sid, label in large.items():
+                if any(e["backend"] == arm and str(e.get("size_id") or e["scale"]) == sid for e in t["entries"]):
+                    continue
+                assert any(a["backend"] == arm and not a.get("column") and label in a["why"] for a in t["declared_absences"]), (t["id"], arm, label)
+    redis = [c for c in tables["docs_olap"]["conditions"] if c.startswith("Redis was not run at TPC-H SF10")]
+    assert len(redis) == 1 and "it keeps the data in memory" in redis[0], redis
+    again, more = RW.restate(after, DAY)
+    assert again == after and not more
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ A reproduction is comparable when it keeps the memory cap, the durability class 
 - A Linux machine on x86-64 with `git`, `curl` and [`uv`](https://docs.astral.sh/uv/). `uv` fetches Python 3.12 (the repository pins it in `.python-version`) and every package, so you install nothing else. The graph cell also needs `zstd`, because the LDBC data is a `.tar.zst` file. The `arcadedb-jvm` wheels for macOS arm64 and Linux arm64 exist too, but the benchmark was only run on Linux x86-64.
 - No Java installation: the `arcadedb-jvm` package bundles its own runtime, and the `arcadedb` package is a native build with no JVM at all.
 - Docker only for the engines that run as servers (the served ArcadeDB arm and most comparators). The cells on this page run in one process and need no Docker.
-- Memory and time as in the table below. The published rows ran inside the memory cap in its last column; a machine with less free memory than the peak column fails with an out-of-memory error. The database of a cell is built in `/tmp`: about 36 MB for `e2`, 706 MB for `tpch1`, 773 MB for the SIFT1M cell, 11 MB for `sf1`. Some Linux distributions mount `/tmp` in memory, so check `df -h /tmp` first.
+- Memory and time as in the table below. The published rows ran inside the memory cap in its last column; a machine with less free memory than the peak column can fail with an out-of-memory error (the `sf1full` cell runs in less with a smaller heap, see its section). The database of a cell is built in `/tmp`: about 36 MB for `e2`, 706 MB for `tpch1`, 773 MB for the SIFT1M cell, 11 MB for `sf1`, 1.6 GiB for `sf1full`. Some Linux distributions mount `/tmp` in memory, so check `df -h /tmp` first.
 
 The table is generated from the published rows (`experiments/results/runs_paper.csv`, three repetitions per cell, `rc == 0`) by `tools/small_cell_cost.py` and is never typed; a test fails when it differs from the rows. The cell time is `build_s` plus `oltp_total_s` plus the elapsed time of the five analytics queries of `l1tpc`, a lower bound because the timed reads of the other lanes are not in it. The memory is the peak of the process the cell runs in, as the runner reads it from the container (`peak_mib_sum`, page cache included). These are the numbers of the benchmark host (12 performance cores, 61 GB of memory): a slower machine takes longer.
 
@@ -232,6 +232,8 @@ Then compare it with the published rows of the same arm:
 uv run --no-project --with pandas==3.0.6 python tools/compare_published.py sf1full_olap_arcadedb.json \
   --lane l2 --backend arcadedb_graph_embedded --scale sf1full --workload olap
 ```
+
+In the clean-room run on a free GitHub runner (4 cores, 16 GB) with the 8 GB heap of the block, the download, the cell, and the comparison took 3 min 18 s together and exited with code 0. The largest process peaked at 8.4 GiB, the database was 1.6 GiB, and all twelve answer digests matched the published rows. A machine with 16 GB of memory is enough for this block, although the peak in the table above is higher.
 
 The default arm builds ArcadeDB's graph analytical view before the questions, and its row says `gav: true`. `BENCH_GAV=0` runs the second published arm, without the view; the comparison reads the rows of the arm you ran. The cell time in the table above is the load alone for this cell, and the peak memory is that of the 16g heap, page cache included. `BENCH_GRAPH_OLAP_ITER` lowers the number of runs per query for a smoke run, and such a row is not comparable with a published one.
 

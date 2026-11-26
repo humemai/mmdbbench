@@ -6,7 +6,8 @@ Reads `experiments/results/runs_paper.csv` (three repetitions per cell, the rela
 
   cell time   build_s + oltp_total_s (the definition of #121) plus the `<query>_elapsed_s` of the five l1tpc analytics queries; still a
               lower bound, because the timed reads of the other lanes are not in it
-  peak GiB    the highest of the five phase peaks (`mem_<phase>_peak_mib`) plus the client peak (`client_peak_mib`), as #121 defines it
+  peak GiB    the runner's `peak_mib_sum`: the peak of the server and of the client container added up, or of the one process when the engine runs
+              inside the client
 
 Nothing here is typed by hand: the guide pastes this output, and `--check` exits 1 when a row of the guide's table differs
 from what the CSV gives. Run it with `uv run --no-project --with pandas python tools/small_cell_cost.py` from `experiments/`.
@@ -19,7 +20,6 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CSV = os.path.join(HERE, "..", "results", "runs_paper.csv")
-PHASES = ("load", "index_build", "warmup", "queries", "idle")
 
 # The cells the guide documents: (lane, scale, backend, workload or None, engine build or None, what the cell is).
 # The ArcadeDB arms have rows for two builds of one release; the guide's commands install the JVM wheel, so those rows are the JVM ones.
@@ -31,17 +31,15 @@ CELLS = (
     ("l3d", "small", "arcadedb_dense_embedded", None, "jvm", "ArcadeDB embedded"),
     ("l3d", "small", "sqlite_vec_dense", None, None, "SQLite with sqlite-vec"),
     ("l2", "sf1", "arcadedb_graph_embedded", "oltp", "jvm", "ArcadeDB embedded"),
+    ("l2", "sf1full", "arcadedb_graph_embedded", "olap", "jvm", "ArcadeDB embedded"),
 )
 
 
 def peak_gib(row):
-    parts = [row.get(f"mem_{p}_peak_mib") for p in PHASES]
-    parts = [float(x) for x in parts if pd.notna(x)]
-    if not parts:
-        return float("nan")
-    client = row.get("client_peak_mib")
-    client = float(client) if pd.notna(client) else 0.0
-    return (max(parts) + client) / 1024.0
+    """The cell's peak as the runner sums it (`peak_mib_sum`): server plus client for a served cell. An engine inside the client's process is one
+    process and counts once; adding the client peak to the phase peaks counted it twice (humemai/mmdbbench#198)."""
+    total = row.get("peak_mib_sum")
+    return float(total) / 1024.0 if pd.notna(total) else float("nan")
 
 
 def load(path=CSV):
@@ -62,6 +60,8 @@ def table(d=None):
             s = s[s["workload"] == workload]
         if build:
             s = s[s["engine_backend"].fillna("jvm") == build]
+        if "gav" in s.columns:                       # graph analytics has an arm without the analytical view; the guide runs the default
+            s = s[s["gav"].astype(str) != "False"]
         if s.empty:
             rows.append((lane, scale, backend, workload or "", what, 0, float("nan"), float("nan"), float("nan"), ""))
             continue

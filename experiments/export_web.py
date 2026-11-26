@@ -201,6 +201,15 @@ def _pinned_dir(name, expected=None, size_class="small"):
     return cand
 
 
+def _comparator_version_split(rows):
+    """The comparator backends published under two versions INSIDE one size class (humemai/mmdbbench#192): across two classes is the rule
+    until the large sizes are rerun, inside one is what version_consistency_check refuses."""
+    by_class = collections.defaultdict(list)
+    for r in rows:
+        by_class[_SC.row_size_class(r)].append(r)
+    return sorted({b for rs in by_class.values() for b, v in _comparator_versions(rs).items() if len(v) > 1})
+
+
 def _comparator_versions(rows):
     """backend -> the set of versions it was published under (non-ArcadeDB)."""
     out = {}
@@ -1091,6 +1100,60 @@ def _release_note(releases):
                 *[v for cls in SIZE_CLASSES for v in sorted(releases.get(cls) or ())])
 
 
+# EVERY OTHER ENGINE SAYS ITS VERSION BY SIZE TOO (humemai/mmdbbench#192, decided 2026-11-26): one version per engine in each data size, so
+# the small rows of a moved comparator carry the new version and its large rows the one that measured them, and each table says which.
+VERSIONS_NOTE = "Engine versions of the other rows:"
+COVERAGE_VERSIONS_NOTE = "Engine versions in the tables this one summarizes:"
+# A version string spells a product as its image or its row does ("duckdb 1.5.6 + duckpgq 61f5d082"). A sentence spells it as a product,
+# and page_check refuses a bare backend key ("duckdb") in page prose.
+_PRODUCT_NAMES = {
+    "age": "AGE", "arangodb": "ArangoDB", "arcadedb": "ArcadeDB", "chroma": "Chroma", "chromadb": "Chroma", "crate": "CrateDB", "cratedb": "CrateDB",
+    "duckdb": "DuckDB", "duckpgq": "DuckPGQ", "elasticsearch": "Elasticsearch", "falkordb": "FalkorDB", "ladybug": "LadybugDB",
+    "ladybugdb": "LadybugDB", "lancedb": "LanceDB", "memgraph": "Memgraph", "milvus": "Milvus", "mongo": "MongoDB", "mongodb": "MongoDB", "neo4j": "Neo4j",
+    "pgvector": "pgvector", "postgres": "PostgreSQL", "postgresql": "PostgreSQL", "qdrant": "Qdrant", "qdrant-client": "Qdrant client", "questdb": "QuestDB",
+    "redis": "Redis", "sqlite": "SQLite", "sqlite-vec": "sqlite-vec", "surrealdb": "SurrealDB", "timescaledb": "TimescaleDB", "vss": "VSS",
+}
+_PRODUCT_WORD = re.compile(r"(?<![\w-])(" + "|".join(re.escape(n) for n in sorted(_PRODUCT_NAMES, key=len, reverse=True)) + r")(?![\w-])",
+                           re.IGNORECASE)
+
+
+def _add_version(versions, cls, entry):
+    """Count the version of a comparator's row in `versions` (class -> set of strings), spelled for a sentence. ArcadeDB's rows have their
+    own sentence (_release_note); a row with no size class or no version adds nothing."""
+    name = entry.get("version_name")
+    if cls and not entry.get("is_arcadedb") and isinstance(name, str) and name.strip():
+        versions[cls].add(_PRODUCT_WORD.sub(lambda m: _PRODUCT_NAMES[m.group(1).lower()], _one_spelling(name.strip())))
+
+
+def _versions_note(prefix, versions):
+    """The generated sentence that names the engine versions of the rows of each size class (`versions`: class -> set of strings), or None."""
+    parts = [f"{cls} size, {', '.join(sorted(versions[cls], key=str.lower))}" for cls in SIZE_CLASSES if versions.get(cls)]
+    if not parts:
+        return None
+    return _gen(f"{prefix} " + "; ".join(parts) + ".", *[v for cls in SIZE_CLASSES for v in sorted(versions.get(cls) or ())])
+
+
+def _coverage_versions_note(tables):
+    """The same sentence for the coverage table, which has no sizes of its own and prints each engine's version strings joined: read from
+    the rows of its engines on the tables it derives from, ArcadeDB's release first in each size."""
+    versions, ours = collections.defaultdict(set), collections.defaultdict(set)
+    for t in multimodel_sources(tables):
+        for e in t.get("entries") or []:
+            if multimodel_engine(entry_engine(e)) not in MULTIMODEL_ENGINES:
+                continue
+            cls = e.get("size_class")
+            _add_version(versions, cls, e)
+            if cls and e.get("is_arcadedb") and _release_of(e.get("version_name")):
+                ours[cls].add(_release_of(e.get("version_name")))
+    parts, values = [], []
+    for cls in SIZE_CLASSES:
+        names = [f"ArcadeDB {v}" for v in sorted(ours.get(cls) or ())] + sorted(versions.get(cls) or (), key=str.lower)
+        if names:
+            parts.append(f"{cls} size, {', '.join(names)}")
+            values += names
+    return _gen(f"{COVERAGE_VERSIONS_NOTE} " + "; ".join(parts) + ".", *values) if parts else None
+
+
 def _classify_sizes(payload):
     """Every row says small or large, a table says when its large size has no rows, and the page says once how to read the two.
 
@@ -1102,8 +1165,9 @@ def _classify_sizes(payload):
     and the table gets `sizes`, one record per size (with a record for a large size that has no rows). A table whose Size column is not a
     corpus size (the durability table names an operation, the coverage table says "every size above") has an empty `sizes`, and its rows
     carry `size_class` null unless the table gave them one: the durability table does, per size class of the rows an entry pools
-    (`_durability_table`, humemai/mmdbbench#145), and its label already starts with the class word. Three kinds of generated sentence follow from the rows: the absent large size, the extra sizes, and the ArcadeDB
-    version of the rows of each size; and one paragraph joins the page's own conditions."""
+    (`_durability_table`, humemai/mmdbbench#145), and its label already starts with the class word. Generated sentences follow from the rows:
+    the absent large size, the extra sizes, the ArcadeDB version of the rows of each size, and the versions of the other engines' rows of each
+    size (humemai/mmdbbench#192; the coverage table gets them from the tables it summarizes); and one paragraph joins the page's own conditions."""
     lanes_with_sizes = {lane for lane, _ in SIZE_CLASS}
     page_releases = collections.defaultdict(set)      # class -> ArcadeDB releases, over the whole page
     for t in payload["tables"]:
@@ -1114,20 +1178,23 @@ def _classify_sizes(payload):
             # The class a table gave its own rows stays (the durability table, #145) and counts in the sentence and the paragraph about the
             # engine version by size; a row with none has none, as before.
             own = collections.defaultdict(set)
+            others = collections.defaultdict(set)
             for e in t.get("entries") or []:
                 cls = e.get("size_class")
                 if cls is not None and cls not in SIZE_CLASSES:
                     raise SystemExit(f"REFUSING: table {tid!r} gives a row the size class {cls!r}; the classes are {', '.join(SIZE_CLASSES)}.")
                 e["size_class"] = cls
+                _add_version(others, cls, e)
                 if cls and e.get("is_arcadedb") and _release_of(e.get("version_name")):
                     own[cls].add(_release_of(e.get("version_name")))
                     page_releases[cls].add(_release_of(e.get("version_name")))
-            note = _release_note(own)
-            if note and note not in (t.get("conditions") or []):
-                t["conditions"] = list(t.get("conditions") or []) + [note]
+            for note in (_release_note(own), _versions_note(VERSIONS_NOTE, others)):
+                if note and note not in (t.get("conditions") or []):
+                    t["conditions"] = list(t.get("conditions") or []) + [note]
             continue
         by_size = {}                                  # size id -> its record, in the order the table prints
         releases = collections.defaultdict(set)       # class -> ArcadeDB releases, on this table
+        others = collections.defaultdict(set)         # class -> versions of the other engines, on this table
         for e in t.get("entries") or []:
             sid = str(e.get("size_id") or e.get("scale"))
             if (lane, sid) not in SIZE_CLASS:
@@ -1140,6 +1207,7 @@ def _classify_sizes(payload):
             e["size_class"] = cls
             rec = by_size.setdefault(sid, {"id": sid, "class": cls, "label": e["scale_label"], "rows": 0})
             rec["rows"] += 1
+            _add_version(others, cls, e)
             if e.get("is_arcadedb") and _release_of(e.get("version_name")):
                 releases[cls].add(_release_of(e.get("version_name")))
                 page_releases[cls].add(_release_of(e.get("version_name")))
@@ -1162,10 +1230,14 @@ def _classify_sizes(payload):
         if extra:
             notes.append(_gen(f"Beside its small and its large size, this table has {'an extra size' if len(extra) == 1 else 'extra sizes'}: "
                               f"{_join_and(extra)}.", *extra))
-        release_note = _release_note(releases)
-        if release_note:
-            notes.append(release_note)
+        notes += [n for n in (_release_note(releases), _versions_note(VERSIONS_NOTE, others)) if n]
         t["conditions"] = list(t.get("conditions") or []) + [n for n in notes if n not in (t.get("conditions") or [])]
+    # After the loop: every source row has its class.
+    for t in payload["tables"]:
+        if t.get("id") == "multimodel":
+            note = _coverage_versions_note(payload["tables"])
+            if note and note not in (t.get("conditions") or []):
+                t["conditions"] = list(t.get("conditions") or []) + [note]
     if not any(t["sizes"] for t in payload["tables"]):
         return
     small, large = sorted(page_releases.get("small") or ()), sorted(page_releases.get("large") or ())
@@ -1177,8 +1249,8 @@ def _classify_sizes(payload):
         text += (f" The final numbers, on ArcadeDB {FINAL_SMALL_RELEASE}, will be the small size of every table"
                  + (f"; the small rows on this page are from ArcadeDB {_join_and(small)}." if small else "."))
     if large:
-        text += (f" The large rows are from the ArcadeDB {_join_and(large)} campaign, and each table names the engine version of its "
-                 f"ArcadeDB rows by size.")
+        text += (f" The large rows are from the ArcadeDB {_join_and(large)} campaign. An engine can be on a newer version at the small size "
+                 f"than at the large size, and each table names the engine versions of its rows by size.")
     text += f" The full run of the large sizes is planned for {LARGE_RUN_YEAR}."
     note = _gen(text, FINAL_SMALL_RELEASE, LARGE_RUN_YEAR, *small, *large)
     if note not in payload["conditions"]:
@@ -8550,7 +8622,7 @@ def main() -> int:
         # arcadedb_version beside this is already None whenever the versions
         # disagree, so the mix was detectable and this field contradicted it.
         # Now they agree: a mixed payload lists every engine it actually holds.
-        # EVERY COMPARATOR VERSION, and a flag when one backend shows two.
+        # EVERY COMPARATOR VERSION, and a flag when one backend shows two inside one size class.
         #
         # The harness pins moved ahead of the frozen results -- ladybug 0.19.1
         # against a published 0.18.1, lancedb 0.37.1 against 0.34.0, qdrant
@@ -8567,8 +8639,7 @@ def main() -> int:
         # which is the claim the tier guard exists to prevent us making.
         "comparator_versions": {
             b: sorted(v) for b, v in sorted(_comparator_versions(rows + _RULE_WITHHELD).items())},
-        "comparator_version_split": sorted(
-            b for b, v in _comparator_versions(rows + _RULE_WITHHELD).items() if len(v) > 1),
+        "comparator_version_split": _comparator_version_split(rows + _RULE_WITHHELD),
         "arcadedb_engines": sorted({
             _engine_identity(_row_engine_string(r), r.get("engine_commit"))
             or str(_row_engine_string(r) or "").strip() or "(no engine recorded)"

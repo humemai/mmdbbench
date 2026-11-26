@@ -23,6 +23,12 @@ version recorded on every published comparator row. Reports three states:
 Exit 1 if anything is STALE or UNKNOWN, because either means the page cannot say
 what it compared against.
 
+PER SIZE CLASS (humemai/mmdbbench#192). When BENCH_LARGE_ENGINE_COMMIT says the
+large rows stay on an earlier release until the full benchmark of February 2027,
+a large row that predates a pin bump is KEPT-LARGE and does not fail, as long as
+the large rows of its backend record one version. Two versions inside the large
+size are STALE, and a small or extra row is held to today's pin as before.
+
     python3 comparator_pins_check.py
     python3 comparator_pins_check.py --frozen results/runs_paper.csv
 """
@@ -33,6 +39,9 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import size_classes as _SC  # noqa: E402
+
 IMAGES = os.path.join(HERE, "build_images.sh")
 FROZEN = os.path.join(HERE, "results", "runs_paper.csv")
 
@@ -133,6 +142,12 @@ def main():
     img_tags, img_pinned = image_versions()
     rows = list(csv.DictReader(open(args.frozen)))
     seen, bad = {}, 0
+    large_kept = bool(os.environ.get(_SC.LARGE_PIN_VAR, "").strip())
+    large_versions = {}      # backend -> the versions its large rows record
+    for r in rows:
+        if _SC.row_size_class(r) == "large":
+            large_versions.setdefault(str(r.get("backend") or ""), set()).add(
+                str(r.get("engine_version") or r.get("version_name") or "").strip())
     for r in rows:
         be = str(r.get("backend") or "")
         if not be or be.startswith("arcadedb"):
@@ -168,11 +183,13 @@ def main():
             pkg, state = "image digest", "IMAGE-PINNED"
         else:
             state = "NO PIN MAPPED"
+        if state == "STALE" and large_kept and _SC.row_size_class(r) == "large" and len(large_versions[be]) == 1:
+            state = "KEPT-LARGE"
         seen.setdefault((be, pkg, rec.strip() or "(blank)", state), 0)
         seen[(be, pkg, rec.strip() or "(blank)", state)] += 1
     print(f"pins from build_images.sh: {len(pins)} packages\n")
-    order = {"NO PIN MAPPED": 0, "STALE": 1, "UNKNOWN": 2, "IMAGE-PINNED": 3,
-             "MATCHES": 4}
+    order = {"NO PIN MAPPED": 0, "STALE": 1, "UNKNOWN": 2, "KEPT-LARGE": 3,
+             "IMAGE-PINNED": 4, "MATCHES": 5}
     for (be, pkg, rec, state), n in sorted(seen.items(), key=lambda kv: (order[kv[0][3]], kv[0][0])):
         want = pins.get(pkg, "-")
         print(f"  {state:<14}{be:<24}{rec[:30]:<32}pinned={want:<10}n={n}")

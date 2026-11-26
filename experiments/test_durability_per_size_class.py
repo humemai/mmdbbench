@@ -105,6 +105,8 @@ def test_the_table_still_counts_its_operations_once_and_names_the_release_of_its
     EW._classify_sizes(payload)
     want = f"Engine version of the ArcadeDB rows: small size, {NEW}; large size, {OLD}."
     assert want in table["conditions"], table["conditions"]
+    others = f"{EW.VERSIONS_NOTE} small size, SQLite 3.46.1; large size, SQLite 3.46.1."          # and the other engines' versions, by size (#192)
+    assert others in table["conditions"], table["conditions"]
     assert {e["size_class"] for e in table["entries"]} == {"small", "large"}              # `_classify_sizes` keeps the class the table gave
     assert table["sizes"] == []                                                          # the Size column is an operation, not a corpus
 

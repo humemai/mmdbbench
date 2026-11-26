@@ -7,10 +7,13 @@ the issue against each of them with a small synthetic payload:
 - small rows on 26.12.1 and large rows on 26.11.1 pass;
 - two releases (or two engine commits) inside one size class are refused, with a sentence that names the size class, the table and both values.
 
+The same two cases hold for every other engine's version since humemai/mmdbbench#192: one version per engine in each size class, and each table
+names the versions of its rows by size.
+
 One test per gate: `arm_identity.pair_problems` with the row classifier the exporter calls it with, `page_check._check_build_pair`,
 `version_consistency_check`, `export_web._one_version` (already per entry, and so per size), and the page sentences the exporter generates from the
 rows (`_classify_sizes`, `_native_server_equiv_note`). The strictness that stays is held here too: a comparator that wears two version strings
-across size classes, rows with no class, and the default `pair_problems` call (no grouping) all fail as before.
+inside one size class, rows with no class, and the default `pair_problems` call (no grouping) all fail.
 Light: dictionaries and a temporary payload file only. Run with pytest, or as plain functions from this directory.
 """
 import contextlib
@@ -180,11 +183,33 @@ def test_version_consistency_refuses_two_arcadedb_releases_inside_one_size_class
     assert any("in the small size" in f and "table l2" in f and "table l3d" in f for f in across), across
 
 
+def test_version_consistency_accepts_one_comparator_version_per_size_class():
+    """humemai/mmdbbench#192: the small rows of a moved comparator carry the new version, its large rows the one that measured them."""
+    failures = _vc([_ve("neo4j 2026.10.0", "small", backend="Neo4j"), _ve("neo4j 2026.08.1", "large", backend="Neo4j"),
+                    _ve("duckdb 2.0.1", "small", backend="DuckDB"), _ve("duckdb 1.5.6", "large", backend="DuckDB"),
+                    _ve("duckdb vss 2.0.1", "small", backend="DuckDB VSS (fp32)"), _ve("duckdb vss 1.5.6", "large", backend="DuckDB VSS (fp32)")])
+    assert failures == [], failures
+
+
+def test_version_consistency_refuses_two_comparator_versions_inside_one_size_class():
+    for cls, other in (("small", "large"), ("large", "small")):
+        # One label on two tables of one size: both the label rule and the family rule name the size.
+        failures = _vc([_ve("neo4j 2026.10.0", cls, backend="Neo4j"), _ve("neo4j 2026.08.1", cls, backend="Neo4j"),
+                        _ve("neo4j 2026.08.1", other, backend="Neo4j")])
+        family = [f for f in failures if f.startswith("neo4j wears 2 versions")]
+        assert len(family) == 1 and f"in the {cls} size" in family[0], failures
+        label = [f for f in failures if "publishes 2 different version strings" in f]
+        assert len(label) == 1 and f"Neo4j in the {cls} size (table l3d)" in label[0], failures
+        assert not [f for f in failures if f"{other} size" in f], failures
+    # Two labels of one family inside one size: the family rule alone catches it.
+    failures = _vc([_ve("duckdb 2.0.1", "small", backend="DuckDB"), _ve("duckdb vss 1.5.6", "small", backend="DuckDB VSS (fp32)")])
+    assert len(failures) == 1 and failures[0].startswith("duckdb wears 2 versions in the small size"), failures
+
+
 def test_version_consistency_keeps_what_it_enforced_before():
-    # No class on the rows (an older payload, a table with no corpus size): one group, so two releases still fail.
+    # No class on the rows (an older payload, a table with no corpus size): one group, so two versions still fail, ours and theirs.
     assert _vc([_ve(f"arcadedb {NEW}", None), _ve(f"arcadedb {OLD}", None)])
-    # A comparator wearing two version strings fails even when the two strings belong to two size classes.
-    assert _vc([_ve("neo4j 2026.08.1", "small", backend="Neo4j"), _ve("neo4j 2026.10.0", "large", backend="Neo4j")])
+    assert _vc([_ve("neo4j 2026.08.1", None, backend="Neo4j"), _ve("neo4j 2026.10.0", None, backend="Neo4j")])
     # A comparator wearing an ArcadeDB release number still fails.
     assert [f for f in _vc([_ve(f"arcadedb {OLD}", "small"), _ve(f"neo4j {NEW}", "large", backend="Neo4j")]) if "is an ArcadeDB release number" in f]
 
@@ -246,6 +271,71 @@ def test_the_page_names_the_release_of_each_size_when_small_is_on_the_new_releas
     payload["conditions"] = payload["conditions"][:1]               # the paragraph alone: the sentence typed for this test has no registry entry
     payload["condition_provenance"] = {"generated": list(EW._GENERATED)}
     assert PC._check_conditions(payload, []) == 0                  # generated, and no number without a source
+
+
+def test_each_table_names_the_other_engines_versions_by_size():
+    def row(backend, version, sid, lane="l2"):
+        return {"backend": backend, "is_arcadedb": False, "scale": sid, "scale_label": EW.scale_label(lane, sid), "version_name": version,
+                "metrics": {}}
+    table = _table("l2", "l2", "sf1", "sf10")
+    table["entries"] = [e for e in table["entries"] if e["is_arcadedb"]] + [
+        row("Neo4j", "neo4j 2026.10.0", "sf1"), row("Neo4j", "neo4j 2026.08.1", "sf10"),
+        row("DuckDB", "duckdb 2.0.1 + duckpgq 61f5d082", "sf1"), row("ArangoDB", None, "sf10")]
+    payload = {"conditions": [], "tables": [table]}
+    EW._classify_sizes(payload)
+    want = (f"{EW.VERSIONS_NOTE} small size, DuckDB 2.0.1 + DuckPGQ 61f5d082, Neo4j 2026.10.0; large size, Neo4j 2026.08.1.")
+    assert want in table["conditions"], table["conditions"]
+    first = payload["conditions"][0]
+    assert "each table names the engine versions of its rows by size" in first, first
+    payload["conditions"] = []                                      # the table's sentences are the ones under test
+    payload["condition_provenance"] = {"generated": list(EW._GENERATED)}
+    assert PC._check_conditions(payload, []) == 0                  # generated, and no number without a source
+    assert PC._check_raw_backend_keys(payload) == 0                # products are spelled as products
+
+
+def test_every_engine_family_of_the_version_gate_has_a_product_name_for_the_sentence():
+    missing = [f for f in VC.FAMILIES if f not in EW._PRODUCT_NAMES]
+    assert not missing, missing
+
+
+def test_the_coverage_table_names_the_versions_of_its_engines_by_size():
+    def row(backend, version, cls, ours=False):
+        return {"backend": backend, "is_arcadedb": ours, "size_class": cls, "version_name": version, "metrics": {}}
+    sources = [{"id": "l2", "title": "Graph", "entries": [
+        row("ArcadeDB (embedded)", f"arcadedb {NEW} · {NEW_SHA}", "small", True), row("ArcadeDB (embedded)", f"arcadedb {OLD} · {OLD_SHA}", "large", True),
+        row("ArangoDB", "arangodb 3.12.14", "small"), row("ArangoDB", "arangodb 3.12.12", "large"), row("Neo4j", "neo4j 2026.10.0", "small")]}]
+    assert EW.multimodel_sources(sources) == sources
+    note = EW._coverage_versions_note(sources + [{"id": "multimodel", "entries": []}])
+    assert note == (f"{EW.COVERAGE_VERSIONS_NOTE} small size, ArcadeDB {NEW}, ArangoDB 3.12.14; large size, ArcadeDB {OLD}, ArangoDB 3.12.12.")
+
+
+def test_the_payload_flags_a_comparator_split_only_inside_one_size_class():
+    def r(version, scale):
+        return {"lane": "l2", "scale": scale, "backend": "neo4j_graph", "engine_version": version}
+    assert EW._comparator_version_split([r("2026.10.0", "sf1"), r("2026.08.1", "sf10")]) == []
+    assert EW._comparator_version_split([r("2026.10.0", "sf1"), r("2026.08.1", "sf1")]) == ["neo4j_graph"]
+
+
+def test_the_pin_report_keeps_an_older_large_row_only_when_the_large_rows_are_on_an_earlier_release(tmp_path, monkeypatch, capsys):
+    import comparator_pins_check as CP
+    pin = CP.read_pins()["duckdb"]
+
+    def run(rows, large_pin):
+        path = tmp_path / "frozen.csv"
+        path.write_text("lane,scale,backend,engine_version\n" + "".join(f"l1tpc,{scale},duckdb,{v}\n" for scale, v in rows))
+        monkeypatch.setattr(sys, "argv", ["comparator_pins_check.py", "--frozen", str(path)])
+        if large_pin:
+            monkeypatch.setenv("BENCH_LARGE_ENGINE_COMMIT", large_pin)
+        else:
+            monkeypatch.delenv("BENCH_LARGE_ENGINE_COMMIT", raising=False)
+        code = CP.main()
+        return code, capsys.readouterr().out
+
+    code, out = run([("tpch1", pin), ("tpch10", "0.0.1")], OLD_SHA)
+    assert code == 0 and "KEPT-LARGE" in out, out
+    assert run([("tpch1", pin), ("tpch10", "0.0.1")], None)[0] == 1                       # one release on the page: every row at the pin
+    assert run([("tpch1", "0.0.1"), ("tpch10", "0.0.1")], OLD_SHA)[0] == 1                # a small row is held to the pin
+    assert run([("tpch1", pin), ("tpch10", "0.0.1"), ("tpch10", "0.0.2")], OLD_SHA)[0] == 1   # two versions inside the large size
 
 
 def test_the_native_server_sentence_says_every_other_build_of_its_release_not_every_other_build_on_the_page():

@@ -1,9 +1,9 @@
 {
- "claimable": false,
+ "claimable": true,
  "claims": [
   {
    "cell_class": null,
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s1-solo",
    "lane": "solo",
@@ -14,7 +14,7 @@
   },
   {
    "cell_class": null,
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s2-c1",
    "lane": "compare1",
@@ -25,7 +25,7 @@
   },
   {
    "cell_class": "compute",
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s2-c2",
    "lane": "compare2",
@@ -36,7 +36,7 @@
   },
   {
    "cell_class": "compute",
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s2-c3",
    "lane": "compare3",
@@ -47,7 +47,7 @@
   },
   {
    "cell_class": null,
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s3-solo",
    "lane": "solo",
@@ -58,7 +58,7 @@
   },
   {
    "cell_class": null,
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s4-c1",
    "lane": "compare1",
@@ -69,7 +69,7 @@
   },
   {
    "cell_class": "compute",
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s4-c2",
    "lane": "compare2",
@@ -80,7 +80,7 @@
   },
   {
    "cell_class": "compute",
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s4-c3",
    "lane": "compare3",
@@ -91,7 +91,7 @@
   },
   {
    "cell_class": null,
-   "claimable": false,
+   "claimable": true,
    "issue": "humemai/mmdbbench#164",
    "job": "pilot164-l6@s5-solo",
    "lane": "solo",
@@ -116,9 +116,9 @@
   "compute"
  ],
  "mid_n": 1,
- "needs": "the cell command, as L5",
+ "needs": null,
  "picks_json_sha256": "82ac20cd16dff84f1218f95df24debf91a4223004eb35803b16671afc3f1a4bc",
- "plan_py_sha256": "e3c33dac5c9b059e84378b3081e758ba2834e2e0701bccb18d027fb8dbb2c1f1",
+ "plan_py_sha256": "65a404270ba1fff6123ba65bed27a54fc3d48e817f1ea3a00b702707e8fee0d9",
  "ref_n": 3,
  "reps": 5,
  "salt": 0,

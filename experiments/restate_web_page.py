@@ -35,7 +35,7 @@ from publish_instrument import results_dir  # noqa: E402
 
 # The sentences the size classification writes (export_web._classify_sizes); a restated payload loses and regains them, so the pass can run twice.
 OWNED_PREFIXES = ("Every table measured on a dataset has a small size and a large size", "Beside its small and its large size, this table has",
-                  "Engine version of the ArcadeDB rows:")
+                  "Engine version of the ArcadeDB rows:", EW.VERSIONS_NOTE, EW.COVERAGE_VERSIONS_NOTE)
 OWNED_LARGE = re.compile(r"^Large size \(.+\): (not run yet\.|no rows yet, planned for )")
 OLD_LEGEND_TAIL = "A dash is an operation the engine cannot express, never a slow one."
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One engine wears one version across the whole page (DECISIONS #103d, #103e).
+"""One engine wears one version in each data size (DECISIONS #103d, #103e; per size since humemai/mmdbbench#192).
 
 BUGS.md F61: the live page carries DuckDB 1.5.5 on the document, time-series and
 dense tables beside DuckPGQ on DuckDB 1.5.4, because the stage that would have
@@ -12,15 +12,16 @@ wrapper over an engine ("duckpgq:f386a6c on duckdb:1.5.4"), so the check looks
 for each family name anywhere in the string and takes the version beside it,
 rather than splitting on the first space and hoping.
 
-ArcadeDB is read per SIZE CLASS (humemai/mmdbbench#134): until the large sizes are rerun, the small rows of a table are on one release and
-the large rows on another, so two ArcadeDB releases in different size classes pass. Two inside one size class fail, on one table or across
-tables, exactly as before; rows with no `size_class` (an older payload, a table that prints no corpus size) are one group, as before. Every
-other family stays one version across the whole page.
+EVERY ENGINE is read per SIZE CLASS (humemai/mmdbbench#134 for ArcadeDB, humemai/mmdbbench#192 for every other engine, decided
+2026-11-26): until the large sizes are rerun in the full benchmark of February 2027, the small rows of an engine are on one version and its
+large rows keep the version that measured them, so two versions in different size classes pass. Two inside one size class fail, on one table
+or across tables; rows with no `size_class` (an older payload, a table that prints no corpus size) are one group of their own. The page says
+which version each size used in a sentence under each table (export_web._classify_sizes).
 
 Usage:
     python3 version_consistency_check.py <payload.json> [more.json ...]
 
-Exit 0 when every family wears one version, 1 otherwise.
+Exit 0 when every family wears one version in each size, 1 otherwise.
 """
 from __future__ import annotations
 
@@ -132,10 +133,6 @@ def _rows(node, table=None):
         yield tid, backend, version
 
 
-def _is_arcadedb(version):
-    return re.search(r"\barcadedb\b", version.lower()) is not None
-
-
 def _versionless_measurements(node, table=None):
     """Rows that PUBLISH A NUMBER without naming the engine that produced it.
 
@@ -166,7 +163,7 @@ def _versionless_measurements(node, table=None):
 
 def check(path: str) -> list[str]:
     payload = json.load(open(path))
-    # (family, size class) -> version -> where. Only ArcadeDB is split by size class; every other family has the class None.
+    # (family, size class) -> version -> where. A row with no size class has the class None.
     seen: dict[tuple, dict[str, set]] = defaultdict(lambda: defaultdict(set))
     unparsed: list[tuple] = []
     for table, backend, version, cls in _sized_rows(payload):
@@ -175,7 +172,7 @@ def check(path: str) -> list[str]:
         for family in FAMILIES:
             pat = SPELLINGS.get(family, re.escape(family))
             for match in re.finditer(r"\b" + pat + _VER, low):
-                seen[(family, cls if family == "arcadedb" else None)][match.group(1)].add((table, backend))
+                seen[(family, cls)][match.group(1)].add((table, backend))
                 hit = True
         if not hit:
             unparsed.append((table, backend, version))
@@ -237,11 +234,11 @@ def check(path: str) -> list[str]:
                     f"number, not {family}'s: {rows}")
 
     # (b) one backend label, two spellings of its version
-    # An ArcadeDB backend label is read per size class (#134): its small rows and its large rows may name two releases.
+    # A backend label is read per size class (#134, #192): its small rows and its large rows may name two versions.
     spellings = defaultdict(set)
     spelled_in = defaultdict(set)    # (backend, class) -> tables
     for table, backend, version, cls in _sized_rows(payload):
-        key = (backend, cls if _is_arcadedb(version) else None)
+        key = (backend, cls)
         spellings[key].add(version.strip())
         spelled_in[key].add(str(table))
     for (backend, cls), values in sorted(spellings.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
@@ -271,12 +268,12 @@ def check(path: str) -> list[str]:
                 f"{who} publishes {len(values)} different version strings: "
                 f"{', '.join(sorted(values))}")
 
-    # (c) one engine family, two versions
+    # (c) one engine family, two versions inside one size class
     for (family, cls), versions in sorted(seen.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
         if len(versions) < 2:
             continue
         if family in ALLOWED_SPLITS:
-            print(f"  ALLOWED {family}: {', '.join(sorted(versions))}"
+            print(f"  ALLOWED {family}{' in the ' + cls + ' size' if cls else ''}: {', '.join(sorted(versions))}"
                   f" -- {ALLOWED_SPLITS[family]}")
             continue
         lines = [f"{family} wears {len(versions)} versions {'in the ' + cls + ' size ' if cls else ''}on one page:"]
@@ -310,7 +307,7 @@ def main(argv: list[str]) -> int:
         if failures:
             bad = 1
         else:
-            print("  ok: every engine family wears one version")
+            print("  ok: every engine family wears one version in each size")
     return bad
 
 

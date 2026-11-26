@@ -127,7 +127,7 @@ They answer different questions. `refresh_web_page.py` runs all of them (`refres
     BENCH_ENGINE_COMMIT=<pin> python fairness_check.py      # F1 to F15
     BENCH_ENGINE_COMMIT=<pin> python page_check.py          # page cells vs generated tables, prose vs pins
     BENCH_ENGINE_COMMIT=<pin> python equivalence_check.py   # do the engines of a table agree on the answer
-    BENCH_ENGINE_COMMIT=<pin> python version_consistency_check.py   # one engine, one version string, across the page
+    BENCH_ENGINE_COMMIT=<pin> python version_consistency_check.py   # one engine, one version string, in each size class
     python version_pin_check.py                             # code and COMPARATORS.md agree on every pin; reads no rows
 
 `equivalence_check.py` holds the rows to each other: every lane of the 2026-11 instrument records its digests (DECISIONS #88).

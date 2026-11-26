@@ -1107,10 +1107,10 @@ COVERAGE_VERSIONS_NOTE = "Engine versions in the tables this one summarizes:"
 # A version string spells a product as its image or its row does ("duckdb 1.5.6 + duckpgq 61f5d082"). A sentence spells it as a product,
 # and page_check refuses a bare backend key ("duckdb") in page prose.
 _PRODUCT_NAMES = {
-    "age": "AGE", "arangodb": "ArangoDB", "arcadedb": "ArcadeDB", "chroma": "Chroma", "chromadb": "Chroma", "cratedb": "CrateDB",
+    "age": "AGE", "arangodb": "ArangoDB", "arcadedb": "ArcadeDB", "chroma": "Chroma", "chromadb": "Chroma", "crate": "CrateDB", "cratedb": "CrateDB",
     "duckdb": "DuckDB", "duckpgq": "DuckPGQ", "elasticsearch": "Elasticsearch", "falkordb": "FalkorDB", "ladybug": "LadybugDB",
-    "ladybugdb": "LadybugDB", "lancedb": "LanceDB", "memgraph": "Memgraph", "milvus": "Milvus", "mongodb": "MongoDB", "neo4j": "Neo4j",
-    "pgvector": "pgvector", "postgresql": "PostgreSQL", "qdrant": "Qdrant", "qdrant-client": "Qdrant client", "questdb": "QuestDB",
+    "ladybugdb": "LadybugDB", "lancedb": "LanceDB", "memgraph": "Memgraph", "milvus": "Milvus", "mongo": "MongoDB", "mongodb": "MongoDB", "neo4j": "Neo4j",
+    "pgvector": "pgvector", "postgres": "PostgreSQL", "postgresql": "PostgreSQL", "qdrant": "Qdrant", "qdrant-client": "Qdrant client", "questdb": "QuestDB",
     "redis": "Redis", "sqlite": "SQLite", "sqlite-vec": "sqlite-vec", "surrealdb": "SurrealDB", "timescaledb": "TimescaleDB", "vss": "VSS",
 }
 _PRODUCT_WORD = re.compile(r"(?<![\w-])(" + "|".join(re.escape(n) for n in sorted(_PRODUCT_NAMES, key=len, reverse=True)) + r")(?![\w-])",

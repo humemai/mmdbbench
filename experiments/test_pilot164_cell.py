@@ -24,6 +24,7 @@ def load(name, path):
 
 cells = load("pilot_cells_under_test", os.path.join(PILOT, "study", "cell_run.py"))
 plan = load("pilot_plan_under_test", os.path.join(PILOT, "plan.py"))
+analyze = load("pilot_analyze_under_test", os.path.join(PILOT, "analyze.py"))
 CFG = cells.load_config()
 
 FAKE_RUNNER = r"""
@@ -35,7 +36,7 @@ row = {"backend": a["--backends"], "scale": a["--scale"], "rep": int(a["--only-r
        "cpuset": os.environ.get("FAKE_CPUSET", cpus), "engine_version": "26.11.1", "build_s": 1.0, "oltp_total_s": 2.0}
 with open(os.path.join("results", a["--results-file"]), "a") as fh:
     fh.write(json.dumps(row) + "\n")
-time.sleep(1.5)
+time.sleep(4)  # long enough that a start a few tens of milliseconds apart stays inside the 95 percent coverage rule
 print("  [1/1] l2_x_sf1_r1 %s (%s) -> %s" % (os.environ.get("FAKE_SECONDS", "12.5s"), cpus, os.environ.get("FAKE_STATUS", "ok")))
 """
 FAKE_DOCKER = r"""
@@ -157,11 +158,14 @@ def test_smoke_leg_runs_through_the_pilot_runner(study):
         out, err = p.communicate(timeout=240)
         assert p.returncode == 0, f"{lane}: {out}{err}"
     all_rows = [r for lane in lanes for r in rows(study, lanes[lane]["out"])]
-    assert all(r["status"] == "ok" for r in all_rows), [r for r in all_rows if r["status"] != "ok"]
+    seen = [(r["unit"], r["lane"], r["role"], r["status"], r.get("reason")) for r in all_rows]
+    # a busy neighbour is stopped when the target is done, so its row says partial; every other row says ok
+    assert all(r["status"] == ("partial" if r["role"] == "busy" else "ok") for r in all_rows), seen
     targets = [r for r in all_rows if r["role"] == "target"]
-    assert len(targets) == 4 and all(r["figure"] == 12.5 and r["cpus_allowed"] == r["cpus_expected"] for r in targets)
-    busy = [r for r in all_rows if r["role"] == "busy"]
-    assert len(busy) == 2
-    for b in busy:  # a neighbour covers the whole target run
-        t = next(r for r in targets if r["unit"] == b["unit"])
-        assert b["t_start"] <= t["t_start"] + 1 and b["t_end"] >= t["t_end"] - 0.5
+    assert len(targets) == 4 and all(r["figure"] == 12.5 for r in targets), seen
+    assert sum(r["role"] == "busy" for r in all_rows) == 2, seen
+    # the registered analysis counts every target run, the neighbour's coverage of the whole cell included
+    by_unit = {(r["unit"], r["lane"]): r for r in all_rows}
+    for u in (u for u in order["units"] if u["stage"] == "s2"):
+        valid, why = analyze.unit_validity(u, by_unit, order["data"])
+        assert valid, (u["id"], why, seen)

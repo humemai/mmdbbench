@@ -85,3 +85,40 @@ jobs:
       - name: Rows the cell wrote
         if: always()
         run: ls -la experiments/*.json || true
+
+  # The clean-room run of a larger cell of the guide, by hand (`gh workflow run reproduce-smoke.yml --ref <branch>`): the download, the cell as
+  # the guide says, and the comparison, with the wall time, the peak memory of the process tree's largest process, and the size of the database.
+  # Not weekly and not on pull requests: it downloads the LDBC data and runs for much longer than the e2 job.
+  l2olap:
+    name: l2 analytics cell from the guide (by hand)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup UV package manager
+        run: |
+          installer="$(mktemp)"
+          curl -LsSf --retry 5 --retry-all-errors --retry-delay 5 -o "$installer" https://astral.sh/uv/0.12.0/install.sh
+          sh "$installer"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Extract the guide's commands
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run --no-project python experiments/tools/guide_blocks.py docs/reproduce.md \
+            --name enter --name sf1-data --name l2olap-arcadedb --name l2olap-compare > "$RUNNER_TEMP/guide-l2olap.sh"
+          cat "$RUNNER_TEMP/guide-l2olap.sh"
+          bash -n "$RUNNER_TEMP/guide-l2olap.sh"
+
+      - name: Run the analytics cell as the guide says
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          nproc; free -g; df -h /tmp
+          /usr/bin/time -v bash -eux "$RUNNER_TEMP/guide-l2olap.sh"
+
+      - name: Size of the database the cell built
+        if: always()
+        run: du -sh /tmp/l2_arcade || true

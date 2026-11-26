@@ -33,7 +33,7 @@ def load_row(path):
     return json.loads(text)
 
 
-def published(csv, lane, backend, scale, workload=None, engine_backend=None, durability_class=None):
+def published(csv, lane, backend, scale, workload=None, engine_backend=None, durability_class=None, gav=None):
     d = pd.read_csv(csv, low_memory=False)
     d = d[(d["rc"] == 0) & (d["lane"] == lane) & (d["backend"] == backend) & (d["scale"] == scale)]
     if workload:
@@ -42,6 +42,9 @@ def published(csv, lane, backend, scale, workload=None, engine_backend=None, dur
         d = d[d["engine_backend"].fillna("jvm") == engine_backend]
     if durability_class and "durability_class" in d.columns:
         d = d[d["durability_class"] == durability_class]
+    # Graph analytics publishes ArcadeDB twice, with and without its analytical view (`gav`). A median over both arms is neither.
+    if gav is not None and "gav" in d.columns:
+        d = d[d["gav"].astype(str) == str(gav)]
     return d
 
 
@@ -83,7 +86,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     row = load_row(args.row)
     eb = args.engine_backend or row.get("engine_backend")
-    pub = published(args.csv, args.lane, args.backend, args.scale, args.workload, eb, row.get("durability_class"))
+    pub = published(args.csv, args.lane, args.backend, args.scale, args.workload, eb, row.get("durability_class"), row.get("gav"))
     if pub.empty:
         print(f"no published rows for lane={args.lane} backend={args.backend} scale={args.scale} workload={args.workload} "
               f"engine_backend={eb}", file=sys.stderr)

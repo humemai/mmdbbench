@@ -11,17 +11,18 @@ A reproduction is comparable when it keeps the memory cap, the durability class 
 - Docker only for the engines that run as servers (the served ArcadeDB arm and most comparators). The cells on this page run in one process and need no Docker.
 - Memory and time as in the table below. The published rows ran inside the memory cap in its last column; a machine with less free memory than the peak column fails with an out-of-memory error. The database of a cell is built in `/tmp`: about 36 MB for `e2`, 706 MB for `tpch1`, 773 MB for the SIFT1M cell, 11 MB for `sf1`. Some Linux distributions mount `/tmp` in memory, so check `df -h /tmp` first.
 
-The table is generated from the published rows (`experiments/results/runs_paper.csv`, three repetitions per cell, `rc == 0`) by `tools/small_cell_cost.py` and is never typed; a test fails when it differs from the rows. The cell time is `build_s` plus `oltp_total_s` plus the elapsed time of the five analytics queries of `l1tpc`, a lower bound because the timed reads of the other lanes are not in it. The memory is the highest of the five phase peaks plus the client peak. These are the numbers of the benchmark host (12 performance cores, 61 GB of memory): a slower machine takes longer.
+The table is generated from the published rows (`experiments/results/runs_paper.csv`, three repetitions per cell, `rc == 0`) by `tools/small_cell_cost.py` and is never typed; a test fails when it differs from the rows. The cell time is `build_s` plus `oltp_total_s` plus the elapsed time of the five analytics queries of `l1tpc`, a lower bound because the timed reads of the other lanes are not in it. The memory is the peak of the process the cell runs in, as the runner reads it from the container (`peak_mib_sum`, page cache included). These are the numbers of the benchmark host (12 performance cores, 61 GB of memory): a slower machine takes longer.
 
 | lane | scale | backend id | workload | rows | cell time, median (s) | peak memory, median / max (GiB) | cap in the rows |
 |---|---|---|---|---|---|---|---|
-| `e2` | `e2` | `arcadedb_e2` | hybrid | 3 | 8 | 2.1 / 2.4 | 12g |
-| `e2` | `e2` | `duckdb_e2` | hybrid | 3 | 3 | 0.7 / 0.7 | 12g |
-| `l1tpc` | `tpch1` | `arcadedb_embedded` | olap | 3 | 513 | 12.2 / 13.3 | 16g |
-| `l1tpc` | `tpch1` | `sqlite` | oltp | 3 | 53 | 1.8 / 1.8 | 16g |
-| `l3d` | `small` | `arcadedb_dense_embedded` | all | 3 | 145 | 10.9 / 11.3 | 16g |
-| `l3d` | `small` | `sqlite_vec_dense` | all | 3 | 12 | 1.2 / 1.2 | 16g |
-| `l2` | `sf1` | `arcadedb_graph_embedded` | oltp | 3 | 575 | 1.4 / 1.4 | 8g |
+| `e2` | `e2` | `arcadedb_e2` | hybrid | 3 | 8 | 1.1 / 1.2 | 12g |
+| `e2` | `e2` | `duckdb_e2` | hybrid | 3 | 3 | 0.4 / 0.4 | 12g |
+| `l1tpc` | `tpch1` | `arcadedb_embedded` | olap | 3 | 513 | 6.1 / 6.7 | 16g |
+| `l1tpc` | `tpch1` | `sqlite` | oltp | 3 | 53 | 0.9 / 0.9 | 16g |
+| `l3d` | `small` | `arcadedb_dense_embedded` | all | 3 | 145 | 5.7 / 5.7 | 16g |
+| `l3d` | `small` | `sqlite_vec_dense` | all | 3 | 12 | 0.6 / 0.6 | 16g |
+| `l2` | `sf1` | `arcadedb_graph_embedded` | oltp | 3 | 575 | 0.7 / 0.7 | 8g |
+| `l2` | `sf1full` | `arcadedb_graph_embedded` | olap | 3 | 118 | 16.9 / 17.0 | 32g |
 
 ## Set up
 
@@ -54,6 +55,7 @@ The packages are named on the command line, `uv run --no-project --with <package
 | `l1tpc` | TPC-H SF1 analytics and a New-Order-style transaction mix on documents | generated with DuckDB, 214 MB | [tpch1](#l1tpc-tpc-h-sf1) |
 | `l3d` | dense vector search on SIFT1M at a matched HNSW operating point | ann-benchmarks download, 525 MB | [small](#l3d-dense-vectors-sift1m) |
 | `l2` | graph reads and writes on the LDBC persons and `KNOWS` graph | LDBC download, 211 MB | [sf1 and hop3f](#l2-graph-ldbc-sf1-and-the-filtered-3-hop-read) |
+| `l2` | graph analytics on the persons, friendships, and messages of the same network | the same LDBC download | [sf1full](#l2-analytics-the-graph-questions-on-the-full-sf1-network) |
 
 ### e2: the smallest cell, about 10 seconds
 
@@ -209,6 +211,30 @@ WHERE p.id = $id AND x.age > 41 RETURN count(DISTINCT x) AS n
 
 The 500 start persons are drawn with a fixed seed (777) from the persons file, so every run asks for the same starts. The timer covers planning, execution, the iteration of the result and its conversion to Python objects.
 
+### l2 analytics: the graph questions on the full SF1 network
+
+The analytics half of the graph lane (`--workload olap`) reads the same download as the cell above, but all of it that the questions touch: persons, friendships, and the messages around them (3,163,871 message-side vertices and 13,581,644 edges; the cell refuses a short load). The scale name is `sf1full`; it reads the `sf1` directory, so the `sf1-data` block above is all the data it needs. It asks five aggregates of this benchmark and seven of the nine LSQB pattern counts, each up to 100 times within 300 seconds per query. LSQB `q6` and `q9` do not run at this size: their first run alone is too long for the cell (`TIER_EXCLUDED` in `graph_common.py`).
+
+<!-- runnable: l2olap-arcadedb -->
+```bash
+export BENCH_GRAPH_SOURCE=ldbc
+export BENCH_GRAPH_DATA=$HOME/bench-data/ldbc
+export ARCADEDB_HEAP=8g              # the published rows ran a 16g heap under a 32g cap
+export BENCH_DURABILITY=relaxed
+uv run --no-project --with arcadedb-jvm==26.11.1 --with numpy==2.5.3 \
+  python l2_graph.py --backend arcadedb_graph_embedded --workload olap --scale sf1full --out sf1full_olap_arcadedb.json
+```
+
+Then compare it with the published rows of the same arm:
+
+<!-- runnable: l2olap-compare -->
+```bash
+uv run --no-project --with pandas==3.0.6 python tools/compare_published.py sf1full_olap_arcadedb.json \
+  --lane l2 --backend arcadedb_graph_embedded --scale sf1full --workload olap
+```
+
+The default arm builds ArcadeDB's graph analytical view before the questions, and its row says `gav: true`. `BENCH_GAV=0` runs the second published arm, without the view; the comparison reads the rows of the arm you ran. The cell time in the table above is the load alone for this cell, and the peak memory is that of the 16g heap, page cache included. `BENCH_GRAPH_OLAP_ITER` lowers the number of runs per query for a smoke run, and such a row is not comparable with a published one.
+
 ## The same cell on another build or engine
 
 - **Embedded, native build.** Replace `--with arcadedb-jvm==26.11.1` by `--with arcadedb==26.11.1` in any command above. The native package has no JVM: it reads `-Xmx` and the system properties from `ARCADEDB_NATIVE_ISOLATE_ARGS`, and the harness turns `ARCADEDB_HEAP` and the durability flag into that for you. The row says `engine_backend: native`.
@@ -228,6 +254,8 @@ The cells read these, and the row records what ran.
 | `BENCH_PREP_DATA` | `experiments/data` | root of `gen_dense_npy.py`: it reads and writes `$BENCH_PREP_DATA/dense` |
 | `BENCH_GRAPH_SOURCE`, `BENCH_GRAPH_DATA` | synthetic, `/data/ldbc` | `ldbc` reads the LDBC files from `$BENCH_GRAPH_DATA/<scale>` |
 | `BENCH_GRAPH_SAMPLES_OUT` | unset | writes one record per timed read of the graph cell |
+| `BENCH_GRAPH_OLAP_ITER`, `BENCH_GRAPH_OLAP_BUDGET_S` | 100, 300 | runs per graph analytics query and the seconds each query may take |
+| `BENCH_GAV` | `1` | `0` runs graph analytics on ArcadeDB without the graph analytical view |
 | `BENCH_OLAP_ITER`, `E2_OPS` | 100, 300 | number of timed runs; lower them for a smoke run. The row records what ran (`olap_iters`), and a row with fewer runs is not comparable with a published one |
 | `BENCH_DUCKDB_THREADS` | the size of the cpuset | DuckDB's thread count; the fairness rule holds it to the cores the cell has |
 | `BENCH_CPUSET`, `BENCH_DATA` | `0-11`, `experiments/data` | `runner.py` only: the cores of the containers and the corpus root it mounts as `/data` |

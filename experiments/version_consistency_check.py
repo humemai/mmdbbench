@@ -221,6 +221,17 @@ def check(path: str) -> list[str]:
             f"THE identifier for our rows (#49) and two spellings of it read as "
             f"two engines")
 
+    # (0c) THE ENGINE LIST OF THE PAYLOAD NAMES NO RELEASE THE TABLES DO NOT PRINT (humemai/mmdbbench#210). `arcadedb_engines` is read from every
+    # frozen row, the tables from the rows they print, so a row that records another engine than it measured (a client's wheel on a served row) shows
+    # up only here. A payload whose tables print no ArcadeDB version has nothing to hold the list against.
+    printed = {m.group(1) for _t, _b, v in _rows(payload) for m in re.finditer(r"\barcadedb\b" + _VER, v.lower())}
+    for listed in (payload.get("arcadedb_engines") or []) if isinstance(payload, dict) else []:
+        for m in re.finditer(r"\barcadedb\b" + _VER, str(listed).lower()):
+            if printed and m.group(1) not in printed:
+                failures.append(
+                    f"the payload's engine list names {listed!r}, a release no ArcadeDB row of any table prints "
+                    f"({', '.join(sorted(printed))}): a row records an engine it did not measure")
+
     # (a) our version on somebody else's row
     for (family, _cls), versions in sorted(seen.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
         if family == "arcadedb":

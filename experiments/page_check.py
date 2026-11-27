@@ -1078,6 +1078,13 @@ NOT_PRINTED = [
      "the compaction interval ArcadeDB's native time-series arms created the type with, as the engine "
      "reports it (milliseconds), or why it could not be asked: the evidence behind the sentence that "
      "names the one-hour interval"),
+    (r"^(ts_compaction_wait_s|ts_mutable_at_query|ts_shard_count_effective)$",
+     "the state ArcadeDB's native time-series arms were queried in (DECISIONS #121): the seconds the lane waited for sealing before the first "
+     "query, the samples still unsealed then (nonzero says the wait hit its bound), and the shard count the engine reports: evidence about the "
+     "run, not a measured quantity of the table"),
+    (r"^(ingest_serialize_s|ingest_post_s|ingest_body_mb)$",
+     "how the served time-series ingest splits into building the request bodies and the server accepting them, and the bytes sent (FAIRNESS "
+     "F14c): parts of the ingest time the table already prints, recorded only by arms that serialize a body"),
     (r"^ts_mutable_at_ingest_end$",
      "the samples ArcadeDB's native time-series arms had not yet sealed when "
      "the ingest timer stopped, from the engine's own count: the evidence "
@@ -1530,6 +1537,22 @@ def _check_build_pair(payload, rows):
     return bad
 
 
+def _declared_as_printed(table, entries, build):
+    """The label under which the table declares that `build` has no row for the arm of `entries`, or None.
+
+    The exporter declares a build's missing row under the label the table prints (export_web._declare_missing_builds), and two tables print an arm
+    under another name than display_name gives its key: the time series table names the model ("ArcadeDB (server, document path)"), and the restart
+    table prints all four served arms as "ArcadeDB (server)" (humemai/mmdbbench#209). The declaration has to name a size one of these entries is
+    printed at, so a statement about another model's size of a shared label does not cover this arm. The statements name the corpus
+    (`size_corpus`); `scale_label` carries the size class in front of it ("Small: 2.59M points") once the table is finished."""
+    sizes = {str(e.get("size_corpus") or e.get("scale_label") or e.get("scale")) for e in entries}
+    for label in sorted({_AI.build_label(_AI.strip_build(str(e["backend"])), build) for e in entries}):
+        for a in table.get("declared_absences") or []:
+            if str(a.get("backend")) == label and not a.get("column") and any(z in str(a.get("why")) for z in sizes):
+                return label
+    return None
+
+
 def EW_family(label):
     return re.sub(r"\s*\(.*$", "", str(label)).strip()
 
@@ -1599,6 +1622,10 @@ def _check_lane_roster(payload):
                     blabel = _AI.build_label(EW.display_name(key), b)
                     if blabel in absent or EW.engine_family(blabel) in absent or _declared_stripped(blabel, absent):
                         print(f"  declared {blabel} [{key}] on {tid}: no row, absence declared")
+                        continue
+                    named = _declared_as_printed(t, keyed[key], b)
+                    if named:
+                        print(f"  declared {named} [{key}] on {tid}: no row, absence declared")
                         continue
                     print(f"  MISSING {blabel} [{key}] on {tid}: the other build has a row, this one has none and no declaration")
                     bad += 1

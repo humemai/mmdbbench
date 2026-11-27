@@ -785,12 +785,18 @@ def apply_overlay_merge(specs, exclude_arms, pin, results=None, large_pin=None):
     for stem, tpin in (("dense_mp5", large_pin or pin), ("dense_mp5_small", pin)):
         target = results / f"{stem}_{tpin}"
         sources = [("existing@" + tpin, target)] if target.is_dir() else []
+        held = len(sources)
         for label, spin, d in parsed:
             src = next((c for c in (Path(d) / f"{stem}_{spin}", Path(d) / f"{stem}_{spin}{ROWS_SUFFIX}") if c.is_dir()), None)
             if src is None:
                 print(f"  overlay-merge: no {stem}_{spin} in {d}")
                 continue
             sources.append((f"{label}@{spin}", src))
+        if held and len(sources) == held:
+            # NOTHING NEW FOR THIS SIZE: merging the directory into itself rewrote MANIFEST.txt with every file under `existing`, and the record of which
+            # chain and pin each file came from was gone (the 9.99M overlay, kept from an earlier landing, at every landing of small rows).
+            print(f"  {target.name}: no source holds this size; the directory and its MANIFEST.txt are left as they are")
+            continue
         if sources:
             lines = overlay_merge.merge(sources, target, exclude_arms=tuple(exclude_arms))
             print(f"  {target.name}: {len(lines)} file(s) from {len(sources)} source(s), MANIFEST.txt beside them")
@@ -825,6 +831,18 @@ def apply_mp_arms(spec):
     if not spec.strip():
         return
     os.environ["BENCH_MP_ARMS"] = ",".join(x.strip() for x in spec.split(","))
+
+
+# What the publish steps import beyond the standard library: the exporter (numpy, through e2_hybrid), the figures (matplotlib) and the guide's cost table
+# (tools/small_cell_cost.py, pandas). The dependency group `publish` of pyproject.toml installs them.
+PUBLISH_PACKAGES = ("numpy", "matplotlib", "pandas")
+
+
+def missing_publish_packages(find=None):
+    """The names of PUBLISH_PACKAGES this interpreter cannot import. `find` stands in for importlib.util.find_spec in a test."""
+    if find is None:
+        from importlib.util import find_spec as find
+    return [name for name in PUBLISH_PACKAGES if find(name) is None]
 
 
 def apply_large_pin(value):
@@ -991,6 +1009,13 @@ def main():
                          "a run with no --apply still merges: --apply governs the "
                          "publish, not the merge.")
     args = ap.parse_args()
+    # THE LIBRARIES OF STEP 4 ARE THERE, OR THE LANDING REFUSES HERE, BEFORE THE MERGE. A plain `uv sync` installs neither: the exporter's import ended
+    # the run before the pull, and matplotlib was missed only by make_paper_figures.py, after the rows were already in the store.
+    if Path(PY).exists() and Path(sys.prefix).resolve() == Path(PY).parent.parent.resolve():
+        _missing = missing_publish_packages()
+        if _missing:
+            sys.exit(f"REFUSING: {PY} lacks {', '.join(_missing)}, which the publish steps import. Run `uv sync --group publish` in {REPO} and run again. "
+                     "Nothing was pulled or merged.")
     apply_mp_builds(args.mp_builds)
     apply_mp_arms(args.mp_arms)
     apply_large_pin(args.large_pin)
@@ -1230,7 +1255,7 @@ def main():
         n = sum(1 for _ in open(filtered)) if filtered.exists() else 0
         print(f"\n  DRY RUN: {n} row(s) would be merged into results/runs.jsonl,"
               f"\n           then the gates would run and the diff would print."
-              f"\n           Nothing was written. Drop --dry-run to proceed.")
+              f"\n           Nothing was merged (the overlay directories of step 1 are written). Drop --dry-run to proceed.")
         if _would_refuse:
             print("\n  The run without --dry-run would refuse (WOULD REFUSE above), so this dry run exits 1.")
         return 1 if _would_refuse else 0

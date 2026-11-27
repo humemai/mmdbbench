@@ -179,7 +179,7 @@ Every other directory under `results/` is evidence, quarantine, or output; nothi
 
 ## Landing a finished queue stage
 
-One command, the same order every time, refuses by default:
+One command, the same order every time, refuses by default. Run `uv sync --group publish` in the checkout first (numpy, matplotlib, and pandas, which the publish steps import); the landing refuses before it pulls anything when one is missing.
 
 ```
 BENCH_COMPARATOR_PIN=<commit the comparators' chain was launched with> \
@@ -193,6 +193,14 @@ BENCH_COMPARATOR_PIN=<commit the comparators' chain was launched with> \
 ```
 
 It pulls `runs_page_<pin>_2611.jsonl` (and, with `--overlay`, an arm's dense multipass files at both sizes, always the sparse second-pass files `sparse_mp_<pin>/` when the sparse lane lands (BUGS F148), and always the deployment decomposition's `e4decomp_<pin>/` files, since the `e4` table is a directory of artifacts rather than rows in the log and the export stops without it), drops the rows of the backends named as still running so a stage in progress never reaches the freeze, merges, publishes through the gates, and prints which page tables changed.
+
+**A comparator rerun at a commit of its own lands in two steps.** `land_stage.py` refuses a pulled file that holds a commit other than `--pin`, so the rows of the rerun are merged first and the landing of `--pin` then reads them from the store (rehearsed on 2026-11-27 with the rows of the 26.12.1 comparator rerun).
+
+1. Concatenate the rows files of every finished claim and check them: each cell has three clean repetitions, or a censored repetition 1. Then `merge_campaign.py --from-file <file> --apply`.
+2. The rerun has to hold every small cell the page prints for an engine it moves (lane, size, workload, and durability class). A cell with no new row keeps its old row and version, and `version_consistency_check` refuses the page (one version per engine in each size). Either measure the missing cell or leave that engine's new rows out of the file.
+3. Export `BENCH_COMPARATOR_PIN` with both commits, the old chain's and the rerun's. ArcadeDB rows never match it.
+4. Build the dense overlay of the small size from three directories, each a separate `DIR` of `--overlay-merge LABEL:PIN:DIR`: `old` (the overlay of the last landing, `dense_mp5_small_<its pin>` only), `cmp` (the rerun's `dense_mp5_small_<rerun pin>_2611`), and `new` (the ArcadeDB chains'). Pass `--overlay-exclude <arm>@old` for `fp32`, `arcsrv`, and every comparator arm the rerun measured; the arms it kept stay from `old`. The 9.99M overlay is left in `results/`; do not give it as a source. `BENCH_MP_ARMS` names the arms the overlay holds.
+5. Delete `results/dense_mp5_small_<pin>` before a run whose sources changed: the merge never overwrites a file with different bytes.
 
 **`--drop-unless` drops the rows a repair stage replaced.** `BACKEND:LANE:WORKLOAD:FIELD=VALUE` drops that cell's rows whose FIELD is not VALUE (absent counts as not VALUE), so the old rows go and the repair's rows, which carry the stamp, stay; repeat it for several cells. Example: the spec in the command above keeps, for ArcadeDB's served graph OLTP, only the rows that carry the raised bulk-load body limit stamped as `server_http_body_max_bytes` (DECISIONS #172). A malformed spec ends the run instead of dropping nothing.
 

@@ -90,8 +90,14 @@ def row_at_pin(row, landing: str | None = None, comparator_pins=()) -> bool:
 
     The class of the row is `row_size_class`, a pair that is not in SIZE_CLASS reads the small class, and the commit of a class is `pin_of_size_class`
     (`landing` None reads BENCH_ENGINE_COMMIT). A row with no commit is at no pin. `export_web._censored_cells` keeps a row of the run log by this
-    test, and `land_stage.py` asks it before the merge which failed comparator rows the exporter would drop (humemai/mmdbbench#157): one test, two readers."""
+    test, and `land_stage.py` asks it before the merge which failed comparator rows the exporter would drop (humemai/mmdbbench#157): one test, two readers.
+
+    `comparator_pins` never apply to an ArcadeDB row. A comparators' chain stamps the pair of the release the page was on (26.11.1 for the small pass
+    run before 26.12.1), which is also the commit of ArcadeDB's OLD rows: naming it in BENCH_COMPARATOR_PIN must not put an old release's failed
+    ArcadeDB cell on the new release's page."""
     got = str(row.get("engine_commit") or "")
+    if str(row.get("backend") or "").startswith("arcadedb"):   # arm_identity.is_arcadedb; this module imports the standard library only
+        comparator_pins = ()
     own = pin_of_size_class(row_size_class(row) or "small", landing=landing)
     return bool(got) and any(got.startswith(p) or p.startswith(got) for p in [own, *comparator_pins] if p)
 

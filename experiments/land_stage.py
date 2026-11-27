@@ -79,7 +79,8 @@ HOST = os.environ.get("BENCH_LAND_HOST", "mini")
 REMOTE = os.environ.get("BENCH_LAND_REMOTE", "~/repos/humemai/mmdbbench/experiments/results")
 # BENCH_LAND_PY names the interpreter every step runs under, for a rehearsal in a worktree that has no .venv (the default
 # is the repository's own).
-PY = os.environ.get("BENCH_LAND_PY") or str(REPO / ".venv" / "bin" / "python")
+DEFAULT_PY = str(REPO / ".venv" / "bin" / "python")
+PY = os.environ.get("BENCH_LAND_PY") or DEFAULT_PY
 SCRATCH = Path(os.environ.get("BENCH_LAND_SCRATCH", "/tmp/claude-1000/land_stage"))
 PROTECTED_BRANCHES = ("main", "master")
 
@@ -1011,7 +1012,8 @@ def main():
     args = ap.parse_args()
     # THE LIBRARIES OF STEP 4 ARE THERE, OR THE LANDING REFUSES HERE, BEFORE THE MERGE. A plain `uv sync` installs neither: the exporter's import ended
     # the run before the pull, and matplotlib was missed only by make_paper_figures.py, after the rows were already in the store.
-    if Path(PY).exists() and Path(sys.prefix).resolve() == Path(PY).parent.parent.resolve():
+    # Only the checkout's own environment is asked: BENCH_LAND_PY names a rehearsal's interpreter, and a test stands one in.
+    if PY == DEFAULT_PY and Path(PY).exists():
         _missing = missing_publish_packages()
         if _missing:
             sys.exit(f"REFUSING: {PY} lacks {', '.join(_missing)}, which the publish steps import. Run `uv sync --group publish` in {REPO} and run again. "

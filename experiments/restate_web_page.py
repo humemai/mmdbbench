@@ -246,34 +246,6 @@ def _size_gaps(payload, changes):
             changes.append(f"{t['id']}: {note}")
 
 
-LEGEND_OPENING = "This table is derived from the "
-
-
-def _coverage_cells(payload, changes):
-    """The coverage table's cells and its legend are derived from the other tables again (export_web._multimodel_table): the declarations the steps
-    above add change what a cell says and which words the legend has to define. A restated payload kept the old cells, so the summary said
-    "declared, censored" of a table that also declared "not measured", and page_check refused it."""
-    fresh = EW._multimodel_table(payload["tables"])
-    if not fresh:
-        return
-    cells = {e["backend"]: e["metrics"] for e in fresh["entries"]}
-    legend = fresh["conditions"][0]
-    for t in payload["tables"]:
-        if t.get("id") != "multimodel":
-            continue
-        for e in t.get("entries") or []:
-            for column, cell in (cells.get(e["backend"]) or {}).items():
-                old = (e.get("metrics") or {}).get(column)
-                if old is not None and old != cell:
-                    changes.append(f"multimodel: {e['backend']} x {column} reads {cell['text']}, not {old.get('text')}")
-                    e["metrics"][column] = cell
-        # the legend is the one condition that opens with the same words; every other sentence of the table stays
-        conditions = [legend if c.startswith(LEGEND_OPENING) else c for c in t.get("conditions") or []]
-        if conditions != t.get("conditions"):
-            changes.append("multimodel: the legend defines the words the cells use now")
-            t["conditions"] = conditions
-
-
 def _registry(payload):
     """The generated-sentence registry holds the sentences the page carries, with the strings they inserted."""
     texts = set(_table_sentences(payload))
@@ -298,7 +270,6 @@ def restate(payload, generated_on=None, status_only=False):
         _no_cold_column(payload, changes)
         _coverage_modes(payload, changes)
         _size_gaps(payload, changes)
-        _coverage_cells(payload, changes)
         EW._classify_sizes(payload)
         _registry(payload)
         day = generated_on or datetime.date.today().isoformat()

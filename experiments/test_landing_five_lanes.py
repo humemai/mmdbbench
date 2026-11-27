@@ -93,7 +93,7 @@ def test_a_freeze_of_one_old_build_renders_the_graph_table_under_the_plain_names
     assert set(counted) == {3} and _labels(body, " & SF1 & ") == ["ArcadeDB (emb)", "ArcadeDB (srv)"], body
 
 
-def test_the_time_series_block_prints_one_row_per_build():
+def test_the_time_series_block_prints_one_row_per_build(tmp_path):
     import make_paper_tables as M
     rows = []
     for backend in ("arcadedb_ts_native", "arcadedb_ts_native_server", "arcadedb_ts_doc", "arcadedb_ts_doc_server"):
@@ -101,7 +101,7 @@ def test_the_time_series_block_prints_one_row_per_build():
     rows += _rows("l4", "duckdb", None, "ts100", 3.0)
     body, counted = _written("dense_ts_table", rows,
                              mock.patch.object(M, "_dense_multipass", lambda: []),
-                             mock.patch.object(M, "dense_mp_dir", lambda: str(HERE / "no-such-directory")),
+                             mock.patch.object(M, "dense_mp_dir", lambda: str(tmp_path / "absent")),
                              mock.patch.object(M, "load_canonical", lambda: rows))
     assert set(counted) == {3}, counted
     got = [x for x in _labels(body, " & ") if x.startswith("ArcadeDB")]

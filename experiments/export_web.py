@@ -5962,6 +5962,15 @@ _CENSORED_CACHE = None
 _CENSORED_PHASE = {}   # (lane, scale, backend, workload) -> phase phrase
 
 
+class _CensoredCells(dict):
+    """What _censored_cells found, (lane, scale, backend, workload) -> outcome, with the evidence it came from: `run`, the key -> the failed run
+    that gave the outcome, and `log`, every row of the run log. A cell the cap rule censored has no failed run and no entry in `run`."""
+
+    def __init__(self, cells, run=None, log=()):
+        super().__init__(cells)
+        self.run, self.log = dict(run or {}), list(log)
+
+
 def _server_hit_envelope(r):
     """A served cell whose SERVER was killed at its memory cap.
 
@@ -6106,7 +6115,7 @@ def _censored_cells():
     if _CENSORED_CACHE is not None:
         return _CENSORED_CACHE
     pin = os.environ.get("BENCH_ENGINE_COMMIT", "").strip()
-    timeouts, clean = {}, set()
+    timeouts, clean, ran = {}, set(), {}
     rows = _run_log_rows()
     # SCOPE TO THE PIN THIS PUBLISH IS FOR: a cell censored at another pin would carry
     # its note, and its budget, onto this page.
@@ -6140,6 +6149,8 @@ def _censored_cells():
         _b = _arm_build(r)
         key = (r.get("lane"), str(r.get("scale")), f"{r.get('backend')}@{_b}" if _b else r.get("backend"), r.get("workload"))
         err = str(r.get("error") or "")
+        if err:
+            ran[key] = r      # the run whose outcome stands below, for the version its note names
         if not err:
             clean.add(key)
         elif err.startswith("timeout_after_"):
@@ -6183,7 +6194,8 @@ def _censored_cells():
             # no row and no note, which reads as a cell nobody ran.
             # The reason is carried as a string so the note can say it.
             timeouts[key] = err.strip().splitlines()[-1][:400] or "an error"
-    _CENSORED_CACHE = {k: v for k, v in timeouts.items() if k not in clean}
+    _CENSORED_CACHE = _CensoredCells({k: v for k, v in timeouts.items() if k not in clean},
+                                     run={k: r for k, r in ran.items() if k not in clean}, log=rows)
     # THE CAP RULE, AT REPORT TIME (DECISIONS #188): rows already measured meet the rule the unmeasured cells met when they ran.
     _CENSORED_CACHE.update(_rule_censored(set(_CENSORED_CACHE), clean))
     return _CENSORED_CACHE
@@ -6875,15 +6887,91 @@ def _reported(error):
     return text or "an error"
 
 
+# THE VERSION AN OUTCOME BELONGS TO (humemai/mmdbbench#205, decided 2026-11-27). A cell with no result prints no version, and its sentence can
+# outlive the engine's version on the rest of the table: a rerun that leaves the cell out keeps the old outcome while the engine's other rows move.
+# So the sentence names the version the failed run was on. A failed run records none (the runner writes its row, not the engine), so it is read
+# from the runs of the log that finished on the same engine, and the export refuses to write a sentence for a run whose version it cannot tell.
+def _version_of_run(r, backend):
+    """The engine version the run `r` records for itself, spelled for a sentence ("DuckDB 1.5.6 + DuckPGQ 61f5d082"), or None. `backend` is
+    the arm the sentence is about, which names the engine when the string does not."""
+    raw = _row_engine_string(r) or r.get("server_engine_version")
+    if not raw or not _engine_is_identifiable(raw):
+        return None
+    if "arcadedb" in str(backend):
+        release = _release_of(_engine_identity(str(raw), None))
+        return f"ArcadeDB {release}" if release else None
+    return _spelled_version(_engine_version(display_name(backend), str(raw)))
+
+
+def _spelled_version(version_name):
+    """A table's version string ("duckdb 1.5.6 + duckpgq 61f5d082") as a sentence spells it, or None."""
+    if not version_name:
+        return None
+    return _PRODUCT_WORD.sub(lambda m: _PRODUCT_NAMES[m.group(1).lower()], _one_spelling(str(version_name).strip()))
+
+
+def _outcome_version(run, log):
+    """The engine version the failed run `run` was on, as its sentence names it. Read, in this order, from: the run itself; the finished runs of
+    the same arm at the same harness commit and server image; for a served arm, the finished runs of the same engine on the same server image
+    (the image is the engine); for an in-process arm, the finished runs of the same engine at the same harness commit (one set of client
+    packages); the pin table of runner.py, for a server image no run finished on. The first of these that names exactly one version wins.
+    Refuses when one names two, or none names any."""
+    backend = str(run.get("backend"))
+    own = _version_of_run(run, backend)
+    if own:
+        return own
+
+    def engine(r):
+        return (display_name(str(r.get("backend"))).split(" (")[0], r.get("topology"))
+
+    image, commit = run.get("server_image"), run.get("engine_commit")
+    finished = [r for r in log if not r.get("error")]
+    sources = [[r for r in finished if r.get("backend") == backend and r.get("engine_commit") == commit and r.get("server_image") == image]]
+    if image:
+        sources.append([r for r in finished if r.get("server_image") == image and engine(r) == engine(run)])
+    else:
+        sources.append([r for r in finished if not r.get("server_image") and r.get("engine_commit") == commit and engine(r) == engine(run)])
+    found = []
+    for same in sources:
+        found = sorted({v for r in same if (v := _version_of_run(r, backend))})
+        if found:
+            break
+    if not found:
+        # a composed stack has more than one image and the table names one: half a stack is not its version
+        ref = str(run.get("server_image_ref") or "")
+        name = _image_version_names().get(ref) if "+" not in display_name(backend) else None
+        if name:
+            found = [_spelled_version(_engine_version(display_name(backend), name, image=ref))]
+    if len(found) == 1 and found[0]:
+        return found[0]
+    raise SystemExit(
+        f"REFUSING: the note of a cell with no result names the engine version the cell ran on (humemai/mmdbbench#205), and the run "
+        f"{run.get('run_id') or '(no run_id)'} ({backend}, {run.get('lane')} {run.get('scale')} {run.get('workload')}, harness commit "
+        f"{commit}) does not give one: it records none, and the finished runs of the log on the same engine name "
+        f"{', '.join(found) if found else 'none'}.")
+
+
+def _versions_sentence(who):
+    """"The run used X." for the (engine label, version) pairs of one outcome sentence, or None when a pair has no version. Engines on
+    different versions are each named with theirs."""
+    if not who or not all(v for _, v in who):
+        return None
+    versions = sorted({v for _, v in who})
+    if len(versions) == 1:
+        return f"The {'run' if len(who) == 1 else 'runs'} used {versions[0]}."
+    return f"The runs used {_join_and([f'{v} for {label}' for label, v in who])}."
+
+
 def _censored_notes(table_id):
     lane_wl = _TABLE_LANE.get(table_id)
     if not lane_wl:
         return []
     lane, wl = lane_wl
     notes = []
-    merged = {}
+    merged, ran_on = {}, {}
     scales = _table_scales(table_id)
-    for (l, scale, _qbackend, w), secs in sorted(_censored_cells().items(), key=str):
+    cells = _censored_cells()
+    for (l, scale, _qbackend, w), secs in sorted(cells.items(), key=str):
         backend, _, _build = str(_qbackend).partition("@")
         if l != lane or (wl and w != wl):
             continue
@@ -6949,8 +7037,12 @@ def _censored_notes(table_id):
                     f"inside its budget and was not retried, so no result was recorded. What it reported: "
                     f"{said}")
             pins = [scale_label(lane, scale), said]
-        merged.setdefault((kind, tail, tuple(pins)), []).append(
+        run = getattr(cells, "run", {}).get((l, scale, _qbackend, w))
+        version = _outcome_version(run, cells.log) if run else None
+        group = (kind, tail, tuple(pins))
+        merged.setdefault(group, []).append(
             _with_build((_dense_arm_label(backend) if lane == "l3d" else None) or display_name(backend), _build))   # the label of the outcome row (#89)
+        ran_on.setdefault(group, []).append((merged[group][-1], version))
 
     # ONE SENTENCE FOR THE ENGINES THAT HAVE THE SAME THING TO SAY. Three
     # engines were censored at TPC-H SF10 and the page printed three sentences
@@ -6965,7 +7057,13 @@ def _censored_notes(table_id):
             who = f"{engines[0]} and {engines[1]}"
         else:
             who = ", ".join(engines[:-1]) + f", and {engines[-1]}"
-        why = _gen(who + tail, who, *[p for p in pins if p is not None])
+        text, values = who + tail, [who, *[p for p in pins if p is not None]]
+        said_on = _versions_sentence(ran_on[(kind, tail, pins)])
+        if said_on:
+            head, mark, reported = tail.partition(" What it reported: ")      # the engine's own words stay last
+            text = f"{who}{head} {said_on}{mark}{reported}"
+            values += [value for pair in ran_on[(kind, tail, pins)] for value in pair]
+        why = _gen(text, *values)
         notes.append(why)
         for e in engines:
             _declare_absence(table_id, e, None, kind, why)

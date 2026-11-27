@@ -21,7 +21,8 @@ import export_web as EW  # noqa: E402
 def test_the_phase_of_a_censored_cell_is_a_registered_value_of_its_sentence():
     tmp = Path(tempfile.mkdtemp(prefix="phase-pin-rows-"))
     row = {"lane": "l2", "scale": "sf1full", "workload": "olap", "backend": "surrealdb_graph_server", "rep": 1, "engine_commit": "abc123def",
-           "instrument": "2026-11", "rc": -1, "error": "timeout_after_7200s", "timeout_phase_hint": "PHASE olap-start PHASE olap-lsqb_q1-start"}
+           "instrument": "2026-11", "rc": -1, "error": "timeout_after_7200s", "timeout_phase_hint": "PHASE olap-start PHASE olap-lsqb_q1-start",
+           "engine_version": "surrealdb-server:3.2.4"}          # the sentence names the version the run was on (humemai/mmdbbench#205)
     (tmp / "runs.jsonl").write_text(json.dumps(row) + "\n")
     old = {k: os.environ.get(k) for k in ("BENCH_ENGINE_COMMIT", "BENCH_COMPARATOR_PIN")}
     os.environ["BENCH_ENGINE_COMMIT"] = "abc123def"

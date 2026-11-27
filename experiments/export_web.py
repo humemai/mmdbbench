@@ -381,7 +381,12 @@ def _engine_identity(raw: str | None, commit: str | None) -> str | None:
 
 def _row_engine_string(r) -> str | None:
     """engine_version unless it is the driver's "unknown (...)" placeholder, in
-    which case lib_version (the served arm's banner, learned on connect())."""
+    which case lib_version (the served arm's banner, learned on connect()). A served ArcadeDB row that carries the server's own banner
+    reads it first: on the time series lane engine_version was the wheel installed in the client image, which put an "arcadedb 26.10.2"
+    nobody measured into the payload's engine list and into outcome sentences (humemai/mmdbbench#210)."""
+    banner = str(r.get("backend_version") or "")
+    if str(r.get("backend") or "").startswith("arcadedb") and re.match(r"server:\d", banner):
+        return banner
     ev = str(r.get("engine_version") or "")
     if ev and not ev.startswith("unknown"):
         return ev

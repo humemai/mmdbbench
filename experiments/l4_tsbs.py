@@ -1889,6 +1889,18 @@ class RedisTS:
         self.r.close()
 
 
+def stamp_served_engine(out, backend):
+    """A served ArcadeDB row names the engine of its SERVER (humemai/mmdbbench#210), as the other lanes' served rows do.
+
+    run_conditions() stamps engine_version from the wheel installed in this process, which for a served arm is the HTTP client's container: the row
+    said 26.10.2 while the server it measured was the release. The server's banner (backend_version, "server:<version>") becomes engine_version and
+    the client's wheel is filed as wheel_version, as l3_sparse does. A row whose server told no version ("server:unknown", "server:?") is left alone."""
+    banner = str(out.get("backend_version") or "")
+    if backend.startswith("arcadedb") and banner.startswith("server:") and banner[len("server:"):][:1].isdigit():
+        out["wheel_version"] = out.get("engine_version")
+        out["engine_version"] = banner
+
+
 _CLIENT_SERVER = {"questdb", "surrealdb_ts_server", "arangodb_ts", "redis_ts"}
 
 BACKENDS = {c.name: c for c in (ArcadeTS, ArcadeTSServer, ArcadeNativeTS, ArcadeNativeTSServer, DuckTS, SQLiteTS, MongoTS, TimescaleTS, QuestTS,
@@ -2270,6 +2282,7 @@ def main():
         # export_web falls back to, and the one the page prints as version_name.
         if not args.backend.startswith("arcadedb"):
             out["harness_arcadedb_version"] = out.pop("engine_version", None)
+        stamp_served_engine(out, args.backend)
     except Exception as e:                     # never lose a measured result
         out["conditions_error"] = f"{e.__class__.__name__}: {e}"
 

@@ -20,6 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
+import arm_identity as _AI
 import publish_instrument as _PI
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -48,7 +49,31 @@ def canonical():
     selects.
     """
     import make_paper_tables as _T
-    return _T.load_canonical()
+    rows = _T.load_canonical()
+    return _AI.select_build(rows, figure_build(rows))
+
+
+def figure_build(rows=None):
+    """The one ArcadeDB build every figure draws ("jvm" or "native"), or None when no row names a build.
+
+    A figure has one ArcadeDB bar, and since 26.11.1 a release is measured on two builds, so the figure names one: the build BENCH_ENGINE_BACKEND asks
+    for, else the JVM build when it has rows, else the one that is there. The JVM build is the default because the overlay files the dense and sparse
+    bars read under their plain names are its files (the native ones carry `_native_` in the name), so every ArcadeDB value of a figure comes from one
+    build. Without this a two-build landing stopped at "name the build" (humemai/mmdbbench#208), and a figure's medians pooled both builds."""
+    want = _AI.wanted_build()
+    if want:
+        return want
+    if rows is None:
+        import make_paper_tables as _T
+        rows = _T.load_canonical()
+    got = {_AI.build_of(r) for r in rows if _AI.built(r)} - {None}
+    return "jvm" if "jvm" in got else ("native" if got else None)
+
+
+def _arc_sparse_rows():
+    """The pinned embedded sparse rows of the figures' build, {tier: rows} (make_paper_tables._sparse_2681_rows, the table's own reader)."""
+    import make_paper_tables as _T
+    return _T._sparse_2681_rows(build=figure_build())
 
 
 def gs_crop(path, margin=4):
@@ -517,6 +542,20 @@ def _check_f4_protocol(entries):
               f"({pair[0]:.3f} vs {pair[1]:.3f})")
 
 
+def _table_rows_of(tab, row):
+    """The names a generated table may give the row F4_VS_TABLE names, the figures' build first.
+
+    A freeze that holds the native build names the build of every ArcadeDB row: the LaTeX tables inside the label ("ArcadeDB (emb, JVM build) & SF10"),
+    the dense block with a suffix ("ArcadeDB (emb, fp32) [jvm]", as page_check reads it). The plain name is the table of a freeze with one build. The
+    qualified name comes first because claims_check.cell matches a prefix, and the plain dense label is a prefix of both builds' rows."""
+    build = figure_build()
+    if build is None:
+        return [row]
+    system, sep, rest = row.partition(" & ")
+    named = _AI.build_label(system, build) + sep + rest
+    return [named, f"{row} [{build}]", row] if tab == "t5_dense_ts.tex" else [named, row]
+
+
 def _check_f4_against_tables(entries):
     """Assert f4 plots the same numbers the tables print.
 
@@ -548,8 +587,12 @@ def _check_f4_against_tables(entries):
             continue
         tab, row, col, which = F4_VS_TABLE[label]
         arcade = (e.get(which) or (None, None))[0]
-        cell = (_C.sparse_cell(row, col, "p50") if tab == "sparse"
-                else _C.cell(tab, row, col))
+        cell = None
+        for _row in _table_rows_of(tab, row):
+            cell = (_C.sparse_cell(_row, col, "p50") if tab == "sparse"
+                    else _C.cell(tab, _row, col))
+            if cell is not None:
+                break
         if cell is None or arcade is None:
             bad.append(f"{label}: figure={arcade} table={cell}")
             continue
@@ -593,17 +636,15 @@ def _sparse_overlay_p50(tier):
     selection rule by COPYING it means the copy has to be updated too, so
     call the table's own function instead of restating what it does.
     """
-    import make_paper_tables as _T
-    g = _T._sparse_2681_rows().get(tier)
+    g = _arc_sparse_rows().get(tier)
     v = [r["query_p50_ms"] for r in (g or [])
          if isinstance(r.get("query_p50_ms"), (int, float))]
     return st.median(v) if v else None
 
 
 def _sparse_rows_identity():
-    import make_paper_tables as _T
     out = set()
-    for r in _T._sparse_2681_rows().get("small") or []:
+    for r in _arc_sparse_rows().get("small") or []:
         rc = str(r.get("engine_commit") or "").strip().lower()
         if rc and rc != "none":
             out.add(rc[:9])
@@ -703,8 +744,7 @@ def f8_deployment(rows):
     # the server half is already on the release in runs.jsonl.
     _sparse_emb = None
     try:
-        import make_paper_tables as _T
-        _g = _T._sparse_2681_rows().get("small") or []
+        _g = _arc_sparse_rows().get("small") or []
         _v = [r["query_p50_ms"] for r in _g
               if isinstance(r.get("query_p50_ms"), (int, float))]
         _sparse_emb = st.median(_v) if _v else None
@@ -767,6 +807,15 @@ def f8_deployment(rows):
         raise SystemExit("f8 would divide across engine lines (F5):\n"
                          + "\n".join(bad)
                          + "\nEvery bar must be one release on both sides.")
+    import size_classes as _SC
+    split = {_SC.pin_of_size_class(c).lower()[:9] for c in ("small", "large")} - {""}
+    if len(seen) > 1 and len(split) > 1 and seen <= split:
+        # THE SMALL ROWS AND THE LARGE ROWS ON TWO RELEASES is a landing the page allows (PAGE-SPEC rule 3; BENCH_LARGE_ENGINE_COMMIT), and these bars
+        # take their rows from both sizes. Each bar is still one release on both sides (checked above), but the figure is one release across its bars, so
+        # it is left out, out loud, as a figure whose lanes are out of scope is (humemai/mmdbbench#208). Any other mix refuses below.
+        print(f"figure omitted: f8_deployment compares deployments across both size classes, and the small rows and the large rows of this landing are on "
+              f"two releases ({', '.join(sorted(seen))})")
+        return
     if len(seen) > 1:
         raise SystemExit(f"f8 bars span more than one release: {sorted(seen)}. "
                          "The figure compares deployments, so the release must "
@@ -915,6 +964,12 @@ def f4_one_vs_n(rows):
             # a row that quietly stops being drawn is its own defect.
             print(f"f4 {label}: SKIPPED, no rows at this pin for its lane yet")
             return None
+        if a_c is not None and not any(v[0] is not None for v in comps.values()):
+            # NO COMPARATOR RAN THIS ROW AT THIS RELEASE (humemai/mmdbbench#208). The landing of 26.12.1 reruns ArcadeDB alone on the sparse lane, and the
+            # page declares each comparator "not run at this release": a ratio against nothing is no bar, so the row is left out, out loud. Comparators
+            # that ran and reach no value this row can use (the recall rule) still refuse below.
+            print(f"f4 {label}: SKIPPED, no comparator has a value for it at this release")
+            return None
         if a_c is None or not elig:
             raise SystemExit(f"f4 {label}: no first-pass value or no eligible comparator ({comps})")
         best = (max if hb else min)(elig.items(), key=lambda kv: kv[1][0])
@@ -965,8 +1020,7 @@ def f4_one_vs_n(rows):
             print(f"f4 {label}: SKIPPED, ArcadeDB has no sparse rows at its pin for {tier}")
             return None
         ours_rec = None
-        import make_paper_tables as _T
-        g = _T._sparse_2681_rows().get(tier) or []
+        g = _arc_sparse_rows().get(tier) or []
         rv = [r["recall_at_10"] for r in g if isinstance(r.get("recall_at_10"), (int, float))]
         ours_rec = st.median(rv) if rv else None
         ours_w = _sparse_overlay_pass(tier, "arc_int8", warm=True) if warm_tier else None

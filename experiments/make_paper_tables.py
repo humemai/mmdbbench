@@ -785,8 +785,11 @@ def tabular_table(rows):
 
 def graph_table(rows):
     l2 = [r for r in rows if r["lane"] == "l2"]
-    order = ["arcadedb_graph_embedded", "arcadedb_graph_server",
-             "neo4j_graph", "ladybug_graph"]
+    # ONE BUILD PER ROW, as in tabular_table: a freeze that holds the native build names the build of every ArcadeDB arm. Pooled, an arm of two builds
+    # printed one median over both behind an N of 6, and provenance_check refused the landing (humemai/mmdbbench#207).
+    split = _AI.splits_page(rows)
+    order = [(be, b) for be in ("arcadedb_graph_embedded", "arcadedb_graph_server")
+             for b in (("native", "jvm") if split else (None,))] + [("neo4j_graph", None), ("ladybug_graph", None)]
     # Peak memory is the LAST column deliberately: it is a resource axis, not a
     # latency, and putting it beside the p99s invites reading it as one. The
     # field is peak_owned_mib_sum (anonymous plus shared memory), which for a served backend is server+client
@@ -795,16 +798,17 @@ def graph_table(rows):
     lines = [r"\begin{tabular}{llrrrr}", r"\toprule",
              r"System & Scale & 1-hop p50 (ms) & 1-hop p99 (ms) & "
              r"2-hop p99 (ms) & Peak memory (GiB) \\", r"\midrule"]
-    for be in order:
+    for be, bld in order:
         for sc in ("sf1", "sf10"):
             # ONE DURABILITY CLASS: the headline (relaxed) one. The strict rows are the durability table's, and pooling
             # them with the relaxed ones printed a median over two settings behind an N that counted both.
             g = [r for r in l2 if r["backend"] == be and r["scale"] == sc
-                 and r["workload"] == "oltp" and (r.get("durability_class") or "relaxed") == "relaxed"]
+                 and r["workload"] == "oltp" and (r.get("durability_class") or "relaxed") == "relaxed"
+                 and (bld is None or _AI.build_of(r) == bld)]
             if not g:
                 continue
             lines.append(" & ".join([
-                NAMES[be], sc.upper(),
+                _build_name(NAMES[be], bld, split), sc.upper(),
                 mmm(g, "hop1_p50_ms"), mmm(g, "hop1_p99_ms"),
                 mmm(g, "hop2_p99_ms"),
                 mmm(g, "peak_owned_mib_sum", 1.0 / 1024)]) + r" \\")
@@ -1460,21 +1464,27 @@ def dense_ts_table(rows):
     elif len(native) < 3:
         print("  !! T5 time-series ArcadeDB row has %d reps, fewer than the instrument's 3." % len(native),
               file=sys.stderr)
-    if native:
-        lines.append(" & ".join([
-            r"ArcadeDB (native TS)", mmm(native, "ingest_pts_per_s"),
-            mmm(native, last_key), mmm(native, "q_range_ms"),
-            mmm(native, "q_global_ms")]) + " & " + chr(92)*2)
+    # ONE BUILD PER ROW here too (humemai/mmdbbench#207): every ArcadeDB arm of the block names its build when the freeze holds the native one.
+    split = _AI.splits_page(rows)
+    builds = ("native", "jvm") if split else (None,)
+    for bld in builds:
+        g = [r for r in native if bld is None or _AI.build_of(r) == bld]
+        if g:
+            lines.append(" & ".join([
+                _build_name(r"ArcadeDB (native TS)", bld, split), mmm(g, "ingest_pts_per_s"),
+                mmm(g, last_key), mmm(g, "q_range_ms"),
+                mmm(g, "q_global_ms")]) + " & " + chr(92)*2)
     for be in ("arcadedb_ts_native_server", "arcadedb_ts_doc", "arcadedb_ts_doc_server", "duckdb", "questdb"):
-        g = [r for r in ts if r["backend"] == be]
-        if not g:
-            continue
         label = {"arcadedb_ts_doc": "ArcadeDB (document path)",
                  "arcadedb_ts_doc_server": "ArcadeDB (srv, document path)",
                  "arcadedb_ts_native_server": "ArcadeDB (srv, native TS)"}.get(be, NAMES.get(be, be))
-        lines.append(" & ".join([
-            label, mmm(g, "ingest_pts_per_s"), mmm(g, "q_last_ms"),
-            mmm(g, "q_range_ms"), mmm(g, "q_global_ms")]) + " & " + chr(92)*2)
+        for bld in (builds if be.startswith("arcadedb") else (None,)):
+            g = [r for r in ts if r["backend"] == be and (bld is None or _AI.build_of(r) == bld)]
+            if not g:
+                continue
+            lines.append(" & ".join([
+                _build_name(label, bld, split), mmm(g, "ingest_pts_per_s"), mmm(g, "q_last_ms"),
+                mmm(g, "q_range_ms"), mmm(g, "q_global_ms")]) + " & " + chr(92)*2)
     lines += [r"\bottomrule", r"\end{tabular}"]
     write("t5_dense_ts.tex", "\n".join(lines) + "\n")
 
